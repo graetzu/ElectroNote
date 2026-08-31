@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		014033249D99126427A9595A /* FunctionPlotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 999AB81BC1230D11890D3A1D /* FunctionPlotView.swift */; };
 		0786AE470E1B1D13DA77C619 /* CanvasViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 491992D124FE033994188999 /* CanvasViewModel.swift */; };
 		081F837F5882BF2E7596DD4C /* ClipArtPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59ED4D66AE57C9555BF8EA27 /* ClipArtPickerView.swift */; };
 		0CB4BA1BDB67FFF148A97BE7 /* BrowserSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40DAF373C86F308143B9E66 /* BrowserSidebarView.swift */; };
@@ -14,6 +15,7 @@
 		209407526838604B75DF3FA3 /* PDFHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F33CF32A4C99A31E9D4CDD2 /* PDFHostView.swift */; };
 		20CFDF8285BF9D60BA249E16 /* DocumentPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 509B35F0AE957F323B74AD91 /* DocumentPicker.swift */; };
 		222097FCC420D891F99E589E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 06464E357D4DC30E74926C49 /* Assets.xcassets */; };
+		48163F798E8117CA8C88865F /* MathViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5D726EEA9E4029579A2DD3F /* MathViewModel.swift */; };
 		4B8F2A5AEB729EC10070D4BF /* ClipArtOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E85309E50DCDF646CD878434 /* ClipArtOverlayView.swift */; };
 		4E3B583F92A15CE6DFC00BDC /* NewItemSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32783332653099D32A9AF5DC /* NewItemSheet.swift */; };
 		52041CB99CB3369DA4876313 /* FileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27E0B214B0DA76663C68628A /* FileService.swift */; };
@@ -24,6 +26,8 @@
 		769D333349739661C285906D /* ClipArtViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7EFC8F475EEF3D3EA5C982 /* ClipArtViewModel.swift */; };
 		78B83EA7B19FBC8674C93E7C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71675B192ED20A8660D1CFD /* ContentView.swift */; };
 		8B2159FFAC3BBBE3AF869E0D /* PDFAnnotationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29E46F818AC5129049142822 /* PDFAnnotationViewController.swift */; };
+		96BC9A9E72085C048BF30B4C /* MathPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDA264B812880EE3ABB0D8AF /* MathPanelView.swift */; };
+		A06A0DF3F2E57C35DC8C7F6C /* MathEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44D12FD4A694A24861F79273 /* MathEvaluator.swift */; };
 		AF9045CC68BD92179A4FE101 /* ClipArtLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F1BEC1AC453C79B74FEA1C8 /* ClipArtLibrary.swift */; };
 		AFA8C431B8E5297DFB8D6D13 /* BrowserViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06BC11C536641FAA3B4EE4D4 /* BrowserViewModel.swift */; };
 		B7816E0DA26C5D00B978C436 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 522009BCC10C02F2DB79AEAA /* WelcomeView.swift */; };
@@ -31,6 +35,7 @@
 		C6DC4C7420F940815D040DA2 /* ElectroNoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ADA6A459A70CD568CCDB014 /* ElectroNoteApp.swift */; };
 		CA74FC7ACD774C4A5EA10C48 /* PDFViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE9A6172774779B2D5D359F /* PDFViewModel.swift */; };
 		E0435A3D716C72A2E6CED20E /* DocumentItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6CD3232753E95898315786A /* DocumentItem.swift */; };
+		E1C167E31091EAA02C1C4195 /* MathRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91BFC98A4E7A6536EB13675E /* MathRecognizer.swift */; };
 		F62671E1B132D4DCA23233C8 /* PDFAnnotationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD50C0F7F3B150972A77A37 /* PDFAnnotationStore.swift */; };
 /* End PBXBuildFile section */
 
@@ -44,6 +49,7 @@
 		317B2BC4FF97317A8824605F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		32783332653099D32A9AF5DC /* NewItemSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewItemSheet.swift; sourceTree = "<group>"; };
 		3AD50C0F7F3B150972A77A37 /* PDFAnnotationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFAnnotationStore.swift; sourceTree = "<group>"; };
+		44D12FD4A694A24861F79273 /* MathEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathEvaluator.swift; sourceTree = "<group>"; };
 		491992D124FE033994188999 /* CanvasViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasViewModel.swift; sourceTree = "<group>"; };
 		4ADA6A459A70CD568CCDB014 /* ElectroNoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElectroNoteApp.swift; sourceTree = "<group>"; };
 		4F33CF32A4C99A31E9D4CDD2 /* PDFHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFHostView.swift; sourceTree = "<group>"; };
@@ -53,12 +59,16 @@
 		59ED4D66AE57C9555BF8EA27 /* ClipArtPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipArtPickerView.swift; sourceTree = "<group>"; };
 		62D31F1D9F3A88209557A8FA /* StringExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringExtensions.swift; sourceTree = "<group>"; };
 		6C28BF3980DEC9B21ED04A44 /* PDFRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFRepresentable.swift; sourceTree = "<group>"; };
+		91BFC98A4E7A6536EB13675E /* MathRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathRecognizer.swift; sourceTree = "<group>"; };
+		999AB81BC1230D11890D3A1D /* FunctionPlotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FunctionPlotView.swift; sourceTree = "<group>"; };
 		A9C4DA6FFDC80E0872587EDE /* ElectroNote.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ElectroNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B40DAF373C86F308143B9E66 /* BrowserSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserSidebarView.swift; sourceTree = "<group>"; };
 		B6CD3232753E95898315786A /* DocumentItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentItem.swift; sourceTree = "<group>"; };
 		C9D0C416F8DDF990A5CACFB1 /* CanvasRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasRepresentable.swift; sourceTree = "<group>"; };
 		E85309E50DCDF646CD878434 /* ClipArtOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipArtOverlayView.swift; sourceTree = "<group>"; };
+		EDA264B812880EE3ABB0D8AF /* MathPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathPanelView.swift; sourceTree = "<group>"; };
 		F2F6E478986FC0092CF34AAA /* CanvasHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasHostView.swift; sourceTree = "<group>"; };
+		F5D726EEA9E4029579A2DD3F /* MathViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathViewModel.swift; sourceTree = "<group>"; };
 		F71675B192ED20A8660D1CFD /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		FA7EFC8F475EEF3D3EA5C982 /* ClipArtViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipArtViewModel.swift; sourceTree = "<group>"; };
 		FCE9A6172774779B2D5D359F /* PDFViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFViewModel.swift; sourceTree = "<group>"; };
@@ -73,9 +83,19 @@
 			path = Extensions;
 			sourceTree = "<group>";
 		};
+		0A94667709F3970A0C0F95B9 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				F5D726EEA9E4029579A2DD3F /* MathViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
 		1BB17763B84C99A6F6EFFB81 /* Math */ = {
 			isa = PBXGroup;
 			children = (
+				0A94667709F3970A0C0F95B9 /* ViewModels */,
+				72798B836AD025C61C2FB083 /* Views */,
 			);
 			path = Math;
 			sourceTree = "<group>";
@@ -130,6 +150,15 @@
 				A9C4DA6FFDC80E0872587EDE /* ElectroNote.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		72798B836AD025C61C2FB083 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				999AB81BC1230D11890D3A1D /* FunctionPlotView.swift */,
+				EDA264B812880EE3ABB0D8AF /* MathPanelView.swift */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 		7F7613816695D500390A0E83 /* ElectroNote */ = {
@@ -222,6 +251,8 @@
 			isa = PBXGroup;
 			children = (
 				27E0B214B0DA76663C68628A /* FileService.swift */,
+				44D12FD4A694A24861F79273 /* MathEvaluator.swift */,
+				91BFC98A4E7A6536EB13675E /* MathRecognizer.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -393,6 +424,11 @@
 				20CFDF8285BF9D60BA249E16 /* DocumentPicker.swift in Sources */,
 				C6DC4C7420F940815D040DA2 /* ElectroNoteApp.swift in Sources */,
 				52041CB99CB3369DA4876313 /* FileService.swift in Sources */,
+				014033249D99126427A9595A /* FunctionPlotView.swift in Sources */,
+				A06A0DF3F2E57C35DC8C7F6C /* MathEvaluator.swift in Sources */,
+				96BC9A9E72085C048BF30B4C /* MathPanelView.swift in Sources */,
+				E1C167E31091EAA02C1C4195 /* MathRecognizer.swift in Sources */,
+				48163F798E8117CA8C88865F /* MathViewModel.swift in Sources */,
 				4E3B583F92A15CE6DFC00BDC /* NewItemSheet.swift in Sources */,
 				F62671E1B132D4DCA23233C8 /* PDFAnnotationStore.swift in Sources */,
 				8B2159FFAC3BBBE3AF869E0D /* PDFAnnotationViewController.swift in Sources */,
