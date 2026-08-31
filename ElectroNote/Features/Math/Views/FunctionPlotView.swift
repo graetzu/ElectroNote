@@ -21,7 +21,7 @@ struct FunctionPlotView: View {
     // MARK: - Grid
 
     private func drawGrid(_ ctx: GraphicsContext, _ c: PlotCoords) {
-        let style = GraphicsContext.StrokeStyle(lineWidth: 0.5)
+        let style = StrokeStyle(lineWidth: 0.5)
         for tick in c.xTicks {
             var p = Path()
             p.move(to:    CGPoint(x: c.sx(tick), y: 0))
@@ -39,7 +39,7 @@ struct FunctionPlotView: View {
     // MARK: - Axes + labels
 
     private func drawAxes(_ ctx: GraphicsContext, _ c: PlotCoords) {
-        let thick = GraphicsContext.StrokeStyle(lineWidth: 1.5)
+        let thick = StrokeStyle(lineWidth: 1.5)
 
         // x-axis
         let y0 = c.sy(0).clamped(to: 0...c.size.height)
