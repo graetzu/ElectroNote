@@ -358,7 +358,7 @@ extension InfiniteNotebookViewController {
         let drawing = canvasView.drawing
         guard !drawing.strokes.filter({ $0.renderBounds.intersects(visible) }).isEmpty else { return }
 
-        let composite = compositeVisible(rect: visible, drawing: drawing)
+        guard let composite = compositeVisible(rect: visible, drawing: drawing) else { return }
         let obs = await runVision(on: composite)
         guard !obs.isEmpty else { return }
 
@@ -382,7 +382,8 @@ extension InfiniteNotebookViewController {
         }
     }
 
-    private func compositeVisible(rect: CGRect, drawing: PKDrawing) -> UIImage {
+    private func compositeVisible(rect: CGRect, drawing: PKDrawing) -> UIImage? {
+        guard rect.width > 0, rect.height > 0 else { return nil }
         let sc:  CGFloat = 1.5
         let size = CGSize(width: rect.width * sc, height: rect.height * sc)
         let ink  = drawing.image(from: rect, scale: sc)
@@ -400,7 +401,12 @@ extension InfiniteNotebookViewController {
             }
             req.recognitionLevel = .accurate
             req.usesLanguageCorrection = false
-            try? VNImageRequestHandler(cgImage: cg).perform([req])
+            do {
+                try VNImageRequestHandler(cgImage: cg).perform([req])
+            } catch {
+                // perform failed — continuation must still be called exactly once
+                cont.resume(returning: [])
+            }
         }
     }
 

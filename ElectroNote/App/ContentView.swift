@@ -34,19 +34,8 @@ struct ContentView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .toolbar {
-            // Global sidebar toggle available from the detail column
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    withAnimation {
-                        sidebarVisibility = sidebarVisibility == .detailOnly ? .all : .detailOnly
-                    }
-                } label: {
-                    Image(systemName: "sidebar.left")
-                }
-                .accessibilityLabel("Seitenleiste ein-/ausblenden")
-            }
-        }
+        // iPadOS stellt automatisch einen Sidebar-Toggle bereit —
+        // kein eigener .toolbar-Modifier nötig (der crasht auf NavigationSplitView)
         .sheet(isPresented: $showMath) {
             MathPanelView()
                 .presentationDetents([.medium, .large])
