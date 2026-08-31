@@ -14,7 +14,7 @@ final class InfiniteNotebookViewController: UIViewController {
     // MARK: - UI
     let scrollView   = UIScrollView()
     let contentView  = UIView()
-    var canvasView   = PKCanvasView()
+    var canvasView   = FixedPKCanvasView()
     let toolPicker   = PKToolPicker()
 
     // MARK: - Inline math/text results
@@ -93,9 +93,9 @@ final class InfiniteNotebookViewController: UIViewController {
         scrollView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         scrollView.backgroundColor = UIColor.systemGroupedBackground
         scrollView.showsHorizontalScrollIndicator = false
+        scrollView.showsVerticalScrollIndicator   = true
         scrollView.delegate = self
         scrollView.contentInsetAdjustmentBehavior = .never
-        // Disable zoom on outer scroll view
         scrollView.minimumZoomScale = 1.0
         scrollView.maximumZoomScale = 1.0
         scrollView.bouncesZoom = false
@@ -117,11 +117,6 @@ final class InfiniteNotebookViewController: UIViewController {
         canvasView.drawingPolicy = .pencilOnly
         canvasView.delegate = self
         contentView.addSubview(canvasView)
-
-        // Remove PKCanvasView's own pinch gesture so it can't zoom
-        canvasView.gestureRecognizers?
-            .compactMap { $0 as? UIPinchGestureRecognizer }
-            .forEach { canvasView.removeGestureRecognizer($0) }
     }
 
     private func setupToolPicker() {
@@ -130,16 +125,18 @@ final class InfiniteNotebookViewController: UIViewController {
     }
 
     private func updateLayout() {
-        let h = document.documentHeight
-        let hInset = max(16, (view.bounds.width - Self.pageW) / 2)
-        scrollView.contentInset = UIEdgeInsets(top: 40, left: hInset, bottom: 120, right: hInset)
-        scrollView.contentSize  = CGSize(width: Self.pageW, height: h)
-        contentView.frame = CGRect(x: 0, y: 0, width: Self.pageW, height: h)
+        let h      = document.documentHeight
+        let vw     = view.bounds.width
+        let hInset = max(0, (vw - Self.pageW) / 2)
+
+        // Vertical padding only — horizontal layout via contentView.frame.origin.x
+        scrollView.contentInset = UIEdgeInsets(top: 40, left: 0, bottom: 120, right: 0)
+        // Content area is full screen width so horizontal scrolling is disabled
+        scrollView.contentSize = CGSize(width: vw, height: h)
+
+        // A4 content is centered inside the full-width scroll area
+        contentView.frame = CGRect(x: hInset, y: 0, width: Self.pageW, height: h)
         canvasView.frame  = contentView.bounds
-        // Pin PKCanvasView's own scroll state so it never jumps internally
-        canvasView.contentSize   = contentView.bounds.size
-        canvasView.contentOffset = .zero
-        canvasView.zoomScale     = 1.0
     }
 
     private func loadDocument() {
@@ -499,9 +496,6 @@ extension InfiniteNotebookViewController: PKCanvasViewDelegate {
         onDrawingChanged?()
         extendIfNeeded()
         scheduleScan()
-        // PKCanvasView occasionally drifts its own contentOffset/zoomScale; reset immediately
-        if canvasView.contentOffset != .zero { canvasView.contentOffset = .zero }
-        if canvasView.zoomScale     != 1.0   { canvasView.zoomScale     = 1.0 }
     }
 }
 
@@ -519,4 +513,25 @@ private final class PaddedLabel: UILabel {
         return CGSize(width: s.width + insets.left + insets.right,
                       height: s.height + insets.top + insets.bottom)
     }
+}
+
+// MARK: - FixedPKCanvasView
+
+/// PKCanvasView subclass that prevents internal scroll and zoom so that the
+/// outer UIScrollView has full control over navigation.
+final class FixedPKCanvasView: PKCanvasView {
+
+    // Block any attempt to change the zoom scale
+    override var zoomScale: CGFloat {
+        get { 1.0 }
+        set { }
+    }
+    override func setZoomScale(_ scale: CGFloat, animated: Bool) { }
+
+    // Block any attempt to scroll the canvas internally
+    override var contentOffset: CGPoint {
+        get { .zero }
+        set { }
+    }
+    override func setContentOffset(_ contentOffset: CGPoint, animated: Bool) { }
 }
