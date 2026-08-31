@@ -8,6 +8,7 @@ protocol FileServiceProtocol: AnyObject {
     func rename(item: DocumentItem, to newName: String) throws -> DocumentItem
     func move(item: DocumentItem, to destination: URL) throws -> DocumentItem
     func delete(item: DocumentItem) throws
+    func importPDF(from sourceURL: URL, to destinationURL: URL) throws -> DocumentItem
 }
 
 final class FileService: FileServiceProtocol {
@@ -106,6 +107,15 @@ final class FileService: FileServiceProtocol {
 
     func delete(item: DocumentItem) throws {
         try FileManager.default.removeItem(at: item.path)
+    }
+
+    func importPDF(from sourceURL: URL, to destinationURL: URL) throws -> DocumentItem {
+        let accessing = sourceURL.startAccessingSecurityScopedResource()
+        defer { if accessing { sourceURL.stopAccessingSecurityScopedResource() } }
+        let baseName = sourceURL.deletingPathExtension().lastPathComponent
+        let dest = uniqueURL(base: baseName, ext: "pdf", isDir: false, in: destinationURL)
+        try FileManager.default.copyItem(at: sourceURL, to: dest)
+        return makeItem(at: dest, name: dest.deletingPathExtension().lastPathComponent, type: .pdf)
     }
 
     // MARK: - Private

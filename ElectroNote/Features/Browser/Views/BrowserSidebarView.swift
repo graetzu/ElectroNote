@@ -6,6 +6,7 @@ struct BrowserSidebarView: View {
 
     @State private var showNewFolder = false
     @State private var showNewNote = false
+    @State private var showPDFPicker = false
     @State private var itemToRename: DocumentItem?
     @State private var renameText = ""
 
@@ -29,6 +30,11 @@ struct BrowserSidebarView: View {
         .sheet(isPresented: $showNewNote) {
             NewItemSheet(title: "Neue Notiz", placeholder: "Notizname") {
                 viewModel.createNote(named: $0)
+            }
+        }
+        .sheet(isPresented: $showPDFPicker) {
+            DocumentPicker(contentTypes: [.pdf]) { url in
+                viewModel.importPDF(from: url)
             }
         }
         .alert("Umbenennen", isPresented: Binding(
@@ -116,10 +122,9 @@ struct BrowserSidebarView: View {
                     Label("Neue Notiz", systemImage: "note.text.badge.plus")
                 }
                 Divider()
-                Button {} label: {
+                Button { showPDFPicker = true } label: {
                     Label("PDF importieren…", systemImage: "doc.badge.plus")
                 }
-                .disabled(true)
             } label: {
                 Image(systemName: "plus")
             }

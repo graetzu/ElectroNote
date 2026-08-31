@@ -15,7 +15,8 @@ struct ContentView: View {
                     CanvasHostView(item: item)
                         .id(item.id)        // rebuild when switching notes
                 case .pdf:
-                    WelcomeView(selectedItemName: item.name)   // Feature 3
+                    PDFHostView(item: item)
+                        .id(item.id)
                 case .folder:
                     WelcomeView()
                 }

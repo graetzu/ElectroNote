@@ -58,6 +58,13 @@ final class BrowserViewModel: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
 
+    func importPDF(from url: URL) {
+        do {
+            _ = try fileService.importPDF(from: url, to: currentPath)
+            loadItems()
+        } catch { self.error = error.localizedDescription }
+    }
+
     func delete(_ items: [DocumentItem]) {
         for item in items {
             do { try fileService.delete(item: item) }
