@@ -1,0 +1,139 @@
+import Foundation
+
+protocol FileServiceProtocol: AnyObject {
+    var rootURL: URL { get }
+    func listItems(at url: URL) -> [DocumentItem]
+    func createFolder(named name: String, at url: URL) throws -> DocumentItem
+    func createNote(named name: String, at url: URL) throws -> DocumentItem
+    func rename(item: DocumentItem, to newName: String) throws -> DocumentItem
+    func move(item: DocumentItem, to destination: URL) throws -> DocumentItem
+    func delete(item: DocumentItem) throws
+}
+
+final class FileService: FileServiceProtocol {
+
+    let rootURL: URL
+
+    init() {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        rootURL = docs.appendingPathComponent("ElectroNote", isDirectory: true)
+        try? FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+    }
+
+    func listItems(at url: URL) -> [DocumentItem] {
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .isDirectoryKey]
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: keys,
+            options: .skipsHiddenFiles
+        ) else { return [] }
+
+        return contents.compactMap { fileURL -> DocumentItem? in
+            guard let res = try? fileURL.resourceValues(forKeys: Set(keys)) else { return nil }
+            let isDir     = res.isDirectory ?? false
+            let modified  = res.contentModificationDate ?? Date()
+            let filename  = fileURL.lastPathComponent
+
+            let type: DocumentItem.ItemType
+            let displayName: String
+
+            if isDir && filename.hasSuffix(".enote") {
+                type = .note
+                displayName = String(filename.dropLast(".enote".count))
+            } else if isDir {
+                type = .folder
+                displayName = filename
+            } else if fileURL.pathExtension.lowercased() == "pdf" {
+                type = .pdf
+                displayName = String(filename.dropLast(".pdf".count))
+            } else {
+                return nil
+            }
+
+            return DocumentItem(
+                id: UUID(),
+                name: displayName,
+                path: fileURL,
+                type: type,
+                modifiedAt: modified,
+                syncStatus: .local
+            )
+        }
+        .sorted {
+            if $0.isFolder != $1.isFolder { return $0.isFolder }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    func createFolder(named name: String, at url: URL) throws -> DocumentItem {
+        let dest = uniqueURL(base: name, ext: nil, isDir: true, in: url)
+        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: false)
+        return makeItem(at: dest, name: dest.lastPathComponent, type: .folder)
+    }
+
+    func createNote(named name: String, at url: URL) throws -> DocumentItem {
+        let dest = uniqueURL(base: name, ext: "enote", isDir: true, in: url)
+        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: false)
+        let metadata = NoteMetadata(title: name, createdAt: Date())
+        let data = try JSONEncoder().encode(metadata)
+        try data.write(to: dest.appendingPathComponent("metadata.json"))
+        return makeItem(at: dest, name: name, type: .note)
+    }
+
+    func rename(item: DocumentItem, to newName: String) throws -> DocumentItem {
+        let suffix: String
+        switch item.type {
+        case .note:   suffix = ".enote"
+        case .pdf:    suffix = ".pdf"
+        case .folder: suffix = ""
+        }
+        let dest = item.path.deletingLastPathComponent()
+            .appendingPathComponent(newName + suffix)
+        try FileManager.default.moveItem(at: item.path, to: dest)
+        var updated = item
+        updated.name = newName
+        updated.path = dest
+        return updated
+    }
+
+    func move(item: DocumentItem, to destination: URL) throws -> DocumentItem {
+        let dest = destination.appendingPathComponent(item.path.lastPathComponent)
+        try FileManager.default.moveItem(at: item.path, to: dest)
+        var updated = item
+        updated.path = dest
+        return updated
+    }
+
+    func delete(item: DocumentItem) throws {
+        try FileManager.default.removeItem(at: item.path)
+    }
+
+    // MARK: - Private
+
+    private func uniqueURL(base: String, ext: String?, isDir: Bool, in url: URL) -> URL {
+        func candidate(_ suffix: String) -> URL {
+            let filename = ext.map { "\(suffix).\($0)" } ?? suffix
+            return url.appendingPathComponent(filename, isDirectory: isDir)
+        }
+        var result = candidate(base)
+        var counter = 2
+        while FileManager.default.fileExists(atPath: result.path) {
+            result = candidate("\(base) \(counter)")
+            counter += 1
+        }
+        return result
+    }
+
+    private func makeItem(at url: URL, name: String, type: DocumentItem.ItemType) -> DocumentItem {
+        DocumentItem(id: UUID(), name: name, path: url, type: type,
+                     modifiedAt: Date(), syncStatus: .local)
+    }
+}
+
+// MARK: - Supporting types
+
+struct NoteMetadata: Codable {
+    var title: String
+    var createdAt: Date
+    var tags: [String] = []
+}
