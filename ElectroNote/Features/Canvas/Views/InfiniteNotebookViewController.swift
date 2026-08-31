@@ -3,31 +3,30 @@ import PencilKit
 import PDFKit
 import Vision
 
-// MARK: - Main class
+// MARK: - Main
 
 final class InfiniteNotebookViewController: UIViewController {
 
     // MARK: - Constants
-    static let pageW: CGFloat = NotebookDocument.pageWidth
-    static let pageH: CGFloat = NotebookDocument.pageHeight
+    static let initialHeight: CGFloat = NotebookDocument.initialHeight
 
-    // MARK: - UI
-    let scrollView   = UIScrollView()
-    let contentView  = UIView()
-    var canvasView   = FixedPKCanvasView()
-    let toolPicker   = PKToolPicker()
+    // MARK: - Views
+    var canvasView  = PKCanvasView()
+    let toolPicker  = PKToolPicker()
 
-    // MARK: - Inline math/text results
-    private var resultViews: [(view: UIView, id: UUID)] = []
-    private var scanTask: Task<Void, Never>?
+    // MARK: - Content layers (below the PencilKit Metal layer)
+    private var pdfLayers:   [CALayer] = []
+    private var imageLayers: [CALayer] = []
 
-    // MARK: - Services
-    private let evaluator  = MathEvaluator()
+    // MARK: - Math/handwriting result labels (above canvas, in scroll space)
+    private var resultLabels: [UILabel] = []
+    private var scanTask:     Task<Void, Never>?
+    private let evaluator  =  MathEvaluator()
 
     // MARK: - State
     private(set) var document = NotebookDocument()
     var store: NotebookDocumentStore!
-    private var layoutDone = false
+    private var didLoad = false
 
     // MARK: - Callbacks
     var onDrawingChanged: (() -> Void)?
@@ -40,37 +39,31 @@ final class InfiniteNotebookViewController: UIViewController {
 
     var mathEnabled: Bool {
         get { document.mathEnabled }
-        set {
-            document.mathEnabled = newValue
-            if !newValue { clearResultViews() }
-        }
+        set { document.mathEnabled = newValue; if !newValue { clearResultLabels() } }
     }
 
     var background: BackgroundStyle {
         get { document.background }
-        set {
-            document.background = newValue
-            applyBackground(newValue)
-            store?.saveDocument(document)
-        }
+        set { document.background = newValue; applyBackground(newValue); store?.saveDocument(document) }
     }
 
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor.systemGroupedBackground
-        setupScrollView()
-        setupContentView()
+        view.backgroundColor = .systemGroupedBackground
         setupCanvas()
         setupToolPicker()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        updateLayout()
-        if !layoutDone {
-            layoutDone = true
+        // Update canvas frame to fill view
+        if canvasView.frame != view.bounds {
+            canvasView.frame = view.bounds
+        }
+        if !didLoad {
+            didLoad = true
             loadDocument()
         }
     }
@@ -87,36 +80,15 @@ final class InfiniteNotebookViewController: UIViewController {
 
     // MARK: - Setup
 
-    private func setupScrollView() {
-        view.addSubview(scrollView)
-        scrollView.frame = view.bounds
-        scrollView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        scrollView.backgroundColor = UIColor.systemGroupedBackground
-        scrollView.showsHorizontalScrollIndicator = false
-        scrollView.showsVerticalScrollIndicator   = true
-        scrollView.delegate = self
-        scrollView.contentInsetAdjustmentBehavior = .never
-        scrollView.minimumZoomScale = 1.0
-        scrollView.maximumZoomScale = 1.0
-        scrollView.bouncesZoom = false
-    }
-
-    private func setupContentView() {
-        scrollView.addSubview(contentView)
-        contentView.backgroundColor = .white
-    }
-
     private func setupCanvas() {
-        canvasView.isScrollEnabled = false
-        canvasView.minimumZoomScale = 1.0
-        canvasView.maximumZoomScale = 1.0
-        canvasView.bouncesZoom = false
-        canvasView.bounces = false
-        canvasView.backgroundColor = .clear
-        canvasView.isOpaque = false
-        canvasView.drawingPolicy = .pencilOnly
-        canvasView.delegate = self
-        contentView.addSubview(canvasView)
+        canvasView.frame = view.bounds
+        canvasView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        // Let PKCanvasView manage its own scrolling and zooming natively
+        canvasView.minimumZoomScale = 0.25
+        canvasView.maximumZoomScale = 8.0
+        canvasView.drawingPolicy   = .pencilOnly
+        canvasView.delegate        = self
+        view.addSubview(canvasView)
     }
 
     private func setupToolPicker() {
@@ -124,79 +96,49 @@ final class InfiniteNotebookViewController: UIViewController {
         toolPicker.addObserver(canvasView)
     }
 
-    private func updateLayout() {
-        let h      = document.documentHeight
-        let vw     = view.bounds.width
-        let hInset = max(0, (vw - Self.pageW) / 2)
-
-        // Vertical padding only — horizontal layout via contentView.frame.origin.x
-        scrollView.contentInset = UIEdgeInsets(top: 40, left: 0, bottom: 120, right: 0)
-        // Content area is full screen width so horizontal scrolling is disabled
-        scrollView.contentSize = CGSize(width: vw, height: h)
-
-        // A4 content is centered inside the full-width scroll area
-        contentView.frame = CGRect(x: hInset, y: 0, width: Self.pageW, height: h)
-        canvasView.frame  = contentView.bounds
-    }
+    // MARK: - Load
 
     private func loadDocument() {
         guard store != nil else { return }
         document = store.loadDocument()
         applyBackground(document.background)
         canvasView.drawing = store.loadDrawing()
-        document.insertedPDFs.forEach   { loadPDFImages($0) }
-        document.insertedImages.forEach { loadInsertedImage($0) }
-        updateLayout()
+
+        // Extend content area if the stored height is larger than the loaded drawing
+        let h = max(document.documentHeight,
+                    canvasView.drawing.bounds.maxY + Self.initialHeight * 0.5)
+        canvasView.contentSize = CGSize(width: view.bounds.width, height: h)
+
+        document.insertedPDFs.forEach   { loadPDFEntry($0) }
+        document.insertedImages.forEach { loadImageEntry($0) }
     }
 
-    // MARK: - Auto-extend
-
-    private func extendIfNeeded() {
-        let bottom = canvasView.drawing.bounds.maxY
-        guard bottom > document.documentHeight * 0.8 else { return }
-        let newH = document.documentHeight + Self.pageH * 10
-        document.documentHeight = newH
-        updateLayout()
-        store?.saveDocument(document)
-    }
-
-    // MARK: - Save
-
-    func save() {
-        store?.saveDrawing(canvasView.drawing)
-        store?.saveDocument(document)
-    }
-}
-
-// MARK: - Background
-
-extension InfiniteNotebookViewController {
+    // MARK: - Background
 
     private func applyBackground(_ style: BackgroundStyle) {
-        contentView.backgroundColor = UIColor(patternImage: makePattern(style))
+        canvasView.backgroundColor = UIColor(patternImage: makePattern(style))
     }
 
     private func makePattern(_ style: BackgroundStyle) -> UIImage {
         switch style {
-        case .blank:  return solidWhite()
+        case .blank:  return solidColor(.white)
         case .lined:  return linedImage()
         case .grid:   return gridImage()
         case .dotted: return dottedImage()
         }
     }
 
-    private func solidWhite() -> UIImage {
+    private func solidColor(_ color: UIColor) -> UIImage {
         UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { ctx in
-            UIColor.white.setFill(); ctx.fill(.init(x: 0, y: 0, width: 1, height: 1))
+            color.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
         }
     }
 
     private func gridImage() -> UIImage {
         let s: CGFloat = 28
-        let line = UIColor.systemGray4
         return UIGraphicsImageRenderer(size: CGSize(width: s, height: s)).image { ctx in
-            UIColor.white.setFill(); ctx.fill(.init(x: 0, y: 0, width: s, height: s))
-            line.setStroke()
+            UIColor.white.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
+            UIColor.systemGray4.setStroke()
             ctx.cgContext.setLineWidth(0.5)
             ctx.cgContext.move(to: CGPoint(x: s, y: 0));  ctx.cgContext.addLine(to: CGPoint(x: s, y: s))
             ctx.cgContext.move(to: CGPoint(x: 0, y: s));  ctx.cgContext.addLine(to: CGPoint(x: s, y: s))
@@ -206,10 +148,9 @@ extension InfiniteNotebookViewController {
 
     private func linedImage() -> UIImage {
         let s: CGFloat = 32
-        let line = UIColor.systemBlue.withAlphaComponent(0.2)
         return UIGraphicsImageRenderer(size: CGSize(width: 20, height: s)).image { ctx in
-            UIColor.white.setFill(); ctx.fill(.init(x: 0, y: 0, width: 20, height: s))
-            line.setStroke()
+            UIColor.white.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 20, height: s))
+            UIColor.systemBlue.withAlphaComponent(0.2).setStroke()
             ctx.cgContext.setLineWidth(0.5)
             ctx.cgContext.move(to: CGPoint(x: 0, y: s - 0.5))
             ctx.cgContext.addLine(to: CGPoint(x: 20, y: s - 0.5))
@@ -219,13 +160,31 @@ extension InfiniteNotebookViewController {
 
     private func dottedImage() -> UIImage {
         let s: CGFloat = 26
-        let dot = UIColor.systemGray3
         return UIGraphicsImageRenderer(size: CGSize(width: s, height: s)).image { ctx in
-            UIColor.white.setFill(); ctx.fill(.init(x: 0, y: 0, width: s, height: s))
-            dot.setFill()
+            UIColor.white.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
+            UIColor.systemGray3.setFill()
             ctx.cgContext.addEllipse(in: CGRect(x: s - 1.5, y: s - 1.5, width: 2.5, height: 2.5))
             ctx.cgContext.fillPath()
         }
+    }
+
+    // MARK: - Auto-extend
+
+    private func extendIfNeeded() {
+        let needed = canvasView.drawing.bounds.maxY + Self.initialHeight * 0.3
+        guard needed > canvasView.contentSize.height else { return }
+        let newH = needed + Self.initialHeight * 0.5
+        canvasView.contentSize.height = newH
+        document.documentHeight = newH
+        store?.saveDocument(document)
+    }
+
+    // MARK: - Save
+
+    func save() {
+        store?.saveDrawing(canvasView.drawing)
+        document.documentHeight = canvasView.contentSize.height
+        store?.saveDocument(document)
     }
 }
 
@@ -241,129 +200,131 @@ extension InfiniteNotebookViewController {
               let pdf = PDFDocument(url: store.pdfURL(filename: filename))
         else { return }
 
-        let startY = currentInsertY()
+        let startY = nextInsertY()
         var y = startY
         var heights: [CGFloat] = []
 
         for i in 0..<pdf.pageCount {
             guard let page = pdf.page(at: i) else { continue }
-            let h = renderAndAdd(page: page, at: y)
+            let h = addPDFLayer(page: page, at: y)
             heights.append(h)
             y += h
         }
 
-        extendDocumentIfNeeded(to: y + Self.pageH * 2)
+        let needed = y + Self.initialHeight * 0.3
+        if needed > canvasView.contentSize.height {
+            canvasView.contentSize.height = needed
+        }
 
         let entry = InsertedPDF(id: UUID(), filename: filename, startY: startY, pageHeights: heights)
         document.insertedPDFs.append(entry)
+        document.documentHeight = canvasView.contentSize.height
         store.saveDocument(document)
 
-        scrollTo(y: startY)
+        canvasView.setContentOffset(CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
     }
 
-    func insertImage(_ image: UIImage, caption: String = "") {
+    func insertImage(_ image: UIImage) {
         guard let filename = try? store.saveImage(image) else { return }
-        let startY = currentInsertY()
-        let ratio  = image.size.height / image.size.width
-        let w      = Self.pageW * 0.85
-        let h      = w * ratio
 
-        let iv = UIImageView(image: image)
-        iv.frame = CGRect(x: (Self.pageW - w) / 2, y: startY, width: w, height: h)
-        iv.contentMode   = .scaleAspectFit
-        iv.layer.cornerRadius = 8
-        iv.clipsToBounds = true
-        iv.layer.borderWidth = 0.5
-        iv.layer.borderColor = UIColor.systemGray4.cgColor
-        contentView.insertSubview(iv, belowSubview: canvasView)
+        let startY  = nextInsertY()
+        let w       = canvasView.contentSize.width
+        let ratio   = image.size.height / image.size.width
+        let h       = w * ratio
 
-        extendDocumentIfNeeded(to: startY + h + Self.pageH)
+        let layer = makeImageLayer(image: image,
+                                   frame: CGRect(x: 0, y: startY, width: w, height: h))
+        insertBelowDrawing(layer)
+        imageLayers.append(layer)
+
+        let needed = startY + h + Self.initialHeight * 0.3
+        if needed > canvasView.contentSize.height {
+            canvasView.contentSize.height = needed
+        }
 
         let entry = InsertedImage(id: UUID(), filename: filename,
                                   startY: startY, width: w, height: h)
         document.insertedImages.append(entry)
+        document.documentHeight = canvasView.contentSize.height
         store.saveDocument(document)
 
-        scrollTo(y: startY)
+        canvasView.setContentOffset(CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
     }
 
     // MARK: - Load on open
 
-    private func loadPDFImages(_ entry: InsertedPDF) {
-        let pdfURL = store.pdfURL(filename: entry.filename)
-        guard let pdf = PDFDocument(url: pdfURL) else { return }
+    private func loadPDFEntry(_ entry: InsertedPDF) {
+        guard let pdf = PDFDocument(url: store.pdfURL(filename: entry.filename)) else { return }
         var y = entry.startY
         for (i, h) in entry.pageHeights.enumerated() {
-            guard let page = pdf.page(at: i) else { y += h; continue }
-            let scale = Self.pageW / page.bounds(for: .cropBox).width
-            let img   = renderPDFPage(page, scale: scale)
-            let iv    = UIImageView(image: img)
-            iv.frame  = CGRect(x: 0, y: y, width: Self.pageW, height: h)
-            iv.contentMode = .scaleAspectFit
-            contentView.insertSubview(iv, belowSubview: canvasView)
+            if let page = pdf.page(at: i) { addPDFLayer(page: page, at: y, height: h) }
             y += h
         }
     }
 
-    private func loadInsertedImage(_ entry: InsertedImage) {
+    private func loadImageEntry(_ entry: InsertedImage) {
         guard let img = UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) else { return }
-        let iv = UIImageView(image: img)
-        iv.frame = CGRect(x: (Self.pageW - entry.width) / 2, y: entry.startY,
-                          width: entry.width, height: entry.height)
-        iv.contentMode = .scaleAspectFit
-        iv.layer.cornerRadius = 8
-        iv.clipsToBounds = true
-        iv.layer.borderWidth = 0.5
-        iv.layer.borderColor = UIColor.systemGray4.cgColor
-        contentView.insertSubview(iv, belowSubview: canvasView)
+        let layer = makeImageLayer(image: img,
+                                   frame: CGRect(x: 0, y: entry.startY, width: entry.width, height: entry.height))
+        insertBelowDrawing(layer)
+        imageLayers.append(layer)
     }
 
-    // MARK: - Helpers
+    // MARK: - Layer helpers
 
     @discardableResult
-    private func renderAndAdd(page: PDFPage, at y: CGFloat) -> CGFloat {
+    private func addPDFLayer(page: PDFPage, at y: CGFloat, height: CGFloat? = nil) -> CGFloat {
         let bounds = page.bounds(for: .cropBox)
-        let scale  = Self.pageW / bounds.width
-        let h      = bounds.height * scale
-        let img    = renderPDFPage(page, scale: scale)
-        let iv     = UIImageView(image: img)
-        iv.frame   = CGRect(x: 0, y: y, width: Self.pageW, height: h)
-        iv.contentMode = .scaleAspectFit
-        contentView.insertSubview(iv, belowSubview: canvasView)
+        let w      = canvasView.contentSize.width > 0 ? canvasView.contentSize.width : view.bounds.width
+        let scale  = w / bounds.width
+        let h      = height ?? bounds.height * scale
+        let image  = renderPDFPage(page, width: w, height: h)
+
+        let layer = CALayer()
+        layer.frame    = CGRect(x: 0, y: y, width: w, height: h)
+        layer.contents = image.cgImage
+        layer.contentsGravity = .resizeAspect
+        insertBelowDrawing(layer)
+        pdfLayers.append(layer)
         return h
     }
 
-    private func renderPDFPage(_ page: PDFPage, scale: CGFloat) -> UIImage {
-        let b = page.bounds(for: .cropBox)
-        let size = CGSize(width: b.width * scale, height: b.height * scale)
+    private func renderPDFPage(_ page: PDFPage, width: CGFloat, height: CGFloat) -> UIImage {
+        let size = CGSize(width: width, height: height)
         return UIGraphicsImageRenderer(size: size).image { ctx in
             UIColor.white.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
-            ctx.cgContext.translateBy(x: 0, y: size.height)
+            let b = page.bounds(for: .cropBox)
+            let scale = width / b.width
+            ctx.cgContext.translateBy(x: 0, y: height)
             ctx.cgContext.scaleBy(x: scale, y: -scale)
             page.draw(with: .cropBox, to: ctx.cgContext)
         }
     }
 
-    private func currentInsertY() -> CGFloat {
-        let visibleBottom = scrollView.contentOffset.y + scrollView.bounds.height
-        let allBottom = max(
-            canvasView.drawing.bounds.maxY,
-            document.insertedPDFs.last?.endY ?? 0,
-            (document.insertedImages.last.map { $0.startY + $0.height } ?? 0)
-        )
-        return max(visibleBottom, allBottom) + 20
+    private func makeImageLayer(image: UIImage, frame: CGRect) -> CALayer {
+        let layer = CALayer()
+        layer.frame           = frame
+        layer.contents        = image.cgImage
+        layer.contentsGravity = .resizeAspect
+        layer.cornerRadius    = 6
+        layer.masksToBounds   = true
+        layer.borderWidth     = 0.5
+        layer.borderColor     = UIColor.systemGray4.cgColor
+        return layer
     }
 
-    private func extendDocumentIfNeeded(to y: CGFloat) {
-        guard y > document.documentHeight else { return }
-        document.documentHeight = y + Self.pageH * 2
-        updateLayout()
+    // Insert a CALayer below PencilKit's Metal drawing layer
+    private func insertBelowDrawing(_ layer: CALayer) {
+        canvasView.layer.insertSublayer(layer, at: 0)
     }
 
-    private func scrollTo(y: CGFloat) {
-        let offset = CGPoint(x: 0, y: max(0, y - 60))
-        scrollView.setContentOffset(offset, animated: true)
+    private func nextInsertY() -> CGFloat {
+        let drawingBottom = canvasView.drawing.bounds.maxY
+        let pdfBottom     = document.insertedPDFs.last?.endY ?? 0
+        let imgBottom     = document.insertedImages.last.map { $0.startY + $0.height } ?? 0
+        let visBottom     = canvasView.contentOffset.y + canvasView.bounds.height
+        return max(drawingBottom, pdfBottom, imgBottom, visBottom) + 40
     }
 }
 
@@ -382,110 +343,102 @@ extension InfiniteNotebookViewController {
     }
 
     func recogniseHandwriting() {
-        Task { [weak self] in
-            await self?.performScan(mathOnly: false)
-        }
+        Task { [weak self] in await self?.performScan(mathOnly: false) }
     }
 
     @MainActor
     private func performScan(mathOnly: Bool) async {
-        let visible = scrollView.convert(scrollView.bounds, to: contentView)
+        let scale     = canvasView.zoomScale
+        let visible   = CGRect(
+            x: canvasView.contentOffset.x / scale,
+            y: canvasView.contentOffset.y / scale,
+            width:  canvasView.bounds.width  / scale,
+            height: canvasView.bounds.height / scale
+        )
         let drawing = canvasView.drawing
-
         guard !drawing.strokes.filter({ $0.renderBounds.intersects(visible) }).isEmpty else { return }
 
-        let image = compositeImage(rect: visible, drawing: drawing)
-        let observations = await runVision(on: image)
-        guard !observations.isEmpty else { return }
+        let composite = compositeVisible(rect: visible, drawing: drawing)
+        let obs = await runVision(on: composite)
+        guard !obs.isEmpty else { return }
 
-        clearResultViews()
+        clearResultLabels()
 
-        for obs in observations {
-            guard let text = obs.topCandidates(1).first?.string, !text.isEmpty else { continue }
+        for o in obs {
+            guard let text = o.topCandidates(1).first?.string, !text.isEmpty else { continue }
 
-            let vb   = obs.boundingBox                     // Vision: normalised, Y from bottom
+            let vb   = o.boundingBox  // normalized, Y from bottom
             let docX = visible.minX + vb.minX * visible.width
             let docY = visible.minY + (1 - vb.maxY) * visible.height
             let docH = vb.height * visible.height
 
             if mathOnly {
                 let expr = leftOfEquals(text)
-                guard looksLikeMath(expr),
-                      case .success(let value) = evaluator.evaluate(expr)
-                else { continue }
-                addResultLabel("= \(formatValue(value))", at: CGPoint(x: docX, y: docY + docH + 4), color: .systemBlue)
+                guard looksLikeMath(expr), case .success(let v) = evaluator.evaluate(expr) else { continue }
+                addResultLabel("= \(fmt(v))", at: CGPoint(x: docX, y: docY + docH + 4), color: .systemBlue)
             } else {
                 addResultLabel(text, at: CGPoint(x: docX, y: docY + docH + 4), color: .systemGreen)
             }
         }
     }
 
-    private func compositeImage(rect: CGRect, drawing: PKDrawing) -> UIImage {
-        let scale: CGFloat = 1.5
-        let size = CGSize(width: rect.width * scale, height: rect.height * scale)
-        let drawingImg = drawing.image(from: rect, scale: scale)
+    private func compositeVisible(rect: CGRect, drawing: PKDrawing) -> UIImage {
+        let sc:  CGFloat = 1.5
+        let size = CGSize(width: rect.width * sc, height: rect.height * sc)
+        let ink  = drawing.image(from: rect, scale: sc)
         return UIGraphicsImageRenderer(size: size).image { ctx in
-            UIColor.white.setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
-            drawingImg.draw(in: CGRect(origin: .zero, size: size))
+            UIColor.white.setFill(); ctx.fill(CGRect(origin: .zero, size: size))
+            ink.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 
     private func runVision(on image: UIImage) async -> [VNRecognizedTextObservation] {
-        guard let cgImage = image.cgImage else { return [] }
+        guard let cg = image.cgImage else { return [] }
         return await withCheckedContinuation { cont in
-            let req = VNRecognizeTextRequest { request, _ in
-                cont.resume(returning: (request.results as? [VNRecognizedTextObservation]) ?? [])
+            let req = VNRecognizeTextRequest { r, _ in
+                cont.resume(returning: (r.results as? [VNRecognizedTextObservation]) ?? [])
             }
             req.recognitionLevel = .accurate
             req.usesLanguageCorrection = false
-            try? VNImageRequestHandler(cgImage: cgImage).perform([req])
+            try? VNImageRequestHandler(cgImage: cg).perform([req])
         }
     }
 
-    private func addResultLabel(_ text: String, at origin: CGPoint, color: UIColor) {
-        let label = PaddedLabel()
-        label.text = text
-        label.font = .monospacedDigitSystemFont(ofSize: 14, weight: .semibold)
-        label.textColor = color
-        label.backgroundColor = color.withAlphaComponent(0.1)
-        label.layer.cornerRadius = 6
-        label.layer.masksToBounds = true
-        label.layer.borderWidth  = 0.5
-        label.layer.borderColor  = color.withAlphaComponent(0.35).cgColor
-        label.insets = UIEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
-        label.sizeToFit()
-        label.frame.origin = CGPoint(
-            x: min(origin.x, Self.pageW - label.frame.width - 8),
-            y: origin.y
-        )
-        contentView.addSubview(label)
-        label.alpha = 0
-        UIView.animate(withDuration: 0.25) { label.alpha = 1 }
-        resultViews.append((view: label, id: UUID()))
+    private func addResultLabel(_ text: String, at pt: CGPoint, color: UIColor) {
+        let lbl = PaddedLabel()
+        lbl.text            = text
+        lbl.font            = .monospacedDigitSystemFont(ofSize: 14, weight: .semibold)
+        lbl.textColor       = color
+        lbl.backgroundColor = color.withAlphaComponent(0.1)
+        lbl.layer.cornerRadius  = 6
+        lbl.layer.masksToBounds = true
+        lbl.layer.borderWidth   = 0.5
+        lbl.layer.borderColor   = color.withAlphaComponent(0.35).cgColor
+        lbl.sizeToFit()
+        lbl.frame.origin = pt
+        canvasView.addSubview(lbl)
+        lbl.alpha = 0
+        UIView.animate(withDuration: 0.25) { lbl.alpha = 1 }
+        resultLabels.append(lbl)
     }
 
-    func clearResultViews() {
-        resultViews.forEach { $0.view.removeFromSuperview() }
-        resultViews.removeAll()
+    func clearResultLabels() {
+        resultLabels.forEach { $0.removeFromSuperview() }
+        resultLabels.removeAll()
     }
 
     // MARK: - Helpers
 
-    private func looksLikeMath(_ text: String) -> Bool {
+    private func looksLikeMath(_ t: String) -> Bool {
         let ops = CharacterSet(charactersIn: "+-*/×÷^%")
-        return text.unicodeScalars.contains(where: ops.contains) &&
-               text.unicodeScalars.contains(where: CharacterSet.decimalDigits.contains)
+        return t.unicodeScalars.contains(where: ops.contains) &&
+               t.unicodeScalars.contains(where: CharacterSet.decimalDigits.contains)
     }
-
-    private func leftOfEquals(_ text: String) -> String {
-        if let r = text.range(of: "=") { return String(text[text.startIndex..<r.lowerBound]) }
-        return text
+    private func leftOfEquals(_ t: String) -> String {
+        t.range(of: "=").map { String(t[t.startIndex..<$0.lowerBound]) } ?? t
     }
-
-    private func formatValue(_ v: Double) -> String {
-        if v == v.rounded(), abs(v) < 1e12 { return String(format: "%.0f", v) }
-        return String(format: "%g", v)
+    private func fmt(_ v: Double) -> String {
+        v == v.rounded() && abs(v) < 1e12 ? String(format: "%.0f", v) : String(format: "%g", v)
     }
 }
 
@@ -499,39 +452,14 @@ extension InfiniteNotebookViewController: PKCanvasViewDelegate {
     }
 }
 
-// MARK: - UIScrollViewDelegate
-
-extension InfiniteNotebookViewController: UIScrollViewDelegate {}
-
-// MARK: - PaddedLabel helper
+// MARK: - PaddedLabel
 
 private final class PaddedLabel: UILabel {
-    var insets = UIEdgeInsets(top: 2, left: 6, bottom: 2, right: 6)
+    var insets = UIEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
     override func drawText(in rect: CGRect) { super.drawText(in: rect.inset(by: insets)) }
     override var intrinsicContentSize: CGSize {
         let s = super.intrinsicContentSize
         return CGSize(width: s.width + insets.left + insets.right,
                       height: s.height + insets.top + insets.bottom)
     }
-}
-
-// MARK: - FixedPKCanvasView
-
-/// PKCanvasView subclass that prevents internal scroll and zoom so that the
-/// outer UIScrollView has full control over navigation.
-final class FixedPKCanvasView: PKCanvasView {
-
-    // Block any attempt to change the zoom scale
-    override var zoomScale: CGFloat {
-        get { 1.0 }
-        set { }
-    }
-    override func setZoomScale(_ scale: CGFloat, animated: Bool) { }
-
-    // Block any attempt to scroll the canvas internally
-    override var contentOffset: CGPoint {
-        get { .zero }
-        set { }
-    }
-    override func setContentOffset(_ contentOffset: CGPoint, animated: Bool) { }
 }
