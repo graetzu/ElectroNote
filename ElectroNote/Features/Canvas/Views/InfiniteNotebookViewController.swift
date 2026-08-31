@@ -95,6 +95,10 @@ final class InfiniteNotebookViewController: UIViewController {
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.delegate = self
         scrollView.contentInsetAdjustmentBehavior = .never
+        // Disable zoom on outer scroll view
+        scrollView.minimumZoomScale = 1.0
+        scrollView.maximumZoomScale = 1.0
+        scrollView.bouncesZoom = false
     }
 
     private func setupContentView() {
@@ -104,13 +108,20 @@ final class InfiniteNotebookViewController: UIViewController {
 
     private func setupCanvas() {
         canvasView.isScrollEnabled = false
-        canvasView.minimumZoomScale = 1
-        canvasView.maximumZoomScale = 1
+        canvasView.minimumZoomScale = 1.0
+        canvasView.maximumZoomScale = 1.0
+        canvasView.bouncesZoom = false
+        canvasView.bounces = false
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
         canvasView.drawingPolicy = .pencilOnly
         canvasView.delegate = self
         contentView.addSubview(canvasView)
+
+        // Remove PKCanvasView's own pinch gesture so it can't zoom
+        canvasView.gestureRecognizers?
+            .compactMap { $0 as? UIPinchGestureRecognizer }
+            .forEach { canvasView.removeGestureRecognizer($0) }
     }
 
     private func setupToolPicker() {
@@ -125,6 +136,10 @@ final class InfiniteNotebookViewController: UIViewController {
         scrollView.contentSize  = CGSize(width: Self.pageW, height: h)
         contentView.frame = CGRect(x: 0, y: 0, width: Self.pageW, height: h)
         canvasView.frame  = contentView.bounds
+        // Pin PKCanvasView's own scroll state so it never jumps internally
+        canvasView.contentSize   = contentView.bounds.size
+        canvasView.contentOffset = .zero
+        canvasView.zoomScale     = 1.0
     }
 
     private func loadDocument() {
@@ -484,6 +499,9 @@ extension InfiniteNotebookViewController: PKCanvasViewDelegate {
         onDrawingChanged?()
         extendIfNeeded()
         scheduleScan()
+        // PKCanvasView occasionally drifts its own contentOffset/zoomScale; reset immediately
+        if canvasView.contentOffset != .zero { canvasView.contentOffset = .zero }
+        if canvasView.zoomScale     != 1.0   { canvasView.zoomScale     = 1.0 }
     }
 }
 
