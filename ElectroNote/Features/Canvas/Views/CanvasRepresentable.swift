@@ -31,7 +31,7 @@ struct CanvasRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ canvas: PKCanvasView, context: Context) {
-        let policy: PKCanvasView.DrawingPolicy = pencilOnly ? .pencilOnly : .anyInput
+        let policy: PKCanvasViewDrawingPolicy = pencilOnly ? .pencilOnly : .anyInput
         if canvas.drawingPolicy != policy {
             canvas.drawingPolicy = policy
         }
