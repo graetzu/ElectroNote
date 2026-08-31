@@ -114,8 +114,9 @@ final class PDFAnnotationViewController: UIViewController {
     @objc private func handlePageChange() {
         saveCurrentAnnotation()
         guard let page = pdfView.currentPage,
-              let doc  = pdfView.document,
-              let idx  = doc.index(for: page) else { return }
+              let doc  = pdfView.document else { return }
+        let idx = doc.index(for: page)
+        guard idx != NSNotFound else { return }
         currentPageIndex = idx
         loadAnnotation(for: idx)
         updateCanvasFrame()

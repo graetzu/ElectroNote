@@ -2,9 +2,16 @@ import SwiftUI
 
 struct PDFHostView: View {
     @StateObject private var viewModel: PDFViewModel
+    @StateObject private var clipArtVM: ClipArtViewModel
+    @State private var showClipArtPicker = false
 
     init(item: DocumentItem) {
-        _viewModel = StateObject(wrappedValue: PDFViewModel(item: item))
+        let vm = PDFViewModel(item: item)
+        _viewModel = StateObject(wrappedValue: vm)
+        // Annotations folder is the sidecar directory for this PDF
+        let annotationsURL = item.path.appendingPathExtension("annotations")
+        try? FileManager.default.createDirectory(at: annotationsURL, withIntermediateDirectories: true)
+        _clipArtVM = StateObject(wrappedValue: ClipArtViewModel(containerURL: annotationsURL, pageIndex: 0))
     }
 
     var body: some View {
@@ -12,13 +19,25 @@ struct PDFHostView: View {
             if let error = viewModel.loadError {
                 ContentUnavailableView(error, systemImage: "doc.text.magnifyingglass")
             } else {
-                PDFRepresentable(viewModel: viewModel)
-                    .ignoresSafeArea(edges: .bottom)
+                ZStack {
+                    PDFRepresentable(viewModel: viewModel)
+                    ClipArtOverlayView(viewModel: clipArtVM)
+                }
+                .ignoresSafeArea(edges: .bottom)
             }
         }
         .navigationTitle(viewModel.item.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
+        .onChange(of: viewModel.currentPageIndex) { _, newPage in
+            clipArtVM.switchToPage(newPage)
+        }
+        .onDisappear { clipArtVM.saveNow() }
+        .sheet(isPresented: $showClipArtPicker) {
+            ClipArtPickerView { entry in
+                clipArtVM.insert(entry, at: CGPoint(x: 400, y: 300))
+            }
+        }
     }
 
     // MARK: - Toolbar
@@ -39,6 +58,13 @@ struct PDFHostView: View {
                 Image(systemName: "chevron.right")
             }
             .disabled(!viewModel.canGoForward)
+        }
+
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button { showClipArtPicker = true } label: {
+                Image(systemName: "square.on.square.badge.person.crop")
+            }
+            .help("Symbol einfügen")
         }
     }
 }
