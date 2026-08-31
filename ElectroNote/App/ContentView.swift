@@ -10,7 +10,15 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 400)
         } detail: {
             if let item = selectedItem {
-                WelcomeView(selectedItemName: item.name)
+                switch item.type {
+                case .note:
+                    CanvasHostView(item: item)
+                        .id(item.id)        // rebuild when switching notes
+                case .pdf:
+                    WelcomeView(selectedItemName: item.name)   // Feature 3
+                case .folder:
+                    WelcomeView()
+                }
             } else {
                 WelcomeView()
             }
