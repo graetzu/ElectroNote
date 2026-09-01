@@ -41,6 +41,7 @@ final class SyncEngine {
 
             // Upload: local-only or locally newer
             for (relPath, localDate) in localMap {
+                guard !relPath.contains(".DS_Store"), !relPath.hasPrefix(".") else { continue }
                 let remoteDate = remoteMap[relPath]
                 if remoteDate == nil || localDate > remoteDate! + 2 {
                     do {
@@ -55,6 +56,7 @@ final class SyncEngine {
 
             // Download: remote-only or remotely newer
             for (relPath, remoteDate) in remoteMap {
+                guard !relPath.contains(".DS_Store"), !relPath.hasPrefix(".") else { continue }
                 let localDate = localMap[relPath]
                 if localDate == nil || remoteDate > localDate! + 2 {
                     do {
@@ -83,6 +85,8 @@ final class SyncEngine {
         ) else { return map }
 
         for case let url as URL in enumerator {
+            let filename = url.lastPathComponent
+            guard !filename.hasPrefix("."), filename != ".DS_Store" else { continue }
             guard let res = try? url.resourceValues(forKeys: Set(keys)),
                   !(res.isDirectory ?? false),
                   let mod = res.contentModificationDate
@@ -96,14 +100,17 @@ final class SyncEngine {
     // MARK: - Upload / Download
 
     private func uploadFile(relPath: String) async throws {
+        let localURL = localRoot.appendingPathComponent(relPath)
+        guard FileManager.default.fileExists(atPath: localURL.path) else { return }
         let remotePath = "\(remoteFolder)/\(relPath)"
         try await client.ensureDirectories(for: remotePath)
-        let data = try Data(contentsOf: localRoot.appendingPathComponent(relPath))
+        let data = try Data(contentsOf: localURL)
         try await client.put(path: remotePath, data: data)
     }
 
     private func downloadFile(relPath: String, remoteDate: Date) async throws {
-        let data     = try await client.get(path: "\(remoteFolder)/\(relPath)")
+        let remotePath = "\(remoteFolder)/\(relPath)"
+        let data     = try await client.get(path: remotePath)
         let localURL = localRoot.appendingPathComponent(relPath)
         try FileManager.default.createDirectory(
             at: localURL.deletingLastPathComponent(), withIntermediateDirectories: true)

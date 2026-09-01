@@ -14,6 +14,14 @@ final class NotebookDocumentStore {
         self.noteURL = noteURL
         try? FileManager.default.createDirectory(at: pdfsFolder,    withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: imagesFolder,  withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: drawingURL.path) {
+            try? PKDrawing().dataRepresentation().write(to: drawingURL, options: .atomic)
+        }
+        if !FileManager.default.fileExists(atPath: documentURL.path) {
+            if let data = try? JSONEncoder().encode(NotebookDocument()) {
+                try? data.write(to: documentURL, options: .atomic)
+            }
+        }
     }
 
     // MARK: - Document

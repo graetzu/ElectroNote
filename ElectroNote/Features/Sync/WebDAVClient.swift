@@ -57,8 +57,12 @@ final class WebDAVClient {
     }
 
     func davURL(path: String) -> URL {
-        path.isEmpty ? credentials.webdavBase
-                     : credentials.webdavBase.appendingPathComponent(path)
+        guard !path.isEmpty else { return credentials.webdavBase }
+        var url = credentials.webdavBase
+        for component in path.split(separator: "/") {
+            url.appendPathComponent(String(component))
+        }
+        return url
     }
 
     private func makeRequest(_ url: URL, method: String) -> URLRequest {
