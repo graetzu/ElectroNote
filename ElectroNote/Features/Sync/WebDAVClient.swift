@@ -11,11 +11,22 @@ struct DAVFile {
     var pathExtension: String { (name as NSString).pathExtension.lowercased() }
     var isPDF:  Bool { pathExtension == "pdf" }
     var isNote: Bool { name.hasSuffix(".enote") }
+    var isOfficeDoc: Bool {
+        let ext = pathExtension
+        return ["docx", "doc", "xlsx", "xls", "pptx", "ppt", "rtf", "txt", "pages", "numbers", "keynote"].contains(ext)
+    }
+    var isImportable: Bool { isPDF || isOfficeDoc }
 
     var systemImage: String {
         if isDirectory { return isNote ? "note.text" : "folder.fill" }
         if isPDF       { return "doc.richtext.fill" }
-        return "doc"
+        switch pathExtension {
+        case "docx", "doc": return "doc.text.fill"
+        case "xlsx", "xls": return "tablecells.fill"
+        case "pptx", "ppt": return "rectangle.inset.filled.and.person.filled"
+        case "rtf", "txt":  return "doc.plaintext.fill"
+        default:            return "doc"
+        }
     }
 }
 

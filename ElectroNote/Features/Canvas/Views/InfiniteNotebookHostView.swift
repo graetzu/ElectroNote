@@ -5,6 +5,8 @@ struct InfiniteNotebookHostView: View {
     let item: DocumentItem
 
     @StateObject private var vm = InfiniteNotebookViewModel()
+    @StateObject private var syncVM = SyncViewModel()
+    @State private var showNextcloudSheet = false
     private let store: NotebookDocumentStore
 
     init(item: DocumentItem) {
@@ -25,8 +27,28 @@ struct InfiniteNotebookHostView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarItems }
         .sheet(isPresented: $vm.showPDFPicker) {
-            DocumentPicker(contentTypes: [.pdf]) { url in
+            DocumentPicker(contentTypes: DocumentConverter.supportedTypes) { url in
                 vm.pendingPDFURL = url
+            }
+        }
+        .sheet(isPresented: $showNextcloudSheet) {
+            if syncVM.credentials != nil {
+                NavigationStack {
+                    NextcloudFileBrowserView(vm: syncVM) { url in
+                        showNextcloudSheet = false
+                        vm.pendingPDFURL = url
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Schließen") { showNextcloudSheet = false }
+                        }
+                    }
+                }
+            } else {
+                SyncSettingsView { url in
+                    showNextcloudSheet = false
+                    vm.pendingPDFURL = url
+                }
             }
         }
         .sheet(isPresented: $vm.showPlotter) {
@@ -157,7 +179,10 @@ struct InfiniteNotebookHostView: View {
                         Label("Handschrift erkennen", systemImage: "text.viewfinder")
                     }
                     Button { vm.showPDFPicker = true } label: {
-                        Label("PDF einfügen", systemImage: "doc.badge.plus")
+                        Label("Dokument einfügen (PDF, Word, Excel, PPT…)", systemImage: "doc.badge.plus")
+                    }
+                    Button { showNextcloudSheet = true } label: {
+                        Label("Aus Nextcloud einfügen…", systemImage: "icloud.and.arrow.down")
                     }
                     Button { vm.showPlotter = true } label: {
                         Label("Funktion einfügen", systemImage: "waveform.path.badge.plus")

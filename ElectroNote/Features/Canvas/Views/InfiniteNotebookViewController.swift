@@ -315,33 +315,42 @@ extension InfiniteNotebookViewController {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
-        guard let filename = try? store.copyPDF(from: url),
-              let pdf = PDFDocument(url: store.pdfURL(filename: filename))
-        else { return }
+        Task { @MainActor in
+            let pdfURL: URL
+            do {
+                pdfURL = try await DocumentConverter.shared.convertToPDF(sourceURL: url)
+            } catch {
+                pdfURL = url
+            }
 
-        let startY = nextInsertY()
-        var y = startY
-        var heights: [CGFloat] = []
+            guard let filename = try? self.store.copyPDF(from: pdfURL),
+                  let pdf = PDFDocument(url: self.store.pdfURL(filename: filename))
+            else { return }
 
-        for i in 0..<pdf.pageCount {
-            guard let page = pdf.page(at: i) else { continue }
-            let h = addPDFLayer(page: page, at: y)
-            heights.append(h)
-            y += h
+            let startY = self.nextInsertY()
+            var y = startY
+            var heights: [CGFloat] = []
+
+            for i in 0..<pdf.pageCount {
+                guard let page = pdf.page(at: i) else { continue }
+                let h = self.addPDFLayer(page: page, at: y)
+                heights.append(h)
+                y += h
+            }
+
+            let needed = y + Self.initialHeight * 0.3
+            if needed > self.canvasView.contentSize.height {
+                self.canvasView.contentSize.height = needed
+                self.updateBackgroundFrame()
+            }
+
+            let entry = InsertedPDF(id: UUID(), filename: filename, startY: startY, pageHeights: heights)
+            self.document.insertedPDFs.append(entry)
+            self.document.documentHeight = self.canvasView.contentSize.height
+            self.store.saveDocument(self.document)
+
+            self.canvasView.setContentOffset(CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
         }
-
-        let needed = y + Self.initialHeight * 0.3
-        if needed > canvasView.contentSize.height {
-            canvasView.contentSize.height = needed
-            updateBackgroundFrame()
-        }
-
-        let entry = InsertedPDF(id: UUID(), filename: filename, startY: startY, pageHeights: heights)
-        document.insertedPDFs.append(entry)
-        document.documentHeight = canvasView.contentSize.height
-        store.saveDocument(document)
-
-        canvasView.setContentOffset(CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
     }
 
     func insertImage(_ image: UIImage) {
@@ -498,18 +507,10 @@ extension InfiniteNotebookViewController {
             self?.selectionOverlay = nil
             guard let self else { return }
 
-            // Convert overlay view points/rect → canvas content coordinates
-            let scale  = self.canvasView.zoomScale
-            let offset = self.canvasView.contentOffset
-            let contentPoints = points.map { pt in
-                CGPoint(x: (pt.x + offset.x) / scale, y: (pt.y + offset.y) / scale)
-            }
-            let contentRect = CGRect(
-                x: (viewRect.minX + offset.x) / scale,
-                y: (viewRect.minY + offset.y) / scale,
-                width:  viewRect.width  / scale,
-                height: viewRect.height / scale
-            )
+            // Precise conversion using canvasView.convert
+            let contentPoints = points.map { self.canvasView.convert($0, from: self.view) }
+            let contentRect   = self.canvasView.convert(viewRect, from: self.view)
+
             self.lastLassoPoints = contentPoints
             Task { await self.recogniseInRegion(contentRect: contentRect, lassoPoints: contentPoints) }
         }
@@ -520,7 +521,31 @@ extension InfiniteNotebookViewController {
 
     @MainActor
     private func recogniseInRegion(contentRect: CGRect, lassoPoints: [CGPoint] = []) async {
-        guard let composite = compositeVisible(rect: contentRect, drawing: canvasView.drawing) else { return }
+        let lassoPolygon = UIBezierPath()
+        if let first = lassoPoints.first {
+            lassoPolygon.move(to: first)
+            for pt in lassoPoints.dropFirst() { lassoPolygon.addLine(to: pt) }
+            lassoPolygon.close()
+        }
+
+        let relevantStrokes = canvasView.drawing.strokes.filter { stroke in
+            if !lassoPoints.isEmpty {
+                let mid = CGPoint(x: stroke.renderBounds.midX, y: stroke.renderBounds.midY)
+                return lassoPolygon.contains(mid) || contentRect.contains(stroke.renderBounds) || contentRect.intersects(stroke.renderBounds)
+            } else {
+                return contentRect.intersects(stroke.renderBounds)
+            }
+        }
+
+        let scanRect: CGRect
+        if !relevantStrokes.isEmpty {
+            let strokeUnion = relevantStrokes.reduce(CGRect.null) { $0.union($1.renderBounds) }
+            scanRect = strokeUnion.insetBy(dx: -20, dy: -20)
+        } else {
+            scanRect = contentRect.insetBy(dx: -20, dy: -20)
+        }
+
+        guard let composite = compositeVisible(rect: scanRect, drawing: canvasView.drawing) else { return }
 
         // Spinner while recognising
         let spinner = UIActivityIndicatorView(style: .large)
@@ -550,9 +575,9 @@ extension InfiniteNotebookViewController {
         }
 
         lastScanItems = items
-        lastScanRect  = contentRect
+        lastScanRect  = scanRect
         lastLassoPoints = lassoPoints
-        showBanner(items: items, scanRect: contentRect)
+        showBanner(items: items, scanRect: scanRect)
     }
 
     @MainActor
@@ -601,12 +626,12 @@ extension InfiniteNotebookViewController {
 
     private func compositeVisible(rect: CGRect, drawing: PKDrawing) -> UIImage? {
         guard rect.width > 0, rect.height > 0 else { return nil }
-        let sc: CGFloat = min(1.5, 1200.0 / max(rect.width, rect.height))
-        let size = CGSize(width: rect.width * sc, height: rect.height * sc)
-        let ink  = drawing.image(from: rect, scale: sc)
-        return UIGraphicsImageRenderer(size: size).image { ctx in
-            UIColor.white.setFill(); ctx.fill(CGRect(origin: .zero, size: size))
-            ink.draw(in: CGRect(origin: .zero, size: size))
+        let scale: CGFloat = 2.0
+        let ink  = drawing.image(from: rect, scale: scale)
+        guard ink.size.width > 0 && ink.size.height > 0 else { return nil }
+        return UIGraphicsImageRenderer(size: ink.size).image { ctx in
+            UIColor.white.setFill(); ctx.fill(CGRect(origin: .zero, size: ink.size))
+            ink.draw(at: .zero)
         }
     }
 
@@ -618,10 +643,11 @@ extension InfiniteNotebookViewController {
                     cont.resume(returning: (r.results as? [VNRecognizedTextObservation]) ?? [])
                 }
                 req.recognitionLevel = .accurate
-                req.recognitionLanguages = ["de-DE", "en-US"]
+                req.recognitionLanguages = ["de-DE", "en-US", "en-GB"]
                 req.usesLanguageCorrection = true
+                req.automaticallyDetectsLanguage = true
                 do {
-                    try VNImageRequestHandler(cgImage: cg).perform([req])
+                    try VNImageRequestHandler(cgImage: cg, orientation: .up, options: [:]).perform([req])
                 } catch {
                     cont.resume(returning: [])
                 }

@@ -2,11 +2,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct DocumentPicker: UIViewControllerRepresentable {
-    let contentTypes: [UTType]
+    var contentTypes: [UTType] = DocumentConverter.supportedTypes
+    var asCopy: Bool = true
     let onPick: (URL) -> Void
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: asCopy)
         picker.delegate = context.coordinator
         picker.allowsMultipleSelection = false
         return picker
@@ -23,7 +24,19 @@ struct DocumentPicker: UIViewControllerRepresentable {
         func documentPicker(_ controller: UIDocumentPickerViewController,
                             didPickDocumentsAt urls: [URL]) {
             guard let url = urls.first else { return }
-            onPick(url)
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+            // Copy to a safe local temporary URL if needed
+            let tempDir = FileManager.default.temporaryDirectory
+            let targetURL = tempDir.appendingPathComponent(url.lastPathComponent)
+            try? FileManager.default.removeItem(at: targetURL)
+            do {
+                try FileManager.default.copyItem(at: url, to: targetURL)
+                onPick(targetURL)
+            } catch {
+                onPick(url)
+            }
         }
     }
 }

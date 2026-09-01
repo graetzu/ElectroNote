@@ -14,12 +14,17 @@ protocol FileServiceProtocol: AnyObject {
 
 final class FileService: FileServiceProtocol {
 
+    static var defaultRootURL: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let root = docs.appendingPathComponent("ElectroNote", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
     let rootURL: URL
 
     init() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        rootURL = docs.appendingPathComponent("ElectroNote", isDirectory: true)
-        try? FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        self.rootURL = Self.defaultRootURL
     }
 
     func listItems(at url: URL) -> [DocumentItem] {

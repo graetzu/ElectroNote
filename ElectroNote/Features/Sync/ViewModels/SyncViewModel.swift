@@ -37,7 +37,7 @@ final class SyncViewModel: ObservableObject {
 
     let localRoot: URL
 
-    init(localRoot: URL) {
+    init(localRoot: URL = FileService.defaultRootURL) {
         self.localRoot = localRoot
         credentials = NextcloudCredentials.load()
         lastSynced  = UserDefaults.standard.object(forKey: "nc_last_synced") as? Date

@@ -10,7 +10,7 @@ struct SyncSettingsView: View {
 
     let onPDFImport: (URL) -> Void
 
-    init(localRoot: URL, onPDFImport: @escaping (URL) -> Void) {
+    init(localRoot: URL = FileService.defaultRootURL, onPDFImport: @escaping (URL) -> Void = { _ in }) {
         self.onPDFImport = onPDFImport
         _vm = StateObject(wrappedValue: SyncViewModel(localRoot: localRoot))
     }
@@ -236,18 +236,18 @@ struct NextcloudFileBrowserView: View {
                     Label(file.name, systemImage: file.systemImage)
                         .foregroundStyle(.primary)
                 }
-            } else if file.isPDF {
+            } else if file.isImportable {
                 HStack {
                     Label {
                         Text(file.name)
                     } icon: {
-                        Image(systemName: file.systemImage).foregroundStyle(.red)
+                        Image(systemName: file.systemImage).foregroundStyle(file.isPDF ? .red : .blue)
                     }
                     Spacer()
                     if importingFile?.davPath == file.davPath {
                         ProgressView()
                     } else {
-                        Button("Importieren") {
+                        Button("Einfügen") {
                             importingFile = file
                             Task {
                                 if let url = await vm.downloadToTemp(file: file) {
@@ -256,7 +256,7 @@ struct NextcloudFileBrowserView: View {
                                 importingFile = nil
                             }
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderedProminent)
                         .font(.caption)
                     }
                 }
