@@ -6,9 +6,18 @@ struct BrowserSidebarView: View {
 
     @State private var showNewFolder = false
     @State private var showNewNote = false
+    @State private var showDocTypePicker = false
+    @State private var pendingDocType: DocumentType? = nil
     @State private var showPDFPicker = false
+    @State private var showNextcloud = false
     @State private var itemToRename: DocumentItem?
     @State private var renameText = ""
+    @State private var showTrash = false
+    @State private var showTagBrowser = false
+    @State private var itemForTagEditor: DocumentItem?
+
+    // Observe metaStore changes so favorites/tags update live
+    @ObservedObject private var metaStore = ItemMetadataStore.shared
 
     var body: some View {
         Group {
@@ -27,15 +36,50 @@ struct BrowserSidebarView: View {
                 viewModel.createFolder(named: $0)
             }
         }
+        .sheet(isPresented: $showDocTypePicker) {
+            DocumentTypePickerView { docType in
+                pendingDocType = docType
+                showDocTypePicker = false
+                // Short delay lets the picker dismiss before the name sheet appears
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    showNewNote = true
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
         .sheet(isPresented: $showNewNote) {
-            NewItemSheet(title: "Neue Notiz", placeholder: "Notizname") {
-                viewModel.createNote(named: $0)
+            NewItemSheet(title: "Neues Dokument", placeholder: "Name") {
+                if let type = pendingDocType {
+                    viewModel.createDocument(named: $0, type: type)
+                } else {
+                    viewModel.createNote(named: $0)
+                }
+                pendingDocType = nil
             }
         }
         .sheet(isPresented: $showPDFPicker) {
             DocumentPicker(contentTypes: [.pdf]) { url in
                 viewModel.importPDF(from: url)
             }
+        }
+        .sheet(isPresented: $showNextcloud) {
+            SyncSettingsView(localRoot: viewModel.currentPath) { pdfURL in
+                viewModel.importPDF(from: pdfURL)
+            }
+        }
+        .sheet(isPresented: $showTrash) {
+            TrashView()
+                .onDisappear { viewModel.loadItems() }
+        }
+        .sheet(isPresented: $showTagBrowser) {
+            TagBrowserView { relPath in
+                if let item = viewModel.navigateTo(relPath: relPath) {
+                    selectedItem = item.isFolder ? nil : item
+                }
+            }
+        }
+        .sheet(item: $itemForTagEditor) { item in
+            TagEditorView(item: item, relPath: viewModel.relPath(for: item))
         }
         .alert("Umbenennen", isPresented: Binding(
             get: { itemToRename != nil },
@@ -62,20 +106,72 @@ struct BrowserSidebarView: View {
 
     private var itemList: some View {
         List {
-            ForEach(viewModel.items) { item in
-                BrowserRowView(item: item, isSelected: selectedItem?.id == item.id)
-                    .contentShape(Rectangle())
-                    .onTapGesture { handleTap(on: item) }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) { remove(item) } label: {
-                            Label("Löschen", systemImage: "trash")
+            // Favorites section – only at root
+            if viewModel.isAtRoot {
+                let favorites = viewModel.items.filter { viewModel.isFavorite($0) }
+                if !favorites.isEmpty {
+                    Section("Favoriten") {
+                        ForEach(favorites) { item in
+                            itemRow(item)
                         }
                     }
-                    .contextMenu { contextMenu(for: item) }
+                }
+            }
+
+            // All items section
+            Section(viewModel.isAtRoot ? "Alle Elemente" : "") {
+                ForEach(viewModel.items) { item in
+                    itemRow(item)
+                }
             }
         }
         .listStyle(.sidebar)
         .animation(.default, value: viewModel.items)
+    }
+
+    private func itemRow(_ item: DocumentItem) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            BrowserRowView(
+                item: item,
+                isSelected: selectedItem?.id == item.id,
+                isFavorite: viewModel.isFavorite(item)
+            )
+            // Tag chips
+            let tags = metaStore.tags(for: viewModel.relPath(for: item))
+            if !tags.isEmpty {
+                tagChipsRow(tags)
+                    .padding(.leading, 48)
+                    .padding(.bottom, 4)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { handleTap(on: item) }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) { remove(item) } label: {
+                Label("Löschen", systemImage: "trash")
+            }
+        }
+        .contextMenu { contextMenu(for: item) }
+    }
+
+    private func tagChipsRow(_ tags: [String]) -> some View {
+        let colors: [Color] = [.blue, .green, .orange, .purple, .red, .teal]
+        return HStack(spacing: 4) {
+            ForEach(tags.prefix(4), id: \.self) { tag in
+                Text(tag)
+                    .font(.system(size: 10, weight: .medium))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(colors[abs(tag.hashValue) % colors.count].opacity(0.15))
+                    .foregroundStyle(colors[abs(tag.hashValue) % colors.count])
+                    .clipShape(Capsule())
+            }
+            if tags.count > 4 {
+                Text("+\(tags.count - 4)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var emptyState: some View {
@@ -114,12 +210,33 @@ struct BrowserSidebarView: View {
         }
 
         ToolbarItem(placement: .navigationBarTrailing) {
+            Button { showNextcloud = true } label: {
+                Image(systemName: "icloud")
+            }
+            .accessibilityLabel("Nextcloud")
+        }
+
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button { showTagBrowser = true } label: {
+                Image(systemName: "tag")
+            }
+            .accessibilityLabel("Tags")
+        }
+
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button { showTrash = true } label: {
+                Image(systemName: "trash")
+            }
+            .accessibilityLabel("Papierkorb")
+        }
+
+        ToolbarItem(placement: .navigationBarTrailing) {
             Menu {
                 Button { showNewFolder = true } label: {
                     Label("Neuer Ordner", systemImage: "folder.badge.plus")
                 }
-                Button { showNewNote = true } label: {
-                    Label("Neue Notiz", systemImage: "note.text.badge.plus")
+                Button { showDocTypePicker = true } label: {
+                    Label("Neues Dokument…", systemImage: "note.text.badge.plus")
                 }
                 Divider()
                 Button { showPDFPicker = true } label: {
@@ -141,7 +258,24 @@ struct BrowserSidebarView: View {
         } label: {
             Label("Umbenennen", systemImage: "pencil")
         }
+
+        Button {
+            viewModel.toggleFavorite(item)
+        } label: {
+            Label(
+                viewModel.isFavorite(item) ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen",
+                systemImage: viewModel.isFavorite(item) ? "star.slash" : "star"
+            )
+        }
+
+        Button {
+            itemForTagEditor = item
+        } label: {
+            Label("Tags bearbeiten…", systemImage: "tag")
+        }
+
         Divider()
+
         Button(role: .destructive) { remove(item) } label: {
             Label("Löschen", systemImage: "trash")
         }

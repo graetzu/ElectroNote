@@ -1,4 +1,5 @@
 import SwiftUI
+import PencilKit
 
 struct InfiniteNotebookHostView: View {
     let item: DocumentItem
@@ -28,6 +29,26 @@ struct InfiniteNotebookHostView: View {
                 }
                 .presentationDetents([.medium, .large])
             }
+            .sheet(isPresented: $vm.showWhiteboard) {
+                WhiteboardView { image in
+                    vm.pendingImage = image
+                }
+            }
+            .sheet(isPresented: $vm.showPAP) {
+                PAPDesignerView { image in
+                    vm.pendingImage = image
+                }
+            }
+            .sheet(isPresented: $vm.showMindMap) {
+                MindMapDesignerView { image in
+                    vm.pendingImage = image
+                }
+            }
+            .sheet(isPresented: $vm.showTextInsertion) {
+                TextInsertionSheet(isPresented: $vm.showTextInsertion) { text, fontSize in
+                    vm.pendingTextInsertion = .init(text: text, fontSize: fontSize)
+                }
+            }
     }
 
     // MARK: - Toolbar
@@ -35,40 +56,48 @@ struct InfiniteNotebookHostView: View {
     @ToolbarContentBuilder
     private var toolbarItems: some ToolbarContent {
 
-        // Left: undo / redo (use system UndoManager via first responder)
+        // Left: undo / redo — routed via ViewModel → Representable → VC so the
+        // PKCanvasView's undoManager is always the target regardless of first-responder state
         ToolbarItemGroup(placement: .navigationBarLeading) {
-            Button { UIApplication.shared.sendAction(#selector(UndoManager.undo), to: nil, from: nil, for: nil) }
-            label: { Image(systemName: "arrow.uturn.backward") }
-            .accessibilityLabel("Rückgängig")
+            Button { vm.triggerUndo = true } label: { Image(systemName: "arrow.uturn.backward") }
+                .accessibilityLabel("Rückgängig")
 
-            Button { UIApplication.shared.sendAction(#selector(UndoManager.redo), to: nil, from: nil, for: nil) }
-            label: { Image(systemName: "arrow.uturn.forward") }
-            .accessibilityLabel("Wiederholen")
+            Button { vm.triggerRedo = true } label: { Image(systemName: "arrow.uturn.forward") }
+                .accessibilityLabel("Wiederholen")
         }
 
-        // Right: feature buttons + save indicator
+        // Right: always-visible core controls
         ToolbarItemGroup(placement: .navigationBarTrailing) {
 
-            // Save state
+            // Save indicator
             Label(vm.saveState.label, systemImage: vm.saveState.symbol)
                 .font(.caption)
                 .foregroundStyle(vm.saveState == .unsaved ? .orange : .secondary)
                 .labelStyle(.iconOnly)
 
-            // Background picker
+            // Background template + line spacing
             Menu {
-                ForEach(BackgroundStyle.allCases) { style in
-                    Button {
-                        vm.background = style
-                    } label: {
-                        Label(style.rawValue, systemImage: style.symbolName)
+                Section("Vorlage") {
+                    ForEach(BackgroundStyle.allCases) { style in
+                        Button { vm.background = style } label: {
+                            Label(style.rawValue, systemImage: style.symbolName)
+                        }
+                        .disabled(vm.background == style)
                     }
-                    .disabled(vm.background == style)
+                }
+                Section("Zeilenabstand") {
+                    ForEach(LineSpacing.allCases) { sp in
+                        Button { vm.lineSpacing = sp } label: {
+                            Label(sp.rawValue,
+                                  systemImage: vm.lineSpacing == sp ? "checkmark" : "minus")
+                        }
+                        .disabled(vm.lineSpacing == sp)
+                    }
                 }
             } label: {
                 Image(systemName: vm.background.symbolName)
             }
-            .accessibilityLabel("Hintergrund")
+            .accessibilityLabel("Vorlage & Zeilenabstand")
 
             // Pencil-only toggle
             Toggle(isOn: $vm.pencilOnly) {
@@ -78,34 +107,98 @@ struct InfiniteNotebookHostView: View {
             .tint(.blue)
             .accessibilityLabel(vm.pencilOnly ? "Nur Pencil" : "Finger & Pencil")
 
-            // Math mode toggle
-            Toggle(isOn: $vm.mathEnabled) {
-                Image(systemName: "function")
+            // Keyboard text insertion
+            Button { vm.triggerNativeTextInput = true } label: {
+                Image(systemName: "keyboard")
             }
-            .toggleStyle(.button)
-            .tint(.purple)
-            .accessibilityLabel("Mathe-Erkennung")
+            .accessibilityLabel("Text per Tastatur eingeben")
 
-            // Handwriting recognition (manual)
-            Button {
-                // The Coordinator holds a weak ref to the VC; call through binding
-                vm.triggerHandwritingRecognition = true
+            // "Mehr" menu — consolidates less-used actions to keep toolbar compact in portrait
+            Menu {
+                Section("Ansicht") {
+                    Toggle(isOn: $vm.rulerActive) {
+                        Label("Lineal", systemImage: "ruler")
+                    }
+                    .tint(.brown)
+
+                    Toggle(isOn: $vm.shapeSnapEnabled) {
+                        Label(
+                            vm.shapeSnapEnabled ? "Formkorrektur aktiv" : "Formkorrektur",
+                            systemImage: vm.shapeSnapEnabled ? "skew" : "scribble"
+                        )
+                    }
+                    .tint(.orange)
+
+                    Toggle(isOn: $vm.darkDrawingMode) {
+                        Label(
+                            vm.darkDrawingMode ? "Hellmodus" : "Dunkelmodus",
+                            systemImage: vm.darkDrawingMode ? "moon.fill" : "moon"
+                        )
+                    }
+                    .tint(.indigo)
+
+                    Toggle(isOn: $vm.mathEnabled) {
+                        Label("Mathe-Erkennung", systemImage: "function")
+                    }
+                    .tint(.purple)
+                }
+
+                Section("Einfügen") {
+                    Button { vm.triggerAddStickyNote = true } label: {
+                        Label("Haftzettel", systemImage: "note.text.badge.plus")
+                    }
+                    Button { vm.triggerHandwritingRecognition = true } label: {
+                        Label("Handschrift erkennen", systemImage: "text.viewfinder")
+                    }
+                    Button { vm.showPDFPicker = true } label: {
+                        Label("PDF einfügen", systemImage: "doc.badge.plus")
+                    }
+                    Button { vm.showPlotter = true } label: {
+                        Label("Funktion einfügen", systemImage: "waveform.path.badge.plus")
+                    }
+
+                    // Diagrams submenu
+                    Menu {
+                        Button { vm.showPAP       = true } label: {
+                            Label("Programmablaufplan", systemImage: "arrow.triangle.branch")
+                        }
+                        Button { vm.showMindMap   = true } label: {
+                            Label("MindMap", systemImage: "brain")
+                        }
+                        Button { vm.showWhiteboard = true } label: {
+                            Label("Whiteboard", systemImage: "rectangle.and.pencil.and.ellipsis")
+                        }
+                    } label: {
+                        Label("Diagramm einfügen", systemImage: "plus.rectangle.on.rectangle")
+                    }
+                }
+
+                Section("Lesezeichen") {
+                    Button { vm.triggerAddBookmark   = true } label: {
+                        Label("Lesezeichen setzen", systemImage: "bookmark.badge.plus")
+                    }
+                    Button { vm.triggerShowBookmarks = true } label: {
+                        Label("Lesezeichen anzeigen", systemImage: "list.bullet")
+                    }
+                }
+
+                Section("Stift-Presets") {
+                    ForEach(InkPresetStore.shared.presets) { preset in
+                        Button { vm.pendingInkPreset = preset } label: {
+                            Label(preset.name, systemImage: "paintbrush.pointed")
+                        }
+                    }
+                }
+
+                Section {
+                    Button { vm.triggerExport = true } label: {
+                        Label("PDF exportieren", systemImage: "square.and.arrow.up")
+                    }
+                }
             } label: {
-                Image(systemName: "text.viewfinder")
+                Image(systemName: "ellipsis.circle")
             }
-            .accessibilityLabel("Handschrift erkennen")
-
-            // Insert PDF
-            Button { vm.showPDFPicker = true } label: {
-                Image(systemName: "doc.badge.plus")
-            }
-            .accessibilityLabel("PDF einfügen")
-
-            // Insert function plot
-            Button { vm.showPlotter = true } label: {
-                Image(systemName: "waveform.path.badge.plus")
-            }
-            .accessibilityLabel("Funktion einfügen")
+            .accessibilityLabel("Mehr")
         }
     }
 }

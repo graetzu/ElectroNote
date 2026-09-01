@@ -21,6 +21,18 @@
 		4E3B583F92A15CE6DFC00BDC /* NewItemSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32783332653099D32A9AF5DC /* NewItemSheet.swift */; };
 		52041CB99CB3369DA4876313 /* FileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27E0B214B0DA76663C68628A /* FileService.swift */; };
 		5D2A7C50AE76BB35D738F414 /* InfiniteNotebookHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ED6DFDF53E81863D619F52E /* InfiniteNotebookHostView.swift */; };
+		BB22CC33DD44EE55FF6677AA /* StickyNoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE55FF66 /* StickyNoteView.swift */; };
+		DD44EE55FF6677AA88BB99CC /* ShapeSnapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC33DD44EE55FF6677AA88BB /* ShapeSnapper.swift */; };
+		HSEL0000000000000000AABB /* HandwritingSelectionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = HSELREF000000000000AABB /* HandwritingSelectionOverlay.swift */; };
+		TIS00000000000000000AABB /* TextInsertionSheet.swift in Sources */   = {isa = PBXBuildFile; fileRef = TISREF0000000000000AABB /* TextInsertionSheet.swift */; };
+		TPO00000000000000000AABB /* TextPositionOverlay.swift in Sources */  = {isa = PBXBuildFile; fileRef = TPOREF0000000000000AABB /* TextPositionOverlay.swift */; };
+		NC01000000000000000000AA /* KeychainHelper.swift in Sources */        = {isa = PBXBuildFile; fileRef = NF01000000000000000000AA /* KeychainHelper.swift */; };
+		NC02000000000000000000BB /* NextcloudCredentials.swift in Sources */  = {isa = PBXBuildFile; fileRef = NF02000000000000000000BB /* NextcloudCredentials.swift */; };
+		NC03000000000000000000CC /* NextcloudLoginFlow.swift in Sources */    = {isa = PBXBuildFile; fileRef = NF03000000000000000000CC /* NextcloudLoginFlow.swift */; };
+		NC04000000000000000000DD /* WebDAVClient.swift in Sources */          = {isa = PBXBuildFile; fileRef = NF04000000000000000000DD /* WebDAVClient.swift */; };
+		NC05000000000000000000EE /* SyncEngine.swift in Sources */            = {isa = PBXBuildFile; fileRef = NF05000000000000000000EE /* SyncEngine.swift */; };
+		NC06000000000000000000FF /* SyncViewModel.swift in Sources */         = {isa = PBXBuildFile; fileRef = NF06000000000000000000FF /* SyncViewModel.swift */; };
+		NC07000000000000000011AA /* SyncSettingsView.swift in Sources */      = {isa = PBXBuildFile; fileRef = NF07000000000000000011AA /* SyncSettingsView.swift */; };
 		651FC4D19A67CB551F6D33F9 /* ClipArtItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 550B4D6EFBAA49AEF198BD00 /* ClipArtItem.swift */; };
 		6853B7DC43671FB8DCCE41B7 /* CanvasRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0C416F8DDF990A5CACFB1 /* CanvasRepresentable.swift */; };
 		6B34404C033A52E5FFC30BB0 /* StringExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62D31F1D9F3A88209557A8FA /* StringExtensions.swift */; };
@@ -43,7 +55,17 @@
 		E0435A3D716C72A2E6CED20E /* DocumentItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6CD3232753E95898315786A /* DocumentItem.swift */; };
 		E1C167E31091EAA02C1C4195 /* MathRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91BFC98A4E7A6536EB13675E /* MathRecognizer.swift */; };
 		EE901805CDD36F5A0C67BD6B /* PlotInserterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C2894B59718F39AE311147C /* PlotInserterView.swift */; };
+		EE11223344556677889900AA /* PAPDesignerView.swift in Sources */   = {isa = PBXBuildFile; fileRef = FF11223344556677889900AA /* PAPDesignerView.swift */; };
+		EE223344556677889900AABB /* MindMapDesignerView.swift in Sources */= {isa = PBXBuildFile; fileRef = FF223344556677889900AABB /* MindMapDesignerView.swift */; };
+		EE334455667788990011BBCC /* WhiteboardView.swift in Sources */     = {isa = PBXBuildFile; fileRef = FF334455667788990011BBCC /* WhiteboardView.swift */; };
+		EE445566778899001122CCDD /* InkPreset.swift in Sources */          = {isa = PBXBuildFile; fileRef = FF445566778899001122CCDD /* InkPreset.swift */; };
 		F62671E1B132D4DCA23233C8 /* PDFAnnotationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD50C0F7F3B150972A77A37 /* PDFAnnotationStore.swift */; };
+		IMB00001 /* ItemMetadataStore.swift in Sources */  = {isa = PBXBuildFile; fileRef = IMS00001 /* ItemMetadataStore.swift */; };
+		TRB00001 /* TrashManager.swift in Sources */        = {isa = PBXBuildFile; fileRef = TRM00001 /* TrashManager.swift */; };
+		TRVB0001 /* TrashView.swift in Sources */           = {isa = PBXBuildFile; fileRef = TRV00001 /* TrashView.swift */; };
+		TEVB0001 /* TagEditorView.swift in Sources */       = {isa = PBXBuildFile; fileRef = TEV00001 /* TagEditorView.swift */; };
+		TBVB0001 /* TagBrowserView.swift in Sources */      = {isa = PBXBuildFile; fileRef = TBV00001 /* TagBrowserView.swift */; };
+		DTPB0001 /* DocumentTypePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DTPV0001 /* DocumentTypePickerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -67,6 +89,22 @@
 		550B4D6EFBAA49AEF198BD00 /* ClipArtItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipArtItem.swift; sourceTree = "<group>"; };
 		59ED4D66AE57C9555BF8EA27 /* ClipArtPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipArtPickerView.swift; sourceTree = "<group>"; };
 		5ED6DFDF53E81863D619F52E /* InfiniteNotebookHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InfiniteNotebookHostView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE55FF66 /* StickyNoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickyNoteView.swift; sourceTree = "<group>"; };
+		HSELREF000000000000AABB /* HandwritingSelectionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandwritingSelectionOverlay.swift; sourceTree = "<group>"; };
+		TISREF0000000000000AABB /* TextInsertionSheet.swift */          = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInsertionSheet.swift;          sourceTree = "<group>"; };
+		TPOREF0000000000000AABB /* TextPositionOverlay.swift */         = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextPositionOverlay.swift;         sourceTree = "<group>"; };
+		CC33DD44EE55FF6677AA88BB /* ShapeSnapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShapeSnapper.swift; sourceTree = "<group>"; };
+		NF01000000000000000000AA /* KeychainHelper.swift */       = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift;       sourceTree = "<group>"; };
+		NF02000000000000000000BB /* NextcloudCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextcloudCredentials.swift; sourceTree = "<group>"; };
+		NF03000000000000000000CC /* NextcloudLoginFlow.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextcloudLoginFlow.swift;   sourceTree = "<group>"; };
+		NF04000000000000000000DD /* WebDAVClient.swift */         = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVClient.swift;         sourceTree = "<group>"; };
+		NF05000000000000000000EE /* SyncEngine.swift */           = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncEngine.swift;           sourceTree = "<group>"; };
+		NF06000000000000000000FF /* SyncViewModel.swift */        = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncViewModel.swift;        sourceTree = "<group>"; };
+		NF07000000000000000011AA /* SyncSettingsView.swift */     = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncSettingsView.swift;     sourceTree = "<group>"; };
+		FF11223344556677889900AA /* PAPDesignerView.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PAPDesignerView.swift;    sourceTree = "<group>"; };
+		FF223344556677889900AABB /* MindMapDesignerView.swift */= {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MindMapDesignerView.swift;sourceTree = "<group>"; };
+		FF334455667788990011BBCC /* WhiteboardView.swift */     = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhiteboardView.swift;     sourceTree = "<group>"; };
+		FF445566778899001122CCDD /* InkPreset.swift */          = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkPreset.swift;          sourceTree = "<group>"; };
 		62D31F1D9F3A88209557A8FA /* StringExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringExtensions.swift; sourceTree = "<group>"; };
 		6C28BF3980DEC9B21ED04A44 /* PDFRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFRepresentable.swift; sourceTree = "<group>"; };
 		80CDC982EBACCEE15FAE4926 /* NotebookDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookDocumentStore.swift; sourceTree = "<group>"; };
@@ -74,7 +112,7 @@
 		91BFC98A4E7A6536EB13675E /* MathRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathRecognizer.swift; sourceTree = "<group>"; };
 		999AB81BC1230D11890D3A1D /* FunctionPlotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FunctionPlotView.swift; sourceTree = "<group>"; };
 		99D40E20783F73B9C859E929 /* InfiniteNotebookViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InfiniteNotebookViewModel.swift; sourceTree = "<group>"; };
-		A9C4DA6FFDC80E0872587EDE /* ElectroNote.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ElectroNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A9C4DA6FFDC80E0872587EDE /* ElectroNote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ElectroNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B40DAF373C86F308143B9E66 /* BrowserSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserSidebarView.swift; sourceTree = "<group>"; };
 		B6CD3232753E95898315786A /* DocumentItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentItem.swift; sourceTree = "<group>"; };
 		C9D0C416F8DDF990A5CACFB1 /* CanvasRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasRepresentable.swift; sourceTree = "<group>"; };
@@ -86,6 +124,12 @@
 		F71675B192ED20A8660D1CFD /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		FA7EFC8F475EEF3D3EA5C982 /* ClipArtViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipArtViewModel.swift; sourceTree = "<group>"; };
 		FCE9A6172774779B2D5D359F /* PDFViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFViewModel.swift; sourceTree = "<group>"; };
+		IMS00001 /* ItemMetadataStore.swift */  = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemMetadataStore.swift;  sourceTree = "<group>"; };
+		TRM00001 /* TrashManager.swift */        = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashManager.swift;        sourceTree = "<group>"; };
+		TRV00001 /* TrashView.swift */           = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift;           sourceTree = "<group>"; };
+		TEV00001 /* TagEditorView.swift */       = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagEditorView.swift;       sourceTree = "<group>"; };
+		TBV00001 /* TagBrowserView.swift */      = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagBrowserView.swift;      sourceTree = "<group>"; };
+		DTPV0001 /* DocumentTypePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentTypePickerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -118,6 +162,7 @@
 			isa = PBXGroup;
 			children = (
 				D9BCFF51AB3E1FB43D3AD37A /* NotebookDocument.swift */,
+				FF445566778899001122CCDD /* InkPreset.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -129,6 +174,10 @@
 				B40DAF373C86F308143B9E66 /* BrowserSidebarView.swift */,
 				32783332653099D32A9AF5DC /* NewItemSheet.swift */,
 				522009BCC10C02F2DB79AEAA /* WelcomeView.swift */,
+				TRV00001 /* TrashView.swift */,
+				TEV00001 /* TagEditorView.swift */,
+				TBV00001 /* TagBrowserView.swift */,
+				DTPV0001 /* DocumentTypePickerView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -244,12 +293,31 @@
 			children = (
 				BBD0CDA5FBA2591A1DAE2D88 /* Browser */,
 				99C03272EA543ED2486DB859 /* Canvas */,
+				AA99887766554433221100FF /* Diagram */,
 				F6BEB72D90499D167F135E67 /* Cliparts */,
 				1BB17763B84C99A6F6EFFB81 /* Math */,
 				CD1D55C0BF42459031CA510E /* PDFViewer */,
 				E444F98B1D4EA227548C3F18 /* Sync */,
+				BB99887766554433221100FF /* Whiteboard */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		AA99887766554433221100FF /* Diagram */ = {
+			isa = PBXGroup;
+			children = (
+				FF11223344556677889900AA /* PAPDesignerView.swift */,
+				FF223344556677889900AABB /* MindMapDesignerView.swift */,
+			);
+			path = Diagram;
+			sourceTree = "<group>";
+		};
+		BB99887766554433221100FF /* Whiteboard */ = {
+			isa = PBXGroup;
+			children = (
+				FF334455667788990011BBCC /* WhiteboardView.swift */,
+			);
+			path = Whiteboard;
 			sourceTree = "<group>";
 		};
 		B703C253717FB93E93E229A9 /* Core */ = {
@@ -286,6 +354,9 @@
 				27E0B214B0DA76663C68628A /* FileService.swift */,
 				44D12FD4A694A24861F79273 /* MathEvaluator.swift */,
 				91BFC98A4E7A6536EB13675E /* MathRecognizer.swift */,
+				NF01000000000000000000AA /* KeychainHelper.swift */,
+				IMS00001 /* ItemMetadataStore.swift */,
+				TRM00001 /* TrashManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -330,8 +401,38 @@
 		E444F98B1D4EA227548C3F18 /* Sync */ = {
 			isa = PBXGroup;
 			children = (
+				NCSYNC01000000000000AABB /* Models */,
+				NCSYNC02000000000000BBCC /* ViewModels */,
+				NCSYNC03000000000000CCDD /* Views */,
+				NF03000000000000000000CC /* NextcloudLoginFlow.swift */,
+				NF04000000000000000000DD /* WebDAVClient.swift */,
+				NF05000000000000000000EE /* SyncEngine.swift */,
 			);
 			path = Sync;
+			sourceTree = "<group>";
+		};
+		NCSYNC01000000000000AABB /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				NF02000000000000000000BB /* NextcloudCredentials.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		NCSYNC02000000000000BBCC /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				NF06000000000000000000FF /* SyncViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		NCSYNC03000000000000CCDD /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				NF07000000000000000011AA /* SyncSettingsView.swift */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 		F6BEB72D90499D167F135E67 /* Cliparts */ = {
@@ -361,6 +462,11 @@
 				5ED6DFDF53E81863D619F52E /* InfiniteNotebookHostView.swift */,
 				5394F3D6AC1E80E2D1ABF5C2 /* InfiniteNotebookRepresentable.swift */,
 				523001FAD465C034DBF85C71 /* InfiniteNotebookViewController.swift */,
+				AA11BB22CC33DD44EE55FF66 /* StickyNoteView.swift */,
+				CC33DD44EE55FF6677AA88BB /* ShapeSnapper.swift */,
+				HSELREF000000000000AABB /* HandwritingSelectionOverlay.swift */,
+				TISREF0000000000000AABB /* TextInsertionSheet.swift */,
+				TPOREF0000000000000AABB /* TextPositionOverlay.swift */,
 				8C2894B59718F39AE311147C /* PlotInserterView.swift */,
 			);
 			path = Views;
@@ -405,7 +511,6 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					338BC1BFEE6FB1D81317286D = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -465,6 +570,8 @@
 				5D2A7C50AE76BB35D738F414 /* InfiniteNotebookHostView.swift in Sources */,
 				736F233BA5DD186CE6927DEA /* InfiniteNotebookRepresentable.swift in Sources */,
 				2E545FA27E937E1271FF28BD /* InfiniteNotebookViewController.swift in Sources */,
+				BB22CC33DD44EE55FF6677AA /* StickyNoteView.swift in Sources */,
+				DD44EE55FF6677AA88BB99CC /* ShapeSnapper.swift in Sources */,
 				B9754B80D8D2AA7CBD7394B3 /* InfiniteNotebookViewModel.swift in Sources */,
 				A06A0DF3F2E57C35DC8C7F6C /* MathEvaluator.swift in Sources */,
 				96BC9A9E72085C048BF30B4C /* MathPanelView.swift in Sources */,
@@ -481,6 +588,26 @@
 				EE901805CDD36F5A0C67BD6B /* PlotInserterView.swift in Sources */,
 				6B34404C033A52E5FFC30BB0 /* StringExtensions.swift in Sources */,
 				B7816E0DA26C5D00B978C436 /* WelcomeView.swift in Sources */,
+				EE11223344556677889900AA /* PAPDesignerView.swift in Sources */,
+				EE223344556677889900AABB /* MindMapDesignerView.swift in Sources */,
+				EE334455667788990011BBCC /* WhiteboardView.swift in Sources */,
+				EE445566778899001122CCDD /* InkPreset.swift in Sources */,
+				HSEL0000000000000000AABB /* HandwritingSelectionOverlay.swift in Sources */,
+				TIS00000000000000000AABB /* TextInsertionSheet.swift in Sources */,
+				TPO00000000000000000AABB /* TextPositionOverlay.swift in Sources */,
+				NC01000000000000000000AA /* KeychainHelper.swift in Sources */,
+				NC02000000000000000000BB /* NextcloudCredentials.swift in Sources */,
+				NC03000000000000000000CC /* NextcloudLoginFlow.swift in Sources */,
+				NC04000000000000000000DD /* WebDAVClient.swift in Sources */,
+				NC05000000000000000000EE /* SyncEngine.swift in Sources */,
+				NC06000000000000000000FF /* SyncViewModel.swift in Sources */,
+				NC07000000000000000011AA /* SyncSettingsView.swift in Sources */,
+				IMB00001 /* ItemMetadataStore.swift in Sources */,
+				TRB00001 /* TrashManager.swift in Sources */,
+				TRVB0001 /* TrashView.swift in Sources */,
+				TEVB0001 /* TagEditorView.swift in Sources */,
+				TBVB0001 /* TagBrowserView.swift in Sources */,
+				DTPB0001 /* DocumentTypePickerView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -493,7 +620,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = PFPJHZQH4E;
 				INFOPLIST_FILE = ElectroNote/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -512,7 +639,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = PFPJHZQH4E;
 				INFOPLIST_FILE = ElectroNote/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (

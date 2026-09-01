@@ -5,6 +5,7 @@ protocol FileServiceProtocol: AnyObject {
     func listItems(at url: URL) -> [DocumentItem]
     func createFolder(named name: String, at url: URL) throws -> DocumentItem
     func createNote(named name: String, at url: URL) throws -> DocumentItem
+    func createDocument(named name: String, type: DocumentType, at url: URL) throws -> DocumentItem
     func rename(item: DocumentItem, to newName: String) throws -> DocumentItem
     func move(item: DocumentItem, to destination: URL) throws -> DocumentItem
     func delete(item: DocumentItem) throws
@@ -41,6 +42,15 @@ final class FileService: FileServiceProtocol {
             if isDir && filename.hasSuffix(".enote") {
                 type = .note
                 displayName = String(filename.dropLast(".enote".count))
+            } else if isDir && filename.hasSuffix(".epap") {
+                type = .pap
+                displayName = String(filename.dropLast(".epap".count))
+            } else if isDir && filename.hasSuffix(".ewb") {
+                type = .whiteboard
+                displayName = String(filename.dropLast(".ewb".count))
+            } else if isDir && filename.hasSuffix(".emm") {
+                type = .mindmap
+                displayName = String(filename.dropLast(".emm".count))
             } else if isDir {
                 type = .folder
                 displayName = filename
@@ -73,20 +83,28 @@ final class FileService: FileServiceProtocol {
     }
 
     func createNote(named name: String, at url: URL) throws -> DocumentItem {
-        let dest = uniqueURL(base: name, ext: "enote", isDir: true, in: url)
+        try createDocument(named: name, type: .notebook, at: url)
+    }
+
+    func createDocument(named name: String, type: DocumentType, at url: URL) throws -> DocumentItem {
+        let ext  = type.fileExtension
+        let dest = uniqueURL(base: name, ext: ext, isDir: true, in: url)
         try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: false)
         let metadata = NoteMetadata(title: name, createdAt: Date())
         let data = try JSONEncoder().encode(metadata)
         try data.write(to: dest.appendingPathComponent("metadata.json"))
-        return makeItem(at: dest, name: name, type: .note)
+        return makeItem(at: dest, name: name, type: type.itemType)
     }
 
     func rename(item: DocumentItem, to newName: String) throws -> DocumentItem {
         let suffix: String
         switch item.type {
-        case .note:   suffix = ".enote"
-        case .pdf:    suffix = ".pdf"
-        case .folder: suffix = ""
+        case .note:       suffix = ".enote"
+        case .pap:        suffix = ".epap"
+        case .whiteboard: suffix = ".ewb"
+        case .mindmap:    suffix = ".emm"
+        case .pdf:        suffix = ".pdf"
+        case .folder:     suffix = ""
         }
         let dest = item.path.deletingLastPathComponent()
             .appendingPathComponent(newName + suffix)

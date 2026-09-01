@@ -6,15 +6,20 @@ final class BrowserViewModel: ObservableObject {
     @Published var currentPath: URL
     @Published var error: String?
 
-    private let fileService: FileServiceProtocol
+    private(set) var fileService: FileServiceProtocol
     private var navStack: [URL] = []
+
+    let metaStore = ItemMetadataStore.shared
 
     var isAtRoot: Bool { currentPath == fileService.rootURL }
     var currentFolderName: String { isAtRoot ? "ElectroNote" : currentPath.lastPathComponent }
+    var rootURL: URL { fileService.rootURL }
 
     init(fileService: FileServiceProtocol = FileService()) {
         self.fileService = fileService
         self.currentPath = fileService.rootURL
+        metaStore.configure(rootURL: fileService.rootURL)
+        TrashManager.shared.configure(rootURL: fileService.rootURL)
         loadItems()
     }
 
@@ -43,9 +48,13 @@ final class BrowserViewModel: ObservableObject {
     }
 
     func createNote(named name: String) {
+        createDocument(named: name, type: .notebook)
+    }
+
+    func createDocument(named name: String, type: DocumentType) {
         guard !name.isEmpty else { return }
         do {
-            _ = try fileService.createNote(named: name, at: currentPath)
+            _ = try fileService.createDocument(named: name, type: type, at: currentPath)
             loadItems()
         } catch { self.error = error.localizedDescription }
     }
@@ -67,9 +76,58 @@ final class BrowserViewModel: ObservableObject {
 
     func delete(_ items: [DocumentItem]) {
         for item in items {
-            do { try fileService.delete(item: item) }
-            catch { self.error = error.localizedDescription }
+            do {
+                try TrashManager.shared.moveToTrash(item: item, rootURL: fileService.rootURL)
+            } catch {
+                // Fall back to permanent delete if trash fails
+                do { try fileService.delete(item: item) }
+                catch { self.error = error.localizedDescription }
+            }
         }
         loadItems()
+    }
+
+    // MARK: - Cross-folder navigation
+
+    /// Navigates to the item at `relPath` (relative to rootURL) and returns it for selection.
+    /// Intermediate folder components are navigated automatically.
+    @discardableResult
+    func navigateTo(relPath: String) -> DocumentItem? {
+        let components = relPath.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard !components.isEmpty else { return nil }
+
+        // Reset to root
+        navStack.removeAll()
+        currentPath = fileService.rootURL
+        loadItems()
+
+        // Walk into each folder until we reach the parent of the target
+        for folder in components.dropLast() {
+            guard let folderItem = items.first(where: { $0.name == folder && $0.isFolder }) else { return nil }
+            navStack.append(currentPath)
+            currentPath = folderItem.path
+            loadItems()
+        }
+
+        let targetName = components.last!
+        return items.first(where: { $0.path.lastPathComponent == targetName })
+    }
+
+    // MARK: - Favorites
+
+    func relPath(for item: DocumentItem) -> String {
+        let rootPath = fileService.rootURL.path
+        let itemPath = item.path.path
+        guard itemPath.hasPrefix(rootPath) else { return item.path.lastPathComponent }
+        let dropped = itemPath.dropFirst(rootPath.count)
+        return dropped.hasPrefix("/") ? String(dropped.dropFirst()) : String(dropped)
+    }
+
+    func isFavorite(_ item: DocumentItem) -> Bool {
+        metaStore.isFavorite(relPath(for: item))
+    }
+
+    func toggleFavorite(_ item: DocumentItem) {
+        metaStore.toggleFavorite(relPath(for: item))
     }
 }

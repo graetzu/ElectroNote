@@ -3,6 +3,10 @@ import PencilKit
 import PDFKit
 import Vision
 
+extension Notification.Name {
+    static let electroNoteDrawingBegan = Notification.Name("ElectroNote.DrawingBegan")
+}
+
 // MARK: - Main
 
 final class InfiniteNotebookViewController: UIViewController {
@@ -15,13 +19,29 @@ final class InfiniteNotebookViewController: UIViewController {
     let toolPicker  = PKToolPicker()
 
     // MARK: - Content layers (below the PencilKit Metal layer)
+    private var backgroundLayer = CALayer()
     private var pdfLayers:   [CALayer] = []
     private var imageLayers: [CALayer] = []
 
-    // MARK: - Math/handwriting result labels (above canvas, in scroll space)
-    private var resultLabels: [UILabel] = []
-    private var scanTask:     Task<Void, Never>?
-    private let evaluator  =  MathEvaluator()
+    // MARK: - Sticky notes (UIView overlays positioned via KVO on scroll/zoom)
+    private var stickyNoteViews: [UUID: StickyNoteView] = [:]
+    private var scrollKVOObservers: [NSKeyValueObservation] = []
+
+    // MARK: - Recognition banner (lives in self.view, fully outside PencilKit)
+    private var bannerView: RecognitionBannerView?
+    private var bannerDismissTask: Task<Void, Never>?
+    private var lastScanRect: CGRect = .null
+    private var lastScanItems: [RecognitionBannerView.Item] = []
+
+    // MARK: - Math / handwriting
+    private var scanTask: Task<Void, Never>?
+    private var selectionOverlay: HandwritingSelectionOverlay?
+    private let evaluator = MathEvaluator()
+
+    // MARK: - Native text input
+    private var nativeTextView: UITextView?
+    private var nativeTextContentOrigin: CGPoint = .zero
+    private lazy var nativeTextDelegate = NativeTextViewDelegate(vc: self)
 
     // MARK: - State
     private(set) var document = NotebookDocument()
@@ -34,31 +54,58 @@ final class InfiniteNotebookViewController: UIViewController {
     // MARK: - Configurable
 
     var pencilOnly: Bool = true {
-        didSet { canvasView.drawingPolicy = pencilOnly ? .pencilOnly : .anyInput }
+        didSet { applyDrawingPolicy() }
+    }
+
+    private func applyDrawingPolicy() {
+        canvasView.drawingPolicy = pencilOnly ? .pencilOnly : .anyInput
+        // In pencil-only mode require 2 fingers to scroll — prevents palm from panning
+        canvasView.panGestureRecognizer.minimumNumberOfTouches = pencilOnly ? 2 : 1
     }
 
     var mathEnabled: Bool {
         get { document.mathEnabled }
-        set { document.mathEnabled = newValue; if !newValue { clearResultLabels() } }
+        set { document.mathEnabled = newValue; if !newValue { hideBanner() } }
     }
+
+    var shapeSnapEnabled: Bool {
+        get { document.shapeSnapEnabled }
+        set { document.shapeSnapEnabled = newValue; store?.saveDocument(document) }
+    }
+    private var isSnappingShape = false
+    private var shapeSnapTask: Task<Void, Never>?
 
     var background: BackgroundStyle {
         get { document.background }
-        set { document.background = newValue; applyBackground(newValue); store?.saveDocument(document) }
+        set { document.background = newValue; refreshBackground(); store?.saveDocument(document) }
+    }
+
+    var lineSpacing: LineSpacing {
+        get { document.lineSpacing }
+        set { document.lineSpacing = newValue; refreshBackground(); store?.saveDocument(document) }
+    }
+
+    var darkDrawingMode: Bool {
+        get { document.darkDrawingMode }
+        set {
+            document.darkDrawingMode = newValue
+            canvasView.overrideUserInterfaceStyle = newValue ? .dark : .light
+            refreshBackground()
+            store?.saveDocument(document)
+        }
     }
 
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemGroupedBackground
+        view.backgroundColor = .systemGray5
         setupCanvas()
         setupToolPicker()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // Update canvas frame to fill view
         if canvasView.frame != view.bounds {
             canvasView.frame = view.bounds
         }
@@ -71,6 +118,7 @@ final class InfiniteNotebookViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         canvasView.becomeFirstResponder()
+        applyDrawingPolicy()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -83,17 +131,31 @@ final class InfiniteNotebookViewController: UIViewController {
     private func setupCanvas() {
         canvasView.frame = view.bounds
         canvasView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        // Let PKCanvasView manage its own scrolling and zooming natively
         canvasView.minimumZoomScale = 0.25
         canvasView.maximumZoomScale = 8.0
         canvasView.drawingPolicy   = .pencilOnly
+        canvasView.backgroundColor = .systemGray6  // solid base prevents black Metal tiles
         canvasView.delegate        = self
+        // 2-finger scroll in pencilOnly mode — prevents single palm touch from panning
+        canvasView.panGestureRecognizer.minimumNumberOfTouches = 2
         view.addSubview(canvasView)
+        setupScrollKVO()
+    }
+
+    private func setupScrollKVO() {
+        let o1 = canvasView.observe(\.contentOffset, options: .new) { [weak self] _, _ in
+            self?.repositionStickyNotes()
+        }
+        let o2 = canvasView.observe(\.zoomScale, options: .new) { [weak self] _, _ in
+            self?.repositionStickyNotes()
+        }
+        scrollKVOObservers = [o1, o2]
     }
 
     private func setupToolPicker() {
         toolPicker.setVisible(true, forFirstResponder: canvasView)
         toolPicker.addObserver(canvasView)
+        toolPicker.addObserver(self)
     }
 
     // MARK: - Load
@@ -101,30 +163,56 @@ final class InfiniteNotebookViewController: UIViewController {
     private func loadDocument() {
         guard store != nil else { return }
         document = store.loadDocument()
-        applyBackground(document.background)
         canvasView.drawing = store.loadDrawing()
 
-        // Extend content area if the stored height is larger than the loaded drawing
-        let h = max(document.documentHeight,
-                    canvasView.drawing.bounds.maxY + Self.initialHeight * 0.5)
+        let drawingMaxY = canvasView.drawing.bounds.isNull ? 0 : canvasView.drawing.bounds.maxY
+        let h = max(document.documentHeight, drawingMaxY + Self.initialHeight * 0.5)
         canvasView.contentSize = CGSize(width: view.bounds.width, height: h)
+
+        canvasView.overrideUserInterfaceStyle = document.darkDrawingMode ? .dark : .light
+        setupBackgroundLayer()
+        refreshBackground()
 
         document.insertedPDFs.forEach   { loadPDFEntry($0) }
         document.insertedImages.forEach { loadImageEntry($0) }
+        document.stickyNotes.forEach    { mountStickyNoteView($0) }
+
     }
 
     // MARK: - Background
 
-    private func applyBackground(_ style: BackgroundStyle) {
-        canvasView.backgroundColor = UIColor(patternImage: makePattern(style))
+    private func setupBackgroundLayer() {
+        backgroundLayer.frame = CGRect(origin: .zero, size: canvasView.contentSize)
+        if backgroundLayer.superlayer == nil {
+            canvasView.layer.insertSublayer(backgroundLayer, at: 0)
+        }
     }
 
-    private func makePattern(_ style: BackgroundStyle) -> UIImage {
+    // Called whenever background style or dark mode changes
+    private func refreshBackground() {
+        let dark = document.darkDrawingMode
+        let bg   = dark ? UIColor(white: 0.12, alpha: 1) : UIColor.white
+        let line = dark ? UIColor(white: 0.30, alpha: 1) : UIColor.systemGray4
+        let pattern = UIColor(patternImage: makePattern(document.background, bg: bg, line: line))
+        // PKCanvasView renders its Metal layer using canvasView.backgroundColor as the paper color.
+        // Sublayers inserted below the Metal layer are hidden by it, so the pattern must go here.
+        canvasView.backgroundColor = pattern
+        // Keep backgroundLayer in sync for PDF export rendering (backgroundLayer.render(in:)).
+        backgroundLayer.backgroundColor = pattern.cgColor
+    }
+
+    private func updateBackgroundFrame() {
+        backgroundLayer.frame = CGRect(origin: .zero, size: canvasView.contentSize)
+    }
+
+    private func makePattern(_ style: BackgroundStyle, bg: UIColor, line: UIColor) -> UIImage {
+        let sp = document.lineSpacing.points
         switch style {
-        case .blank:  return solidColor(.white)
-        case .lined:  return linedImage()
-        case .grid:   return gridImage()
-        case .dotted: return dottedImage()
+        case .blank:   return solidColor(bg)
+        case .lined:   return linedImage(spacing: sp, bg: bg, line: line)
+        case .grid:    return gridImage(spacing: sp, bg: bg, line: line)
+        case .dotted:  return dottedImage(spacing: sp, bg: bg, dot: line)
+        case .cornell: return cornellImage(spacing: sp, bg: bg, line: line)
         }
     }
 
@@ -134,23 +222,23 @@ final class InfiniteNotebookViewController: UIViewController {
         }
     }
 
-    private func gridImage() -> UIImage {
-        let s: CGFloat = 28
+    private func gridImage(spacing: CGFloat, bg: UIColor, line: UIColor) -> UIImage {
+        let s = spacing
         return UIGraphicsImageRenderer(size: CGSize(width: s, height: s)).image { ctx in
-            UIColor.white.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
-            UIColor.systemGray4.setStroke()
+            bg.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
+            line.setStroke()
             ctx.cgContext.setLineWidth(0.5)
-            ctx.cgContext.move(to: CGPoint(x: s, y: 0));  ctx.cgContext.addLine(to: CGPoint(x: s, y: s))
-            ctx.cgContext.move(to: CGPoint(x: 0, y: s));  ctx.cgContext.addLine(to: CGPoint(x: s, y: s))
+            ctx.cgContext.move(to: CGPoint(x: s, y: 0)); ctx.cgContext.addLine(to: CGPoint(x: s, y: s))
+            ctx.cgContext.move(to: CGPoint(x: 0, y: s)); ctx.cgContext.addLine(to: CGPoint(x: s, y: s))
             ctx.cgContext.strokePath()
         }
     }
 
-    private func linedImage() -> UIImage {
-        let s: CGFloat = 32
+    private func linedImage(spacing: CGFloat, bg: UIColor, line: UIColor) -> UIImage {
+        let s = spacing
         return UIGraphicsImageRenderer(size: CGSize(width: 20, height: s)).image { ctx in
-            UIColor.white.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 20, height: s))
-            UIColor.systemBlue.withAlphaComponent(0.2).setStroke()
+            bg.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 20, height: s))
+            line.withAlphaComponent(0.6).setStroke()
             ctx.cgContext.setLineWidth(0.5)
             ctx.cgContext.move(to: CGPoint(x: 0, y: s - 0.5))
             ctx.cgContext.addLine(to: CGPoint(x: 20, y: s - 0.5))
@@ -158,25 +246,62 @@ final class InfiniteNotebookViewController: UIViewController {
         }
     }
 
-    private func dottedImage() -> UIImage {
-        let s: CGFloat = 26
+    private func dottedImage(spacing: CGFloat, bg: UIColor, dot: UIColor) -> UIImage {
+        let s = spacing
         return UIGraphicsImageRenderer(size: CGSize(width: s, height: s)).image { ctx in
-            UIColor.white.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
-            UIColor.systemGray3.setFill()
+            bg.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
+            dot.setFill()
             ctx.cgContext.addEllipse(in: CGRect(x: s - 1.5, y: s - 1.5, width: 2.5, height: 2.5))
             ctx.cgContext.fillPath()
+        }
+    }
+
+    private func cornellImage(spacing: CGFloat, bg: UIColor, line: UIColor) -> UIImage {
+        // Full-page tile so each A4 section shows the Cornell layout
+        let w = NotebookDocument.pageWidth
+        let h = NotebookDocument.pageHeight
+        let cueCol: CGFloat  = 175  // left cue/keywords column width
+        let summaryH: CGFloat = 160 // summary strip at page bottom
+
+        return UIGraphicsImageRenderer(size: CGSize(width: w, height: h)).image { ctx in
+            bg.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+
+            // Strong structural lines
+            line.setStroke()
+            ctx.cgContext.setLineWidth(1.0)
+            // Vertical divider (cue | notes)
+            ctx.cgContext.move(to: CGPoint(x: cueCol, y: 0))
+            ctx.cgContext.addLine(to: CGPoint(x: cueCol, y: h - summaryH))
+            // Horizontal divider (notes | summary)
+            ctx.cgContext.move(to: CGPoint(x: 0, y: h - summaryH))
+            ctx.cgContext.addLine(to: CGPoint(x: w, y: h - summaryH))
+            ctx.cgContext.strokePath()
+
+            // Ruled lines across full width (subtle)
+            line.withAlphaComponent(0.3).setStroke()
+            ctx.cgContext.setLineWidth(0.5)
+            var y: CGFloat = spacing
+            while y < h - summaryH {
+                ctx.cgContext.move(to: CGPoint(x: 0, y: y))
+                ctx.cgContext.addLine(to: CGPoint(x: w, y: y))
+                y += spacing
+            }
+            ctx.cgContext.strokePath()
         }
     }
 
     // MARK: - Auto-extend
 
     private func extendIfNeeded() {
-        let needed = canvasView.drawing.bounds.maxY + Self.initialHeight * 0.3
+        let rawMaxY = canvasView.drawing.bounds.isNull ? 0 : canvasView.drawing.bounds.maxY
+        let needed = rawMaxY + Self.initialHeight * 0.3
         guard needed > canvasView.contentSize.height else { return }
         let newH = needed + Self.initialHeight * 0.5
         canvasView.contentSize.height = newH
+        updateBackgroundFrame()
         document.documentHeight = newH
-        store?.saveDocument(document)
+        // Document height persisted by the ViewModel autosave timer — no immediate write needed here
     }
 
     // MARK: - Save
@@ -214,6 +339,7 @@ extension InfiniteNotebookViewController {
         let needed = y + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height {
             canvasView.contentSize.height = needed
+            updateBackgroundFrame()
         }
 
         let entry = InsertedPDF(id: UUID(), filename: filename, startY: startY, pageHeights: heights)
@@ -240,6 +366,7 @@ extension InfiniteNotebookViewController {
         let needed = startY + h + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height {
             canvasView.contentSize.height = needed
+            updateBackgroundFrame()
         }
 
         let entry = InsertedImage(id: UUID(), filename: filename,
@@ -265,7 +392,8 @@ extension InfiniteNotebookViewController {
     private func loadImageEntry(_ entry: InsertedImage) {
         guard let img = UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) else { return }
         let layer = makeImageLayer(image: img,
-                                   frame: CGRect(x: 0, y: entry.startY, width: entry.width, height: entry.height))
+                                   frame: CGRect(x: entry.startX, y: entry.startY,
+                                                 width: entry.width, height: entry.height))
         insertBelowDrawing(layer)
         imageLayers.append(layer)
     }
@@ -314,13 +442,19 @@ extension InfiniteNotebookViewController {
         return layer
     }
 
-    // Insert a CALayer below PencilKit's Metal drawing layer
     private func insertBelowDrawing(_ layer: CALayer) {
-        canvasView.layer.insertSublayer(layer, at: 0)
+        // Find the PencilKit Metal layer (always the topmost sublayer) and insert just below it.
+        // This keeps content layers visible while the ink layer stays on top.
+        let sublayers = canvasView.layer.sublayers ?? []
+        if sublayers.count > 1, let ref = sublayers.last {
+            canvasView.layer.insertSublayer(layer, below: ref)
+        } else {
+            canvasView.layer.addSublayer(layer)
+        }
     }
 
     private func nextInsertY() -> CGFloat {
-        let drawingBottom = canvasView.drawing.bounds.maxY
+        let drawingBottom = canvasView.drawing.bounds.isNull ? 0 : canvasView.drawing.bounds.maxY
         let pdfBottom     = document.insertedPDFs.last?.endY ?? 0
         let imgBottom     = document.insertedImages.last.map { $0.startY + $0.height } ?? 0
         let visBottom     = canvasView.contentOffset.y + canvasView.bounds.height
@@ -343,48 +477,131 @@ extension InfiniteNotebookViewController {
     }
 
     func recogniseHandwriting() {
-        Task { [weak self] in await self?.performScan(mathOnly: false) }
+        showSelectionOverlay()
+    }
+
+    // MARK: - Selection overlay
+
+    private func showSelectionOverlay() {
+        let overlay = HandwritingSelectionOverlay()
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(overlay)
+        NSLayoutConstraint.activate([
+            overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            overlay.topAnchor.constraint(equalTo: view.topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        selectionOverlay = overlay
+
+        overlay.onCancel = { [weak self, weak overlay] in
+            overlay?.removeFromSuperview()
+            self?.selectionOverlay = nil
+        }
+        overlay.onRegionSelected = { [weak self, weak overlay] viewRect in
+            overlay?.removeFromSuperview()
+            self?.selectionOverlay = nil
+            guard let self else { return }
+
+            // Convert overlay view rect → canvas content coordinates
+            let scale  = self.canvasView.zoomScale
+            let offset = self.canvasView.contentOffset
+            let contentRect = CGRect(
+                x: (viewRect.minX + offset.x) / scale,
+                y: (viewRect.minY + offset.y) / scale,
+                width:  viewRect.width  / scale,
+                height: viewRect.height / scale
+            )
+            Task { await self.recogniseInRegion(contentRect: contentRect) }
+        }
+
+        overlay.alpha = 0
+        UIView.animate(withDuration: 0.2) { overlay.alpha = 1 }
+    }
+
+    @MainActor
+    private func recogniseInRegion(contentRect: CGRect) async {
+        guard let composite = compositeVisible(rect: contentRect, drawing: canvasView.drawing) else { return }
+
+        // Spinner while recognising
+        let spinner = UIActivityIndicatorView(style: .large)
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+        ])
+        spinner.startAnimating()
+
+        let obs = await runVision(on: composite)
+        spinner.removeFromSuperview()
+
+        let items: [RecognitionBannerView.Item] = obs.compactMap {
+            guard let text = $0.topCandidates(1).first?.string, !text.isEmpty else { return nil }
+            return .init(label: text, copyText: text)
+        }
+
+        guard !items.isEmpty else {
+            let alert = UIAlertController(title: "Nichts erkannt",
+                                          message: "Im ausgewählten Bereich wurde keine Handschrift gefunden.",
+                                          preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return
+        }
+
+        lastScanItems = items
+        lastScanRect  = contentRect
+        showBanner(items: items, scanRect: contentRect)
     }
 
     @MainActor
     private func performScan(mathOnly: Bool) async {
-        let scale     = canvasView.zoomScale
-        let visible   = CGRect(
-            x: canvasView.contentOffset.x / scale,
-            y: canvasView.contentOffset.y / scale,
-            width:  canvasView.bounds.width  / scale,
-            height: canvasView.bounds.height / scale
-        )
         let drawing = canvasView.drawing
-        guard !drawing.strokes.filter({ $0.renderBounds.intersects(visible) }).isEmpty else { return }
 
-        guard let composite = compositeVisible(rect: visible, drawing: drawing) else { return }
+        let scanRect: CGRect
+        if mathOnly {
+            let scale = canvasView.zoomScale
+            let visible = CGRect(
+                x: canvasView.contentOffset.x / scale,
+                y: canvasView.contentOffset.y / scale,
+                width:  canvasView.bounds.width  / scale,
+                height: canvasView.bounds.height / scale
+            )
+            guard drawing.strokes.contains(where: { $0.renderBounds.intersects(visible) }) else { return }
+            scanRect = visible
+        } else {
+            let b = drawing.bounds
+            guard !b.isNull, b.width > 0, b.height > 0 else { return }
+            scanRect = b.insetBy(dx: -30, dy: -30)
+        }
+
+        guard let composite = compositeVisible(rect: scanRect, drawing: drawing) else { return }
         let obs = await runVision(on: composite)
         guard !obs.isEmpty else { return }
 
-        clearResultLabels()
+        var items: [RecognitionBannerView.Item] = []
 
         for o in obs {
             guard let text = o.topCandidates(1).first?.string, !text.isEmpty else { continue }
-
-            let vb   = o.boundingBox  // normalized, Y from bottom
-            let docX = visible.minX + vb.minX * visible.width
-            let docY = visible.minY + (1 - vb.maxY) * visible.height
-            let docH = vb.height * visible.height
-
             if mathOnly {
                 let expr = leftOfEquals(text)
                 guard looksLikeMath(expr), case .success(let v) = evaluator.evaluate(expr) else { continue }
-                addResultLabel("= \(fmt(v))", at: CGPoint(x: docX, y: docY + docH + 4), color: .systemBlue)
+                items.append(.init(label: "\(text) = \(fmt(v))", copyText: fmt(v)))
             } else {
-                addResultLabel(text, at: CGPoint(x: docX, y: docY + docH + 4), color: .systemGreen)
+                items.append(.init(label: text, copyText: text))
             }
         }
+
+        guard !items.isEmpty else { return }
+        lastScanItems = items
+        lastScanRect  = scanRect
+        showBanner(items: items, scanRect: scanRect)
     }
 
     private func compositeVisible(rect: CGRect, drawing: PKDrawing) -> UIImage? {
         guard rect.width > 0, rect.height > 0 else { return nil }
-        let sc:  CGFloat = 1.5
+        let sc: CGFloat = min(1.5, 1200.0 / max(rect.width, rect.height))
         let size = CGSize(width: rect.width * sc, height: rect.height * sc)
         let ink  = drawing.image(from: rect, scale: sc)
         return UIGraphicsImageRenderer(size: size).image { ctx in
@@ -396,44 +613,76 @@ extension InfiniteNotebookViewController {
     private func runVision(on image: UIImage) async -> [VNRecognizedTextObservation] {
         guard let cg = image.cgImage else { return [] }
         return await withCheckedContinuation { cont in
-            let req = VNRecognizeTextRequest { r, _ in
-                cont.resume(returning: (r.results as? [VNRecognizedTextObservation]) ?? [])
-            }
-            req.recognitionLevel = .accurate
-            req.usesLanguageCorrection = false
-            do {
-                try VNImageRequestHandler(cgImage: cg).perform([req])
-            } catch {
-                // perform failed — continuation must still be called exactly once
-                cont.resume(returning: [])
+            DispatchQueue.global(qos: .userInitiated).async {
+                let req = VNRecognizeTextRequest { r, _ in
+                    cont.resume(returning: (r.results as? [VNRecognizedTextObservation]) ?? [])
+                }
+                req.recognitionLevel = .accurate
+                req.recognitionLanguages = ["de-DE", "en-US"]
+                req.usesLanguageCorrection = true
+                do {
+                    try VNImageRequestHandler(cgImage: cg).perform([req])
+                } catch {
+                    cont.resume(returning: [])
+                }
             }
         }
     }
 
-    private func addResultLabel(_ text: String, at pt: CGPoint, color: UIColor) {
-        let lbl = PaddedLabel()
-        lbl.text            = text
-        lbl.font            = .monospacedDigitSystemFont(ofSize: 14, weight: .semibold)
-        lbl.textColor       = color
-        lbl.backgroundColor = color.withAlphaComponent(0.1)
-        lbl.layer.cornerRadius  = 6
-        lbl.layer.masksToBounds = true
-        lbl.layer.borderWidth   = 0.5
-        lbl.layer.borderColor   = color.withAlphaComponent(0.35).cgColor
-        lbl.sizeToFit()
-        lbl.frame.origin = pt
-        canvasView.addSubview(lbl)
-        lbl.alpha = 0
-        UIView.animate(withDuration: 0.25) { lbl.alpha = 1 }
-        resultLabels.append(lbl)
+    // MARK: - Recognition Banner
+
+    func showBanner(items: [RecognitionBannerView.Item], scanRect: CGRect = .null) {
+        hideBanner()
+
+        let banner = RecognitionBannerView(items: items)
+        banner.onDismiss = { [weak self] in self?.hideBanner() }
+        banner.onInsertAsText = { [weak self] in
+            guard let self else { return }
+            let img = self.renderTextAsImage(self.lastScanItems)
+            self.insertImage(img)
+            self.hideBanner()
+        }
+        banner.onReplaceHandwriting = { [weak self] in
+            guard let self, !self.lastScanRect.isNull else { return }
+            self.replaceHandwriting(in: self.lastScanRect, with: self.lastScanItems)
+            self.hideBanner()
+        }
+        banner.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(banner)
+
+        NSLayoutConstraint.activate([
+            banner.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            banner.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            banner.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
+        ])
+
+        bannerView = banner
+        banner.alpha = 0
+        banner.transform = CGAffineTransform(translationX: 0, y: 40)
+        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
+            banner.alpha = 1
+            banner.transform = .identity
+        }
+
+        bannerDismissTask?.cancel()
+        bannerDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.hideBanner() }
+        }
     }
 
-    func clearResultLabels() {
-        resultLabels.forEach { $0.removeFromSuperview() }
-        resultLabels.removeAll()
+    func hideBanner() {
+        bannerDismissTask?.cancel()
+        guard let banner = bannerView else { return }
+        bannerView = nil
+        UIView.animate(withDuration: 0.2) {
+            banner.alpha = 0
+            banner.transform = CGAffineTransform(translationX: 0, y: 30)
+        } completion: { _ in banner.removeFromSuperview() }
     }
 
-    // MARK: - Helpers
+    // MARK: - Math helpers
 
     private func looksLikeMath(_ t: String) -> Bool {
         let ops = CharacterSet(charactersIn: "+-*/×÷^%")
@@ -448,24 +697,604 @@ extension InfiniteNotebookViewController {
     }
 }
 
+// MARK: - Text Conversion
+
+extension InfiniteNotebookViewController {
+
+    func renderTextAsImage(_ items: [RecognitionBannerView.Item], targetWidth: CGFloat? = nil) -> UIImage {
+        let combined = items.map(\.copyText).joined(separator: "\n")
+        let font  = UIFont.systemFont(ofSize: 22, weight: .regular)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.black]
+        let str   = NSAttributedString(string: combined, attributes: attrs)
+        let w     = max(targetWidth ?? (canvasView.contentSize.width - 40), 200)
+        let textH = str.boundingRect(
+            with: CGSize(width: w - 40, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).height
+        let totalH = max(textH + 40, 60)
+
+        let fmt = UIGraphicsImageRendererFormat()
+        fmt.scale = 1
+        fmt.preferredRange = .standard
+        return UIGraphicsImageRenderer(size: CGSize(width: w, height: totalH), format: fmt).image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: w, height: totalH))
+            UIColor.systemBlue.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: 6, height: totalH))
+            str.draw(in: CGRect(x: 20, y: 20, width: w - 40, height: textH + 4))
+        }
+    }
+
+    func replaceHandwriting(in contentRect: CGRect, with items: [RecognitionBannerView.Item]) {
+        let regionDesc = contentRect.isNull ? "im sichtbaren Bereich" : "im ausgewählten Bereich"
+        let alert = UIAlertController(
+            title: "Handschrift ersetzen",
+            message: "Die Handschrift \(regionDesc) wird durch Text ersetzt.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Ersetzen", style: .destructive) { [weak self] _ in
+            guard let self else { return }
+
+            // Determine which region to clear
+            let clearRect: CGRect
+            if contentRect.isNull {
+                let sc = self.canvasView.zoomScale
+                let off = self.canvasView.contentOffset
+                clearRect = CGRect(x: off.x / sc, y: off.y / sc,
+                                   width:  self.canvasView.bounds.width  / sc,
+                                   height: self.canvasView.bounds.height / sc)
+            } else {
+                clearRect = contentRect
+            }
+
+            // Remove strokes whose renderBounds are fully inside the cleared region
+            let remaining = self.canvasView.drawing.strokes.filter {
+                !clearRect.contains($0.renderBounds)
+            }
+            self.canvasView.drawing = PKDrawing(strokes: remaining)
+
+            // Render text at the region's exact width & position
+            let imgW   = clearRect.width > 60 ? clearRect.width : self.canvasView.contentSize.width
+            let startX = clearRect.width > 60 ? clearRect.minX  : 0
+            let img    = self.renderTextAsImage(items, targetWidth: imgW)
+            guard let filename = try? self.store.saveImage(img) else { return }
+
+            let imgH   = imgW * (img.size.height / img.size.width)
+            let startY = max(clearRect.minY, 0)
+            let frame  = CGRect(x: startX, y: startY, width: imgW, height: imgH)
+            let layer  = self.makeImageLayer(image: img, frame: frame)
+            self.insertBelowDrawing(layer)
+            self.imageLayers.append(layer)
+
+            let entry = InsertedImage(id: UUID(), filename: filename,
+                                      startX: startX, startY: startY,
+                                      width: imgW, height: imgH)
+            self.document.insertedImages.append(entry)
+            self.document.documentHeight = self.canvasView.contentSize.height
+            self.store.saveDocument(self.document)
+            self.canvasView.setContentOffset(
+                CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
+        })
+        present(alert, animated: true)
+    }
+}
+
+// MARK: - Typed Text Insertion
+
+extension InfiniteNotebookViewController {
+
+    func startTextPlacement(text: String, fontSize: CGFloat) {
+        let overlay = TextPositionOverlay()
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(overlay)
+        NSLayoutConstraint.activate([
+            overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            overlay.topAnchor.constraint(equalTo: view.topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+
+        overlay.onCancel = { [weak overlay] in
+            overlay?.removeFromSuperview()
+        }
+        overlay.onPositionSelected = { [weak self, weak overlay] viewPoint in
+            overlay?.removeFromSuperview()
+            guard let self else { return }
+            let contentPt = self.viewPointToContent(viewPoint)
+            self.insertTypedText(text: text, fontSize: fontSize, contentOrigin: contentPt)
+        }
+
+        overlay.alpha = 0
+        UIView.animate(withDuration: 0.2) { overlay.alpha = 1 }
+    }
+
+    private func viewPointToContent(_ pt: CGPoint) -> CGPoint {
+        let sc  = canvasView.zoomScale
+        let off = canvasView.contentOffset
+        return CGPoint(x: (pt.x + off.x) / sc, y: (pt.y + off.y) / sc)
+    }
+
+    private func insertTypedText(text: String, fontSize: CGFloat, contentOrigin: CGPoint) {
+        let img = renderTypedText(text, fontSize: fontSize, originX: contentOrigin.x)
+        guard let filename = try? store.saveImage(img) else { return }
+
+        let frame = CGRect(x: contentOrigin.x, y: contentOrigin.y,
+                           width: img.size.width, height: img.size.height)
+        let layer = makeImageLayer(image: img, frame: frame)
+        insertBelowDrawing(layer)
+        imageLayers.append(layer)
+
+        let entry = InsertedImage(id: UUID(), filename: filename,
+                                  startX: contentOrigin.x, startY: contentOrigin.y,
+                                  width: img.size.width, height: img.size.height)
+        document.insertedImages.append(entry)
+        let needed = contentOrigin.y + img.size.height + Self.initialHeight * 0.3
+        if needed > canvasView.contentSize.height { canvasView.contentSize.height = needed }
+        document.documentHeight = canvasView.contentSize.height
+        store.saveDocument(document)
+
+        canvasView.setContentOffset(
+            CGPoint(x: 0, y: max(0, contentOrigin.y - 40)), animated: true)
+    }
+
+    private func renderTypedText(_ text: String, fontSize: CGFloat, originX: CGFloat) -> UIImage {
+        let font  = UIFont.systemFont(ofSize: fontSize, weight: .regular)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.black]
+        let str   = NSAttributedString(string: text, attributes: attrs)
+
+        // Available width from insertion point to right edge, capped at 80% of canvas
+        let available = max(canvasView.contentSize.width - originX - 20, 200)
+        let w  = min(available, canvasView.contentSize.width * 0.85)
+        let pad: CGFloat = 20
+        let textH = str.boundingRect(
+            with: CGSize(width: w - pad * 2, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).height
+        let totalH = max(textH + pad * 1.5, fontSize + pad)
+
+        let fmt = UIGraphicsImageRendererFormat()
+        fmt.scale = 1
+        fmt.preferredRange = .standard
+        return UIGraphicsImageRenderer(size: CGSize(width: w, height: totalH), format: fmt).image { ctx in
+            UIColor.white.withAlphaComponent(0).setFill()   // transparent background
+            ctx.fill(CGRect(x: 0, y: 0, width: w, height: totalH))
+            str.draw(in: CGRect(x: pad, y: pad * 0.75, width: w - pad * 2, height: textH + 4))
+        }
+    }
+}
+
+// MARK: - Native Keyboard Text Input
+
+extension InfiniteNotebookViewController {
+
+    /// Called from the toolbar keyboard button via ViewModel → Representable bridge.
+    /// Shows a tap-to-place overlay; after the user taps, a live UITextView appears there.
+    func beginNativeTextInput() {
+        let overlay = TextPositionOverlay()
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(overlay)
+        NSLayoutConstraint.activate([
+            overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            overlay.topAnchor.constraint(equalTo: view.topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        overlay.onCancel = { [weak overlay] in overlay?.removeFromSuperview() }
+        overlay.onPositionSelected = { [weak self, weak overlay] viewPoint in
+            overlay?.removeFromSuperview()
+            self?.showNativeKeyboard(at: viewPoint)
+        }
+        overlay.alpha = 0
+        UIView.animate(withDuration: 0.2) { overlay.alpha = 1 }
+    }
+
+    private func showNativeKeyboard(at viewPoint: CGPoint) {
+        let scale  = canvasView.zoomScale
+        let offset = canvasView.contentOffset
+        let contentX = (viewPoint.x + offset.x) / scale
+        let contentY = (viewPoint.y + offset.y) / scale
+        nativeTextContentOrigin = CGPoint(x: contentX, y: contentY)
+
+        let tv = UITextView()
+        tv.font = UIFont.systemFont(ofSize: 22)
+        tv.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.0)
+        tv.textColor = document.darkDrawingMode ? .white : .black
+        tv.isScrollEnabled = false
+        tv.textContainer.lineBreakMode = .byWordWrapping
+        // Position at the tapped point in view coordinates
+        let availableWidth = max(view.bounds.width - viewPoint.x - 16, 200)
+        tv.frame = CGRect(x: viewPoint.x, y: viewPoint.y, width: min(availableWidth, 500), height: 52)
+        tv.layer.borderWidth = 1
+        tv.layer.borderColor = UIColor.systemBlue.withAlphaComponent(0.5).cgColor
+        tv.layer.cornerRadius = 6
+
+        let toolbar = UIToolbar(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 44))
+        toolbar.items = [
+            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
+            UIBarButtonItem(title: "Fertig", style: .done, target: self, action: #selector(commitNativeText))
+        ]
+        tv.inputAccessoryView = toolbar
+
+        nativeTextView = tv
+        tv.delegate = nativeTextDelegate
+        view.addSubview(tv)
+        tv.becomeFirstResponder()
+    }
+
+    @objc private func commitNativeText() {
+        guard let tv = nativeTextView else { return }
+        let text = tv.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        tv.resignFirstResponder()
+        tv.removeFromSuperview()
+        nativeTextView = nil
+
+        guard !text.isEmpty else { return }
+        let fontSize = tv.font?.pointSize ?? 22
+        insertTypedText(text: text, fontSize: fontSize, contentOrigin: nativeTextContentOrigin)
+    }
+}
+
+// MARK: - Sticky Notes
+
+extension InfiniteNotebookViewController {
+
+    func addStickyNote() {
+        let scale  = canvasView.zoomScale
+        let offset = canvasView.contentOffset
+        // Place at center of visible area, offset by half note size
+        let cx = (offset.x + canvasView.bounds.width  / 2) / scale - 100
+        let cy = (offset.y + canvasView.bounds.height / 2) / scale - 80
+        let note = StickyNote(id: UUID(), text: "",
+                              x: max(0, cx), y: max(0, cy),
+                              colorIndex: document.stickyNotes.count % 4)
+        document.stickyNotes.append(note)
+        store.saveDocument(document)
+        mountStickyNoteView(note)
+    }
+
+    func mountStickyNoteView(_ note: StickyNote) {
+        let v = StickyNoteView(note: note)
+        v.onMoved = { [weak self] screenOrigin in
+            guard let self else { return }
+            let sc  = self.canvasView.zoomScale
+            let off = self.canvasView.contentOffset
+            if let i = self.document.stickyNotes.firstIndex(where: { $0.id == note.id }) {
+                self.document.stickyNotes[i].x = (screenOrigin.x + off.x) / sc
+                self.document.stickyNotes[i].y = (screenOrigin.y + off.y) / sc
+                self.store.saveDocument(self.document)
+            }
+        }
+        v.onTextChanged = { [weak self] text in
+            guard let self else { return }
+            if let i = self.document.stickyNotes.firstIndex(where: { $0.id == note.id }) {
+                self.document.stickyNotes[i].text = text
+                self.store.saveDocument(self.document)
+            }
+        }
+        v.onDelete = { [weak self] in
+            guard let self else { return }
+            self.document.stickyNotes.removeAll { $0.id == note.id }
+            self.stickyNoteViews[note.id]?.removeFromSuperview()
+            self.stickyNoteViews.removeValue(forKey: note.id)
+            self.store.saveDocument(self.document)
+        }
+        stickyNoteViews[note.id] = v
+        view.addSubview(v)
+        repositionStickyNotes()
+    }
+
+    func repositionStickyNotes() {
+        let offset = canvasView.contentOffset
+        let scale  = canvasView.zoomScale
+        for note in document.stickyNotes {
+            guard let v = stickyNoteViews[note.id] else { continue }
+            v.frame.origin = CGPoint(
+                x: note.x * scale - offset.x,
+                y: note.y * scale - offset.y
+            )
+        }
+    }
+}
+
+// MARK: - Bookmarks
+
+extension InfiniteNotebookViewController {
+
+    func addBookmark() {
+        let y = canvasView.contentOffset.y / canvasView.zoomScale
+        let alert = UIAlertController(title: "Lesezeichen hinzufügen",
+                                      message: "Name für diese Position",
+                                      preferredStyle: .alert)
+        alert.addTextField { $0.placeholder = "z.B. Kapitel 2" }
+        alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Speichern", style: .default) { [weak self] _ in
+            guard let self else { return }
+            let title = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespaces) ?? ""
+            let bookmark = Bookmark(id: UUID(), title: title.isEmpty ? "Lesezeichen" : title, y: y)
+            self.document.bookmarks.append(bookmark)
+            self.store.saveDocument(self.document)
+        })
+        present(alert, animated: true)
+    }
+
+    func showBookmarkList() {
+        let sheet = UIAlertController(title: "Lesezeichen", message: nil, preferredStyle: .actionSheet)
+        for bm in document.bookmarks {
+            sheet.addAction(UIAlertAction(title: bm.title, style: .default) { [weak self] _ in
+                guard let self else { return }
+                let targetY = bm.y * self.canvasView.zoomScale
+                self.canvasView.setContentOffset(CGPoint(x: 0, y: max(0, targetY)), animated: true)
+            })
+        }
+        if document.bookmarks.isEmpty {
+            sheet.message = "Noch keine Lesezeichen.\nMit dem Lesezeichen-Button Position speichern."
+        }
+        sheet.addAction(UIAlertAction(title: "Schließen", style: .cancel))
+        if let pop = sheet.popoverPresentationController {
+            pop.sourceView = view
+            pop.sourceRect = CGRect(x: view.bounds.midX, y: 60, width: 0, height: 0)
+        }
+        present(sheet, animated: true)
+    }
+
+    func deleteBookmark(id: UUID) {
+        document.bookmarks.removeAll { $0.id == id }
+        store.saveDocument(document)
+    }
+}
+
 // MARK: - PKCanvasViewDelegate
 
 extension InfiniteNotebookViewController: PKCanvasViewDelegate {
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+        guard !isSnappingShape else { return }
         onDrawingChanged?()
         extendIfNeeded()
         scheduleScan()
+        NotificationCenter.default.post(name: .electroNoteDrawingBegan, object: nil)
+        scheduleShapeSnap()
     }
 }
 
-// MARK: - PaddedLabel
+// MARK: - Shape Snapping
 
-private final class PaddedLabel: UILabel {
-    var insets = UIEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
-    override func drawText(in rect: CGRect) { super.drawText(in: rect.inset(by: insets)) }
-    override var intrinsicContentSize: CGSize {
-        let s = super.intrinsicContentSize
-        return CGSize(width: s.width + insets.left + insets.right,
-                      height: s.height + insets.top + insets.bottom)
+extension InfiniteNotebookViewController {
+
+    private func scheduleShapeSnap() {
+        guard shapeSnapEnabled else { return }
+        shapeSnapTask?.cancel()
+        shapeSnapTask = Task { [weak self] in
+            // Wait for the drawing event to settle (PKCanvasView may fire
+            // canvasViewDrawingDidChange multiple times for one gesture).
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled, let self else { return }
+            self.performShapeSnap()
+        }
+    }
+
+    @MainActor
+    private func performShapeSnap() {
+        let strokes = canvasView.drawing.strokes
+        guard let last = strokes.last else { return }
+        guard let (snapped, _) = ShapeSnapper.snap(last) else { return }
+
+        isSnappingShape = true
+        var updated = strokes
+        updated[updated.count - 1] = snapped
+        canvasView.drawing = PKDrawing(strokes: updated)
+        isSnappingShape = false
+    }
+}
+
+// MARK: - PKToolPickerObserver
+
+extension InfiniteNotebookViewController: PKToolPickerObserver {
+    func toolPickerVisibilityDidChange(_ toolPicker: PKToolPicker) {
+        applyDrawingPolicy()
+    }
+}
+
+// MARK: - PDF Export
+
+extension InfiniteNotebookViewController {
+
+    func exportAsPDF(completion: @escaping (URL?) -> Void) {
+        let drawing = canvasView.drawing
+        let canvasWidth = canvasView.contentSize.width
+        let canvasHeight = canvasView.contentSize.height
+
+        guard canvasWidth > 0, canvasHeight > 0 else { completion(nil); return }
+
+        // A4 page size in points
+        let pageW: CGFloat = 595
+        let pageH: CGFloat = 842
+        let scale = pageW / canvasWidth
+        let totalPDFHeight = canvasHeight * scale
+        let pageCount = max(1, Int(ceil(totalPDFHeight / pageH)))
+
+        let filename = store.noteURL.deletingPathExtension().lastPathComponent
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(filename)_\(UUID().uuidString).pdf")
+
+        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pageH))
+        let data = renderer.pdfData { ctx in
+            for page in 0..<pageCount {
+                ctx.beginPage()
+                let pdfCtx = ctx.cgContext
+                // White background
+                pdfCtx.setFillColor(UIColor.white.cgColor)
+                pdfCtx.fill(CGRect(x: 0, y: 0, width: pageW, height: pageH))
+                // Translate for current page
+                pdfCtx.saveGState()
+                pdfCtx.scaleBy(x: scale, y: scale)
+                pdfCtx.translateBy(x: 0, y: -CGFloat(page) * pageH / scale)
+                // Render background layer
+                backgroundLayer.render(in: pdfCtx)
+                // Render image layers
+                imageLayers.forEach { $0.render(in: pdfCtx) }
+                // Render PDF layers
+                pdfLayers.forEach { $0.render(in: pdfCtx) }
+                // Render drawing for this page's slice
+                let pageContentRect = CGRect(
+                    x: 0, y: CGFloat(page) * pageH / scale,
+                    width: canvasWidth, height: pageH / scale
+                )
+                let inkImage = drawing.image(from: pageContentRect, scale: 2)
+                inkImage.draw(in: CGRect(origin: .zero, size: CGSize(width: canvasWidth, height: pageH / scale)))
+                pdfCtx.restoreGState()
+            }
+        }
+
+        do {
+            try data.write(to: tempURL)
+            completion(tempURL)
+        } catch {
+            completion(nil)
+        }
+    }
+
+    func presentExport() {
+        exportAsPDF { [weak self] url in
+            guard let self, let url = url else { return }
+            let ac = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            ac.popoverPresentationController?.sourceView = self.view
+            ac.popoverPresentationController?.sourceRect = CGRect(
+                x: self.view.bounds.midX, y: 100, width: 0, height: 0)
+            self.present(ac, animated: true)
+        }
+    }
+}
+
+// MARK: - RecognitionBannerView
+
+final class RecognitionBannerView: UIView {
+
+    struct Item {
+        let label: String
+        let copyText: String
+    }
+
+    var onDismiss: (() -> Void)?
+    var onInsertAsText: (() -> Void)?
+    var onReplaceHandwriting: (() -> Void)?
+
+    init(items: [Item]) {
+        super.init(frame: .zero)
+        backgroundColor = UIColor.secondarySystemBackground
+        layer.cornerRadius = 14
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.12
+        layer.shadowRadius = 12
+        layer.shadowOffset = CGSize(width: 0, height: 4)
+
+        let titleRow = makeRow()
+
+        let titleLabel = UILabel()
+        titleLabel.text = "Erkannt"
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .secondaryLabel
+        titleRow.addArrangedSubview(titleLabel)
+
+        let insertBtn = makeButton(title: "Als Text", image: "text.badge.plus", tint: .systemIndigo) { [weak self] in
+            self?.onInsertAsText?()
+        }
+        titleRow.addArrangedSubview(insertBtn)
+
+        let replaceBtn = makeButton(title: "Ersetzen", image: "pencil.slash", tint: .systemOrange) { [weak self] in
+            self?.onReplaceHandwriting?()
+        }
+        titleRow.addArrangedSubview(replaceBtn)
+
+        // Copy-all only if multiple items
+        if items.count > 1 {
+            let allText = items.map(\.copyText).joined(separator: "\n")
+            let copyAll = makeButton(title: "Alles kopieren", tint: .systemBlue) { [allText] in
+                UIPasteboard.general.string = allText
+            }
+            titleRow.addArrangedSubview(copyAll)
+        }
+
+        let close = makeButton(title: nil, image: "xmark.circle.fill", tint: .tertiaryLabel) { [weak self] in
+            self?.onDismiss?()
+        }
+        titleRow.addArrangedSubview(close)
+
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12)
+        ])
+
+        stack.addArrangedSubview(titleRow)
+
+        for item in items {
+            let row = makeRow()
+
+            let lbl = UILabel()
+            lbl.text = item.label
+            lbl.font = .monospacedDigitSystemFont(ofSize: 15, weight: .regular)
+            lbl.numberOfLines = 2
+            lbl.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            row.addArrangedSubview(lbl)
+
+            let copyText = item.copyText
+            let btn = makeButton(title: "Kopieren", tint: .systemBlue) {
+                UIPasteboard.general.string = copyText
+            }
+            btn.setContentHuggingPriority(.required, for: .horizontal)
+            row.addArrangedSubview(btn)
+
+            stack.addArrangedSubview(row)
+
+            let sep = UIView()
+            sep.backgroundColor = .separator
+            sep.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
+            stack.addArrangedSubview(sep)
+        }
+
+        // Remove last separator
+        if let last = stack.arrangedSubviews.last, last.backgroundColor == .separator {
+            stack.removeArrangedSubview(last); last.removeFromSuperview()
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func makeRow() -> UIStackView {
+        let s = UIStackView()
+        s.axis = .horizontal
+        s.alignment = .center
+        s.spacing = 8
+        return s
+    }
+
+    private func makeButton(title: String?, image: String? = nil, tint: UIColor, action: @escaping () -> Void) -> UIButton {
+        var cfg = UIButton.Configuration.plain()
+        if let t = title { cfg.title = t }
+        if let i = image  { cfg.image = UIImage(systemName: i) }
+        cfg.baseForegroundColor = tint
+        cfg.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+        let btn = UIButton(configuration: cfg)
+        btn.addAction(UIAction { _ in action() }, for: .touchUpInside)
+        return btn
+    }
+}
+
+// MARK: - NativeTextViewDelegate
+
+private final class NativeTextViewDelegate: NSObject, UITextViewDelegate {
+    weak var vc: InfiniteNotebookViewController?
+    init(vc: InfiniteNotebookViewController) { self.vc = vc }
+
+    func textViewDidChange(_ textView: UITextView) {
+        // Auto-resize height to fit content while keeping the same width
+        let size = textView.sizeThatFits(CGSize(width: textView.frame.width, height: .greatestFiniteMagnitude))
+        textView.frame.size.height = max(52, size.height)
     }
 }

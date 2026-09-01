@@ -23,6 +23,22 @@ struct ContentView: View {
                 case .note:
                     InfiniteNotebookHostView(item: item)
                         .id(item.id)
+                case .pap:
+                    PAPDesignerView { image in
+                        // PAP used as standalone full-screen document; image export goes to photo library
+                        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+                    }
+                    .id(item.id)
+                case .whiteboard:
+                    WhiteboardView { image in
+                        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+                    }
+                    .id(item.id)
+                case .mindmap:
+                    MindMapDesignerView { image in
+                        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+                    }
+                    .id(item.id)
                 case .pdf:
                     PDFHostView(item: item)
                         .id(item.id)
@@ -36,6 +52,9 @@ struct ContentView: View {
         .navigationSplitViewStyle(.balanced)
         // iPadOS stellt automatisch einen Sidebar-Toggle bereit —
         // kein eigener .toolbar-Modifier nötig (der crasht auf NavigationSplitView)
+        .onReceive(NotificationCenter.default.publisher(for: .electroNoteDrawingBegan)) { _ in
+            withAnimation { sidebarVisibility = .detailOnly }
+        }
         .sheet(isPresented: $showMath) {
             MathPanelView()
                 .presentationDetents([.medium, .large])

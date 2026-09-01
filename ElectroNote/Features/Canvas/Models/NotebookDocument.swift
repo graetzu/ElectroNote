@@ -7,26 +7,68 @@ enum BackgroundStyle: String, Codable, CaseIterable, Identifiable {
     case lined   = "Liniert"
     case grid    = "Kariert"
     case dotted  = "Gepunktet"
+    case cornell = "Cornell"
 
     var id: String { rawValue }
     var symbolName: String {
         switch self {
-        case .blank:  return "rectangle"
-        case .lined:  return "line.3.horizontal"
-        case .grid:   return "squareshape.split.2x2"
-        case .dotted: return "ellipsis"
+        case .blank:   return "rectangle"
+        case .lined:   return "line.3.horizontal"
+        case .grid:    return "squareshape.split.2x2"
+        case .dotted:  return "ellipsis"
+        case .cornell: return "rectangle.split.3x1"
         }
     }
+}
+
+// MARK: - LineSpacing
+
+enum LineSpacing: String, Codable, CaseIterable, Identifiable {
+    case narrow = "Eng"
+    case medium = "Mittel"
+    case wide   = "Weit"
+
+    var id: String { rawValue }
+    var points: CGFloat {
+        switch self {
+        case .narrow: return 20
+        case .medium: return 28
+        case .wide:   return 38
+        }
+    }
+}
+
+// MARK: - Bookmark
+
+struct Bookmark: Identifiable, Codable {
+    let id: UUID
+    var title: String
+    let y: CGFloat
+}
+
+// MARK: - StickyNote
+
+struct StickyNote: Identifiable, Codable {
+    let id: UUID
+    var text: String
+    var x: CGFloat   // canvas content coordinates
+    var y: CGFloat
+    var colorIndex: Int
 }
 
 // MARK: - Document model
 
 struct NotebookDocument: Codable {
-    var background: BackgroundStyle = .grid
-    var documentHeight: CGFloat = NotebookDocument.initialHeight
-    var insertedPDFs:   [InsertedPDF]   = []
-    var insertedImages: [InsertedImage] = []
-    var mathEnabled:    Bool = false
+    var background:      BackgroundStyle = .grid
+    var lineSpacing:     LineSpacing     = .medium
+    var documentHeight:  CGFloat         = NotebookDocument.initialHeight
+    var insertedPDFs:    [InsertedPDF]   = []
+    var insertedImages:  [InsertedImage] = []
+    var mathEnabled:      Bool            = false
+    var darkDrawingMode:  Bool            = false
+    var shapeSnapEnabled: Bool            = true
+    var bookmarks:       [Bookmark]      = []
+    var stickyNotes:     [StickyNote]    = []
 
     static let pageWidth:     CGFloat = 595
     static let pageHeight:    CGFloat = 842
@@ -47,7 +89,25 @@ struct InsertedPDF: Identifiable, Codable {
 struct InsertedImage: Identifiable, Codable {
     let id: UUID
     let filename: String
+    var startX: CGFloat
     let startY: CGFloat
     let width: CGFloat
     let height: CGFloat
+
+    init(id: UUID = UUID(), filename: String, startX: CGFloat = 0,
+         startY: CGFloat, width: CGFloat, height: CGFloat) {
+        self.id = id; self.filename = filename; self.startX = startX
+        self.startY = startY; self.width = width; self.height = height
+    }
+
+    // Backward-compatible decoder: startX defaults to 0 for old documents
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id       = try c.decode(UUID.self,    forKey: .id)
+        filename = try c.decode(String.self,  forKey: .filename)
+        startX   = try c.decodeIfPresent(CGFloat.self, forKey: .startX) ?? 0
+        startY   = try c.decode(CGFloat.self, forKey: .startY)
+        width    = try c.decode(CGFloat.self, forKey: .width)
+        height   = try c.decode(CGFloat.self, forKey: .height)
+    }
 }

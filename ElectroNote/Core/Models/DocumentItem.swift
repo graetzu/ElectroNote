@@ -12,14 +12,25 @@ struct DocumentItem: Identifiable, Hashable {
 
     var systemImage: String {
         switch type {
-        case .folder: return "folder.fill"
-        case .pdf:    return "doc.richtext.fill"
-        case .note:   return "note.text"
+        case .folder:     return "folder.fill"
+        case .pdf:        return "doc.richtext.fill"
+        case .note:       return "note.text"
+        case .pap:        return "arrow.triangle.branch"
+        case .whiteboard: return "rectangle.and.pencil.and.ellipsis"
+        case .mindmap:    return "brain"
+        }
+    }
+
+    /// True for any document type that opens in the canvas/notebook area
+    var isDocument: Bool {
+        switch type {
+        case .folder, .pdf: return false
+        case .note, .pap, .whiteboard, .mindmap: return true
         }
     }
 
     enum ItemType: String {
-        case folder, pdf, note
+        case folder, pdf, note, pap, whiteboard, mindmap
     }
 
     enum SyncStatus: Equatable {

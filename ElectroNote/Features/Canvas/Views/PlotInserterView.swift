@@ -1,6 +1,14 @@
 import SwiftUI
 
-// Sheet that lets the user configure a plot and insert it into the notebook as an image.
+// MARK: - FunctionEntry
+
+struct FunctionEntry: Identifiable {
+    let id = UUID()
+    var expression: String
+    var color: Color
+}
+
+// MARK: - PlotInserterView
 
 struct PlotInserterView: View {
     @StateObject private var vm = PlotInserterViewModel()
@@ -10,38 +18,59 @@ struct PlotInserterView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // f(x) input row
-                HStack(spacing: 10) {
-                    Text("f(x) =").foregroundStyle(.secondary).font(.title3.monospaced())
-                    TextField("x^2 - 3*x + 1", text: $vm.expression)
-                        .font(.title3.monospaced())
-                        .autocorrectionDisabled()
-                        .onSubmit { vm.compute() }
-                    Button { vm.compute() } label: {
-                        Image(systemName: "play.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding()
 
-                // x-range row
-                HStack(spacing: 16) {
+                // Function rows
+                ForEach($vm.functions) { $fn in
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(fn.color)
+                            .frame(width: 12, height: 12)
+                        Text("f(x) =")
+                            .foregroundStyle(.secondary)
+                            .font(.title3.monospaced())
+                        TextField("Ausdruck …", text: $fn.expression)
+                            .font(.title3.monospaced())
+                            .autocorrectionDisabled()
+                            .onSubmit { vm.compute() }
+                        if vm.functions.count > 1 {
+                            Button {
+                                vm.remove(id: fn.id)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
+                    Divider().padding(.leading)
+                }
+
+                // Controls row
+                HStack(spacing: 14) {
+                    Button {
+                        vm.addFunction()
+                    } label: {
+                        Label("Funktion", systemImage: "plus.circle")
+                    }
+                    .disabled(vm.functions.count >= 5)
+
+                    Spacer()
+
                     labeledField("x min", value: $vm.xMin)
                     labeledField("x max", value: $vm.xMax)
-                    Spacer()
-                    Button("Plot") { vm.compute() }.buttonStyle(.bordered)
+
+                    Button("Plot") { vm.compute() }
+                        .buttonStyle(.bordered)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 8)
+                .padding()
 
                 Divider()
 
                 // Plot preview
-                if !vm.plotPoints.isEmpty {
-                    FunctionPlotView(points:  vm.plotPoints,
-                                     xMin:    vm.xMin,
-                                     xMax:    vm.xMax,
-                                     yRange:  vm.yRange)
+                if !vm.curves.isEmpty {
+                    FunctionPlotView(curves: vm.curves,
+                                     xMin: vm.xMin, xMax: vm.xMax, yRange: vm.yRange)
                         .frame(maxWidth: .infinity)
                         .frame(height: 300)
                         .padding()
@@ -52,7 +81,7 @@ struct PlotInserterView: View {
                         .frame(height: 300)
                 }
             }
-            .navigationTitle("Funktion einfügen")
+            .navigationTitle("Funktionen einfügen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -65,7 +94,7 @@ struct PlotInserterView: View {
                             dismiss()
                         }
                     }
-                    .disabled(vm.plotPoints.isEmpty)
+                    .disabled(vm.curves.isEmpty)
                     .bold()
                 }
             }
@@ -79,7 +108,7 @@ struct PlotInserterView: View {
             TextField(label, value: value, format: .number)
                 .keyboardType(.numbersAndPunctuation)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 80)
+                .frame(width: 76)
         }
     }
 }
@@ -88,44 +117,64 @@ struct PlotInserterView: View {
 
 @MainActor
 private final class PlotInserterViewModel: ObservableObject {
-    @Published var expression = "x^2"
+    @Published var functions: [FunctionEntry] = [FunctionEntry(expression: "x^2", color: .blue)]
     @Published var xMin: Double = -5
     @Published var xMax: Double =  5
-    @Published var plotPoints: [MathViewModel.PlotPoint] = []
+    @Published var curves: [FunctionPlotView.Curve] = []
     @Published var yRange: ClosedRange<Double> = -10...10
 
+    private let palette: [Color] = [.blue, .red, .green, .orange, .purple]
     private let evaluator = MathEvaluator()
+
+    func addFunction() {
+        let color = palette[functions.count % palette.count]
+        functions.append(FunctionEntry(expression: "", color: color))
+    }
+
+    func remove(id: UUID) {
+        functions.removeAll { $0.id == id }
+        if functions.isEmpty {
+            functions = [FunctionEntry(expression: "x^2", color: .blue)]
+        }
+        compute()
+    }
 
     func compute() {
         guard xMin < xMax else { return }
-        var pts: [MathViewModel.PlotPoint] = []
-        var yMin = Double.infinity, yMax = -Double.infinity
-        for i in 0...600 {
-            let x = xMin + (xMax - xMin) * Double(i) / 600
-            if let y = evaluator.evaluateFunction(expression, at: x) {
-                pts.append(.init(x: x, y: y))
-                yMin = min(yMin, y); yMax = max(yMax, y)
+        var allCurves: [FunctionPlotView.Curve] = []
+        var globalYMin = Double.infinity, globalYMax = -Double.infinity
+
+        for fn in functions {
+            guard !fn.expression.isEmpty else { continue }
+            var pts: [MathViewModel.PlotPoint] = []
+            for i in 0...600 {
+                let x = xMin + (xMax - xMin) * Double(i) / 600
+                if let y = evaluator.evaluateFunction(fn.expression, at: x) {
+                    pts.append(.init(x: x, y: y))
+                    globalYMin = min(globalYMin, y)
+                    globalYMax = max(globalYMax, y)
+                }
+            }
+            if !pts.isEmpty {
+                allCurves.append(.init(points: pts, color: fn.color, label: fn.expression))
             }
         }
-        plotPoints = pts
-        if pts.count > 1, yMin < yMax {
-            let m = (yMax - yMin) * 0.12
-            yRange = (yMin - m)...(yMax + m)
+
+        curves = allCurves
+        if globalYMin < globalYMax {
+            let m = (globalYMax - globalYMin) * 0.12
+            yRange = (globalYMin - m)...(globalYMax + m)
         } else {
             yRange = -10...10
         }
     }
 
     func renderToImage() -> UIImage? {
-        guard !plotPoints.isEmpty else { return nil }
-        let plotView = FunctionPlotView(points:  plotPoints,
-                                        xMin:    xMin,
-                                        xMax:    xMax,
-                                        yRange:  yRange)
-            .frame(width: 480, height: 320)
+        guard !curves.isEmpty else { return nil }
+        let plotView = FunctionPlotView(curves: curves, xMin: xMin, xMax: xMax, yRange: yRange)
+            .frame(width: 540, height: curves.count > 1 ? 380 : 340)
             .padding(16)
             .background(Color(.systemBackground))
-
         let renderer = ImageRenderer(content: plotView)
         renderer.scale = 2.0
         return renderer.uiImage
