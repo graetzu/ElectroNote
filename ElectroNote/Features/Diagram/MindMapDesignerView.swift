@@ -21,243 +21,335 @@ enum BubbleShape: String, CaseIterable, Identifiable {
         }
     }
 
-    func path(in rect: CGRect) -> UIBezierPath {
+    var defaultWidth: CGFloat {
         switch self {
-        case .circle:
-            let dim = min(rect.width, rect.height)
-            let circleRect = CGRect(x: rect.midX - dim/2, y: rect.midY - dim/2, width: dim, height: dim)
-            return UIBezierPath(ovalIn: circleRect)
-        case .oval:
-            return UIBezierPath(ovalIn: rect)
-        case .rectangle:
-            return UIBezierPath(roundedRect: rect, cornerRadius: 10)
-        case .diamond:
-            let p = UIBezierPath()
-            p.move(to: CGPoint(x: rect.midX, y: rect.minY))
-            p.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-            p.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
-            p.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
-            p.close()
-            return p
+        case .circle:    return 130
+        case .oval:      return 160
+        case .rectangle: return 150
+        case .diamond:   return 140
+        }
+    }
+
+    var defaultHeight: CGFloat {
+        switch self {
+        case .circle:    return 130
+        case .oval:      return 95
+        case .rectangle: return 90
+        case .diamond:   return 110
         }
     }
 }
 
-// MARK: - MindMapBubble View
+// MARK: - MindMap Models
 
-final class MindMapBubble: UIView {
-    let shape: BubbleShape
-    var color: UIColor = .systemBlue {
-        didSet { updateShape() }
-    }
-    var onDelete: (() -> Void)?
+struct MindMapNode: Identifiable {
+    let id: UUID
+    var shape: BubbleShape
+    var label: String
+    var color: Color
+    var cx: CGFloat
+    var cy: CGFloat
 
-    var isSelectedBubble: Bool = false {
-        didSet { updateSelection() }
-    }
-
-    private let shapeLayer = CAShapeLayer()
-    private let deleteButton = UIButton(type: .custom)
-
-    init(shape: BubbleShape, frame: CGRect, color: UIColor = .systemBlue) {
+    init(id: UUID = UUID(), shape: BubbleShape, label: String, color: Color = .blue, cx: CGFloat, cy: CGFloat) {
+        self.id = id
         self.shape = shape
+        self.label = label
         self.color = color
-        super.init(frame: frame)
-
-        backgroundColor = .clear
-        isOpaque = false
-
-        shapeLayer.fillColor   = color.withAlphaComponent(0.06).cgColor
-        shapeLayer.strokeColor = color.cgColor
-        shapeLayer.lineWidth   = 2.5
-        layer.addSublayer(shapeLayer)
-
-        deleteButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
-        deleteButton.tintColor = .systemRed
-        deleteButton.addTarget(self, action: #selector(deleteSelf), for: .touchUpInside)
-        deleteButton.isHidden = true
-        addSubview(deleteButton)
-
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-        tap.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-        addGestureRecognizer(tap)
-
-        updateShape()
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        updateShape()
-        deleteButton.frame = CGRect(x: bounds.width - 24, y: -8, width: 28, height: 28)
-    }
-
-    private func updateShape() {
-        let path = shape.path(in: bounds.insetBy(dx: 4, dy: 4))
-        shapeLayer.path = path.cgPath
-        shapeLayer.frame = bounds
-        shapeLayer.fillColor = color.withAlphaComponent(0.06).cgColor
-        shapeLayer.strokeColor = isSelectedBubble ? UIColor.systemOrange.cgColor : color.cgColor
-    }
-
-    private func updateSelection() {
-        shapeLayer.strokeColor = isSelectedBubble ? UIColor.systemOrange.cgColor : color.cgColor
-        shapeLayer.lineWidth   = isSelectedBubble ? 3.5 : 2.5
-        deleteButton.isHidden  = !isSelectedBubble
-    }
-
-    @objc private func handleTap() {
-        isSelectedBubble.toggle()
-    }
-
-    @objc private func deleteSelf() {
-        onDelete?()
-    }
-
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        // Let Apple Pencil touches pass directly through to PKCanvasView
-        if let touches = event?.allTouches {
-            for touch in touches {
-                if touch.type == .pencil { return nil }
-            }
-        }
-        // If delete button was tapped, handle it
-        if !deleteButton.isHidden {
-            let deletePoint = convert(point, to: deleteButton)
-            if deleteButton.point(inside: deletePoint, with: event) {
-                return deleteButton
-            }
-        }
-        return super.hitTest(point, with: event)
+        self.cx = cx
+        self.cy = cy
     }
 }
 
-// MARK: - MindMap ViewController
+struct MindMapEdge: Identifiable {
+    let id: UUID
+    let fromId: UUID
+    let toId: UUID
+    var label: String
 
-final class MindMapViewController: UIViewController {
-    let canvasView = PKCanvasView()
-    let toolPicker = PKToolPicker()
-    var bubbles: [MindMapBubble] = []
-    var onInsert: ((UIImage) -> Void)?
-    var selectedBubble: MindMapBubble? {
-        didSet {
-            oldValue?.isSelectedBubble = false
-            selectedBubble?.isSelectedBubble = true
-        }
+    init(id: UUID = UUID(), fromId: UUID, toId: UUID, label: String = "") {
+        self.id = id
+        self.fromId = fromId
+        self.toId = toId
+        self.label = label
     }
+}
 
-    private func setupCanvas() {
-        canvasView.frame = view.bounds
-        canvasView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        canvasView.drawingPolicy = .anyInput   // pencil and finger can draw
-        canvasView.backgroundColor = .white
-        canvasView.contentSize = CGSize(width: 3000, height: 3000)
-        canvasView.isScrollEnabled = true
-        canvasView.tool = PKInkingTool(.pen, color: .black, width: 3)
-        view.addSubview(canvasView)
-    }
+// MARK: - MindMap ViewModel
 
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .white
-        setupCanvas()
-    }
+@MainActor
+final class MindMapDesignerViewModel: ObservableObject {
+    @Published var nodes: [MindMapNode] = []
+    @Published var edges: [MindMapEdge] = []
+    @Published var selectedId: UUID? = nil
+    @Published var connectMode: Bool = false
+    @Published var connectFromId: UUID? = nil
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        if canvasView.frame != view.bounds {
-            canvasView.frame = view.bounds
-        }
-        if canvasView.contentSize.width < view.bounds.width {
-            canvasView.contentSize = CGSize(width: max(view.bounds.width * 2, 2000), height: max(view.bounds.height * 2, 2000))
-        }
-    }
+    private var undoStack: [([MindMapNode], [MindMapEdge])] = []
+    private var redoStack: [([MindMapNode], [MindMapEdge])] = []
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        canvasView.becomeFirstResponder()
-    }
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
 
-    func addBubble(shape: BubbleShape, color: UIColor = .systemBlue) {
-        let center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
-        let size: CGSize
-        switch shape {
-        case .circle:    size = CGSize(width: 140, height: 140)
-        case .oval:      size = CGSize(width: 180, height: 110)
-        case .rectangle: size = CGSize(width: 170, height: 100)
-        case .diamond:   size = CGSize(width: 150, height: 110)
-        }
-
-        let frame = CGRect(origin: CGPoint(x: center.x - size.width/2, y: center.y - size.height/2), size: size)
-        let bubble = MindMapBubble(shape: shape, frame: frame, color: color)
-        bubble.onDelete = { [weak self, weak bubble] in
-            guard let self, let bubble else { return }
-            bubble.removeFromSuperview()
-            self.bubbles.removeAll { $0 === bubble }
-            if self.selectedBubble === bubble { self.selectedBubble = nil }
-        }
-
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleBubblePan(_:)))
-        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-        bubble.addGestureRecognizer(pan)
-
-        view.addSubview(bubble)
-        bubbles.append(bubble)
-        selectedBubble = bubble
-    }
-
-    @objc private func handleBubblePan(_ pan: UIPanGestureRecognizer) {
-        guard let bubble = pan.view as? MindMapBubble else { return }
-        let delta = pan.translation(in: view)
-        bubble.center = CGPoint(x: bubble.center.x + delta.x, y: bubble.center.y + delta.y)
-        pan.setTranslation(.zero, in: view)
-        selectedBubble = bubble
-    }
-
-    @objc private func deselectAll() {
-        selectedBubble = nil
+    func pushUndo() {
+        undoStack.append((nodes, edges))
+        redoStack.removeAll()
     }
 
     func undo() {
-        canvasView.undoManager?.undo()
+        guard let prev = undoStack.popLast() else { return }
+        redoStack.append((nodes, edges))
+        nodes = prev.0
+        edges = prev.1
+        selectedId = nil
+        connectFromId = nil
     }
 
     func redo() {
-        canvasView.undoManager?.redo()
+        guard let next = redoStack.popLast() else { return }
+        undoStack.append((nodes, edges))
+        nodes = next.0
+        edges = next.1
     }
 
-    func exportAsImage() -> UIImage {
-        let renderBounds = view.bounds
-        let fmt = UIGraphicsImageRendererFormat()
-        fmt.scale = 2
-        return UIGraphicsImageRenderer(bounds: renderBounds, format: fmt).image { _ in
-            view.drawHierarchy(in: renderBounds, afterScreenUpdates: true)
+    func addNode(_ shape: BubbleShape, color: Color, near anchor: CGPoint) {
+        pushUndo()
+        let defaultLabel: String
+        switch shape {
+        case .circle:    defaultLabel = "Zentralthema"
+        case .oval:      defaultLabel = "Hauptidee"
+        case .rectangle: defaultLabel = "Notiz"
+        case .diamond:   defaultLabel = "Aspekt"
+        }
+        let node = MindMapNode(shape: shape, label: defaultLabel, color: color, cx: anchor.x, cy: anchor.y)
+        nodes.append(node)
+        selectedId = node.id
+    }
+
+    func move(id: UUID, to p: CGPoint) {
+        if let i = nodes.firstIndex(where: { $0.id == id }) {
+            nodes[i].cx = p.x
+            nodes[i].cy = p.y
+        }
+    }
+
+    func tap(id: UUID) {
+        if connectMode {
+            if let from = connectFromId, from != id {
+                if !edges.contains(where: { ($0.fromId == from && $0.toId == id) || ($0.fromId == id && $0.toId == from) }) {
+                    pushUndo()
+                    edges.append(MindMapEdge(fromId: from, toId: id))
+                }
+                connectFromId = nil
+            } else {
+                connectFromId = id
+            }
+        } else {
+            selectedId = selectedId == id ? nil : id
+        }
+    }
+
+    func deleteSelected() {
+        guard let id = selectedId else { return }
+        pushUndo()
+        nodes.removeAll { $0.id == id }
+        edges.removeAll { $0.fromId == id || $0.toId == id }
+        selectedId = nil
+    }
+
+    func setNodeLabel(id: UUID, label: String) {
+        if let i = nodes.firstIndex(where: { $0.id == id }) {
+            pushUndo()
+            nodes[i].label = label
+        }
+    }
+
+    // MARK: Export
+
+    func renderToImage(drawing: PKDrawing? = nil) -> UIImage? {
+        guard !nodes.isEmpty else { return nil }
+        let pad: CGFloat = 60
+        let minX = (nodes.map { $0.cx - $0.shape.defaultWidth/2  }.min() ?? 0) - pad
+        let minY = (nodes.map { $0.cy - $0.shape.defaultHeight/2 }.min() ?? 0) - pad
+        let maxX = (nodes.map { $0.cx + $0.shape.defaultWidth/2  }.max() ?? 400) + pad
+        let maxY = (nodes.map { $0.cy + $0.shape.defaultHeight/2 }.max() ?? 600) + pad
+        let w = max(maxX - minX, 300)
+        let h = max(maxY - minY, 300)
+        let offset = CGPoint(x: -minX, y: -minY)
+
+        let renderView = MindMapRenderView(nodes: nodes, edges: edges, offset: offset)
+            .frame(width: w, height: h)
+            .background(Color.white)
+
+        let renderer = ImageRenderer(content: renderView)
+        renderer.scale = 2
+        guard let baseImage = renderer.uiImage else { return nil }
+
+        if let drawing = drawing, !drawing.bounds.isNull && !drawing.strokes.isEmpty {
+            let drawingImage = drawing.image(from: CGRect(x: minX, y: minY, width: w, height: h), scale: 2)
+            let finalRenderer = UIGraphicsImageRenderer(size: baseImage.size)
+            return finalRenderer.image { _ in
+                baseImage.draw(at: .zero)
+                drawingImage.draw(in: CGRect(origin: .zero, size: baseImage.size))
+            }
+        }
+        return baseImage
+    }
+}
+
+// MARK: - Branch Curve Path
+
+struct MindMapBranchPath: Shape {
+    let start: CGPoint
+    let end: CGPoint
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: start)
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let control1 = CGPoint(x: start.x + dx * 0.5, y: start.y)
+        let control2 = CGPoint(x: start.x + dx * 0.5, y: end.y)
+        p.addCurve(to: end, control1: control1, control2: control2)
+        return p
+    }
+}
+
+// MARK: - Pure Render View for Export
+
+struct MindMapRenderView: View {
+    let nodes: [MindMapNode]
+    let edges: [MindMapEdge]
+    let offset: CGPoint
+
+    var body: some View {
+        ZStack {
+            ForEach(edges) { edge in
+                edgeBranch(edge)
+            }
+            ForEach(nodes) { node in
+                MindMapBubbleShapeView(node: node, isSelected: false)
+                    .position(x: node.cx + offset.x, y: node.cy + offset.y)
+            }
+        }
+    }
+
+    func edgeBranch(_ edge: MindMapEdge) -> some View {
+        guard let from = nodes.first(where: { $0.id == edge.fromId }),
+              let to   = nodes.first(where: { $0.id == edge.toId }) else {
+            return AnyView(EmptyView())
+        }
+        let (s, e) = branchEndpoints(from: from, to: to)
+        let os = CGPoint(x: s.x + offset.x, y: s.y + offset.y)
+        let oe = CGPoint(x: e.x + offset.x, y: e.y + offset.y)
+        return AnyView(
+            MindMapBranchPath(start: os, end: oe)
+                .stroke(from.color.opacity(0.85), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+        )
+    }
+
+    func branchEndpoints(from: MindMapNode, to: MindMapNode) -> (CGPoint, CGPoint) {
+        let dx = to.cx - from.cx
+        let fw = from.shape.defaultWidth, fh = from.shape.defaultHeight
+        let tw = to.shape.defaultWidth,   th = to.shape.defaultHeight
+        let s = CGPoint(x: dx >= 0 ? from.cx + fw/2 : from.cx - fw/2, y: from.cy)
+        let e = CGPoint(x: dx >= 0 ? to.cx - tw/2 : to.cx + tw/2, y: to.cy)
+        return (s, e)
+    }
+}
+
+// MARK: - Bubble Shape View
+
+struct MindMapBubbleShapeView: View {
+    let node: MindMapNode
+    let isSelected: Bool
+
+    var body: some View {
+        ZStack {
+            shapeBackground
+                .frame(width: node.shape.defaultWidth, height: node.shape.defaultHeight)
+
+            Text(node.label.isEmpty ? "Idee..." : node.label)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundColor(.primary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: node.shape.defaultWidth - 16, maxHeight: node.shape.defaultHeight - 16)
+        }
+    }
+
+    @ViewBuilder
+    var shapeBackground: some View {
+        let fill = node.color.opacity(0.12)
+        let stroke = isSelected ? Color.orange : node.color
+        let lineWidth: CGFloat = isSelected ? 3.5 : 2.5
+
+        switch node.shape {
+        case .circle:
+            Circle()
+                .fill(fill)
+                .overlay(Circle().stroke(stroke, lineWidth: lineWidth))
+        case .oval:
+            Capsule()
+                .fill(fill)
+                .overlay(Capsule().stroke(stroke, lineWidth: lineWidth))
+        case .rectangle:
+            RoundedRectangle(cornerRadius: 14)
+                .fill(fill)
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(stroke, lineWidth: lineWidth))
+        case .diamond:
+            DiamondShape()
+                .fill(fill)
+                .overlay(DiamondShape().stroke(stroke, lineWidth: lineWidth))
         }
     }
 }
 
-// MARK: - MindMap Representable
+// MARK: - Transparent PencilKit Canvas for MindMap Annotations
 
-struct MindMapRepresentable: UIViewControllerRepresentable {
-    @Binding var vcRef: MindMapViewController?
+final class MindMapCanvasView: PKCanvasView {
+    var isDrawingMode: Bool = false
 
-    func makeUIViewController(context: Context) -> MindMapViewController {
-        let controller = MindMapViewController()
-        DispatchQueue.main.async { vcRef = controller }
-        return controller
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let touches = event?.allTouches else { return super.hitTest(point, with: event) }
+        let hasPencil = touches.contains { $0.type == .pencil }
+        if hasPencil || isDrawingMode {
+            return super.hitTest(point, with: event)
+        }
+        // In mindmap mode, pass finger touches through to move/connect nodes
+        return nil
     }
-
-    func updateUIViewController(_ uiViewController: MindMapViewController, context: Context) {}
 }
 
-// MARK: - MindMap Designer SwiftUI View
+struct MindMapDrawingCanvasRepresentable: UIViewRepresentable {
+    @Binding var canvasViewRef: MindMapCanvasView?
+    let isDrawingMode: Bool
+
+    func makeUIView(context: Context) -> MindMapCanvasView {
+        let cv = MindMapCanvasView()
+        cv.backgroundColor = .clear
+        cv.isOpaque = false
+        cv.drawingPolicy = .anyInput
+        cv.tool = PKInkingTool(.pen, color: .black, width: 3)
+        cv.isDrawingMode = isDrawingMode
+        DispatchQueue.main.async { canvasViewRef = cv }
+        return cv
+    }
+
+    func updateUIView(_ uiView: MindMapCanvasView, context: Context) {
+        uiView.isDrawingMode = isDrawingMode
+    }
+}
+
+// MARK: - Main MindMap Designer View
 
 struct MindMapDesignerView: View {
+    @StateObject private var vm = MindMapDesignerViewModel()
     let onInsert: (UIImage) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var vc: MindMapViewController?
 
+    @State private var canvasView: MindMapCanvasView?
+    @State private var isDrawingMode: Bool = false
     @State private var activeTool: CanvasToolType = .pen
     @State private var selectedPenColor: Color = .black
     @State private var selectedWidth: CGFloat = 3.0
@@ -265,15 +357,188 @@ struct MindMapDesignerView: View {
     @State private var rulerActive: Bool = false
 
     @State private var selectedBubbleColor: Color = .blue
-    private let bubbleColors: [Color] = [.blue, .green, .orange, .purple, .red, .teal]
+    @State private var editLabelText = ""
+    @State private var showEditLabel = false
+    @State private var editingNodeId: UUID? = nil
+
+    private let bubbleColors: [Color] = [.blue, .purple, .teal, .green, .orange, .pink, .red]
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .top) {
-                MindMapRepresentable(vcRef: $vc)
-                    .ignoresSafeArea()
+            HStack(spacing: 0) {
+                // Left shapes & actions palette
+                shapePalette
+                    .frame(width: 95)
+                    .background(Color(.systemGroupedBackground))
 
-                // Dedicated Pen Toolbar for note-taking in MindMaps
+                Divider()
+
+                // Interactive MindMap canvas
+                canvas
+            }
+            .navigationTitle("MindMap")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { toolbarContent }
+            .alert("Knoten-Text bearbeiten", isPresented: $showEditLabel) {
+                TextField("Text", text: $editLabelText)
+                Button("OK") { applyLabelEdit() }
+                Button("Abbrechen", role: .cancel) {}
+            }
+        }
+    }
+
+    // MARK: Shape palette
+
+    var shapePalette: some View {
+        ScrollView {
+            VStack(spacing: 10) {
+                Text("Formen")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+
+                ForEach(BubbleShape.allCases) { shape in
+                    Button {
+                        vm.addNode(shape, color: selectedBubbleColor, near: CGPoint(x: 240, y: CGFloat(vm.nodes.count) * 110 + 100))
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: shape.symbolName)
+                                .font(.title3)
+                                .foregroundStyle(selectedBubbleColor)
+                            Text(shape.rawValue)
+                                .font(.caption2)
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(.primary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(selectedBubbleColor.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 8)
+                }
+
+                Divider().padding(.vertical, 4)
+
+                // Connect mode toggle
+                Button {
+                    vm.connectMode.toggle()
+                    vm.connectFromId = nil
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: vm.connectMode ? "point.filled.topleft.down.curvedto.point.bottomright.up" : "point.topleft.down.curvedto.point.bottomright.up")
+                            .font(.title3)
+                            .foregroundStyle(vm.connectMode ? .blue : .primary)
+                        Text(vm.connectMode ? "Verbinden\naktiv" : "Verbinden")
+                            .font(.caption2)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(vm.connectMode ? Color.blue.opacity(0.18) : Color(.systemFill))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 8)
+
+                Divider().padding(.vertical, 4)
+
+                // Color picker for new nodes
+                Text("Farbe")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                    ForEach(bubbleColors, id: \.self) { col in
+                        Circle()
+                            .fill(col)
+                            .frame(width: 24, height: 24)
+                            .overlay(
+                                Circle().stroke(Color.primary.opacity(0.3), lineWidth: selectedBubbleColor == col ? 2 : 0)
+                            )
+                            .onTapGesture { selectedBubbleColor = col }
+                    }
+                }
+                .padding(.horizontal, 8)
+            }
+        }
+    }
+
+    // MARK: Canvas
+
+    var canvas: some View {
+        ZStack(alignment: .top) {
+            ZStack(alignment: .topLeading) {
+                // Subtle dot grid background
+                Canvas { ctx, size in
+                    let step: CGFloat = 30
+                    var x: CGFloat = 15
+                    while x < size.width {
+                        var y: CGFloat = 15
+                        while y < size.height {
+                            let dot = Path(ellipseIn: CGRect(x: x - 1, y: y - 1, width: 2, height: 2))
+                            ctx.fill(dot, with: .color(Color(white: 0.85)))
+                            y += step
+                        }
+                        x += step
+                    }
+                }
+                .background(Color(white: 0.98))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    vm.selectedId = nil
+                    vm.connectFromId = nil
+                }
+
+                // Branches / Edges
+                ForEach(vm.edges) { edge in
+                    edgeBranchView(edge)
+                }
+
+                // Node Bubbles
+                ForEach(vm.nodes) { node in
+                    MindMapBubbleShapeView(
+                        node: node,
+                        isSelected: vm.selectedId == node.id || vm.connectFromId == node.id
+                    )
+                    .position(x: node.cx, y: node.cy)
+                    .onTapGesture {
+                        vm.tap(id: node.id)
+                    }
+                    .onLongPressGesture {
+                        editingNodeId = node.id
+                        editLabelText = node.label
+                        showEditLabel = true
+                    }
+                    .gesture(
+                        DragGesture()
+                            .onChanged { v in
+                                if !vm.connectMode && !isDrawingMode {
+                                    vm.move(id: node.id, to: v.location)
+                                }
+                            }
+                    )
+                }
+
+                // Connect hint banner
+                if vm.connectMode {
+                    Text(vm.connectFromId == nil ? "Start-Knoten antippen" : "Ziel-Knoten für Ast antippen")
+                        .font(.caption)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.blue.opacity(0.9))
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                        .padding(10)
+                }
+            }
+
+            // Transparent PencilKit layer for handwriting notes & sketches
+            MindMapDrawingCanvasRepresentable(canvasViewRef: $canvasView, isDrawingMode: isDrawingMode)
+
+            // Top Pen Toolbar
+            if isDrawingMode {
                 PenToolbarView(
                     activeTool: $activeTool,
                     selectedColor: $selectedPenColor,
@@ -283,66 +548,104 @@ struct MindMapDesignerView: View {
                     darkDrawingMode: false,
                     showRuler: true
                 ) { newTool in
-                    vc?.canvasView.tool = newTool
+                    canvasView?.tool = newTool
                 }
                 .padding(.top, 8)
             }
-            .navigationTitle("MindMap")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItemGroup(placement: .navigationBarLeading) {
-                    Button("Abbrechen") { dismiss() }
+        }
+        .clipped()
+    }
 
-                    Button { vc?.undo() } label: {
-                        Image(systemName: "arrow.uturn.backward")
-                    }
-                    .accessibilityLabel("Rückgängig")
+    func edgeBranchView(_ edge: MindMapEdge) -> some View {
+        guard let from = vm.nodes.first(where: { $0.id == edge.fromId }),
+              let to   = vm.nodes.first(where: { $0.id == edge.toId })
+        else { return AnyView(EmptyView()) }
 
-                    Button { vc?.redo() } label: {
-                        Image(systemName: "arrow.uturn.forward")
-                    }
-                    .accessibilityLabel("Wiederholen")
+        let dx = to.cx - from.cx
+        let fw = from.shape.defaultWidth
+        let tw = to.shape.defaultWidth
+        let s = CGPoint(x: dx >= 0 ? from.cx + fw/2 : from.cx - fw/2, y: from.cy)
+        let e = CGPoint(x: dx >= 0 ? to.cx - tw/2 : to.cx + tw/2, y: to.cy)
+
+        return AnyView(
+            MindMapBranchPath(start: s, end: e)
+                .stroke(from.color.opacity(0.85), style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+        )
+    }
+
+    // MARK: Toolbar
+
+    @ToolbarContentBuilder
+    var toolbarContent: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigationBarLeading) {
+            Button("Abbrechen") { dismiss() }
+
+            Button {
+                if let cv = canvasView, cv.undoManager?.canUndo == true {
+                    cv.undoManager?.undo()
+                } else {
+                    vm.undo()
                 }
+            } label: {
+                Image(systemName: "arrow.uturn.backward")
+            }
+            .disabled(!vm.canUndo && (canvasView?.undoManager?.canUndo != true))
+            .accessibilityLabel("Rückgängig")
 
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    // Shapes menu
-                    Menu {
-                        Section("Form hinzufügen") {
-                            ForEach(BubbleShape.allCases) { shape in
-                                Button {
-                                    vc?.addBubble(shape: shape, color: UIColor(selectedBubbleColor))
-                                } label: {
-                                    Label(shape.rawValue, systemImage: shape.symbolName)
-                                }
-                            }
-                        }
-                        Section("Formfarbe") {
-                            ForEach(bubbleColors, id: \.self) { col in
-                                Button {
-                                    selectedBubbleColor = col
-                                } label: {
-                                    HStack {
-                                        Text(col.description.capitalized)
-                                        if selectedBubbleColor == col {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        Label("Form", systemImage: "plus.circle")
-                    }
+            Button {
+                if let cv = canvasView, cv.undoManager?.canRedo == true {
+                    cv.undoManager?.redo()
+                } else {
+                    vm.redo()
+                }
+            } label: {
+                Image(systemName: "arrow.uturn.forward")
+            }
+            .disabled(!vm.canRedo && (canvasView?.undoManager?.canRedo != true))
+            .accessibilityLabel("Wiederholen")
+        }
 
-                    Button("Einfügen") {
-                        if let img = vc?.exportAsImage() {
-                            onInsert(img)
-                            dismiss()
-                        }
-                    }
-                    .bold()
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            // Edit text button for selected node
+            if let sel = vm.selectedId, let node = vm.nodes.first(where: { $0.id == sel }) {
+                Button {
+                    editingNodeId = node.id
+                    editLabelText = node.label
+                    showEditLabel = true
+                } label: {
+                    Label("Text bearbeiten", systemImage: "character.cursor.ibeam")
                 }
             }
+
+            // Mode toggle: MindMap vs Freehand Drawing
+            Button {
+                isDrawingMode.toggle()
+            } label: {
+                Label(isDrawingMode ? "Notizen aktiv" : "Notizen",
+                      systemImage: isDrawingMode ? "pencil.and.scribble" : "pencil")
+            }
+            .tint(isDrawingMode ? .blue : .primary)
+
+            Button(role: .destructive) { vm.deleteSelected() } label: {
+                Image(systemName: "trash")
+            }
+            .disabled(vm.selectedId == nil)
+
+            Button("Einfügen") {
+                if let img = vm.renderToImage(drawing: canvasView?.drawing) {
+                    onInsert(img)
+                    dismiss()
+                }
+            }
+            .bold()
+            .disabled(vm.nodes.isEmpty)
+        }
+    }
+
+    func applyLabelEdit() {
+        if let id = editingNodeId {
+            vm.setNodeLabel(id: id, label: editLabelText)
+            editingNodeId = nil
         }
     }
 }
