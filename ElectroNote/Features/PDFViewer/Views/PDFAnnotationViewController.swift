@@ -92,7 +92,7 @@ final class PDFAnnotationViewController: UIViewController {
     private func setupCanvasView() {
         canvasView.backgroundColor = .clear
         canvasView.isOpaque        = false
-        canvasView.drawingPolicy   = .pencilOnly   // finger scrolls/navigates PDF
+        canvasView.drawingPolicy   = .anyInput
         canvasView.delegate        = self
 
         view.addSubview(canvasView)

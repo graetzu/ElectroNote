@@ -18,8 +18,10 @@ final class InfiniteNotebookViewController: UIViewController {
     var canvasView  = PKCanvasView()
     let toolPicker  = PKToolPicker()
 
-    // MARK: - Content layers (below the PencilKit Metal layer)
+    // MARK: - Content layers & views (below the PencilKit Metal layer)
     private var backgroundLayer = CALayer()
+    private var pdfViews:    [UIImageView] = []
+    private var imageViews:  [UIImageView] = []
     private var pdfLayers:   [CALayer] = []
     private var imageLayers: [CALayer] = []
 
@@ -362,9 +364,10 @@ extension InfiniteNotebookViewController {
         let h       = w * ratio
 
         let contentFrame = CGRect(x: 0, y: startY, width: w, height: h)
-        let layer = makeImageLayer(image: image, frame: contentFrame)
-        insertBelowDrawing(layer)
-        imageLayers.append(layer)
+        let imgView = makeImageView(image: image, frame: contentFrame)
+        canvasView.insertSubview(imgView, at: 0)
+        imageViews.append(imgView)
+        imageLayers.append(imgView.layer)
 
         let needed = startY + h + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height {
@@ -375,7 +378,7 @@ extension InfiniteNotebookViewController {
         let entry = InsertedImage(id: UUID(), filename: filename,
                                   startY: startY, width: w, height: h)
         document.insertedImages.append(entry)
-        addImageHandle(for: layer, at: contentFrame, documentIndex: document.insertedImages.count - 1)
+        addImageHandle(for: imgView.layer, at: contentFrame, documentIndex: document.insertedImages.count - 1)
         document.documentHeight = canvasView.contentSize.height
         store.saveDocument(document)
 
@@ -397,11 +400,12 @@ extension InfiniteNotebookViewController {
         guard let img = UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) else { return }
         let contentFrame = CGRect(x: entry.startX, y: entry.startY,
                                   width: entry.width, height: entry.height)
-        let layer = makeImageLayer(image: img, frame: contentFrame)
-        insertBelowDrawing(layer)
-        imageLayers.append(layer)
-        let idx = document.insertedImages.firstIndex(where: { $0.id == entry.id }) ?? (imageLayers.count - 1)
-        addImageHandle(for: layer, at: contentFrame, documentIndex: idx)
+        let imgView = makeImageView(image: img, frame: contentFrame)
+        canvasView.insertSubview(imgView, at: 0)
+        imageViews.append(imgView)
+        imageLayers.append(imgView.layer)
+        let idx = document.insertedImages.firstIndex(where: { $0.id == entry.id }) ?? (imageViews.count - 1)
+        addImageHandle(for: imgView.layer, at: contentFrame, documentIndex: idx)
     }
 
     // MARK: - Layer helpers
@@ -414,12 +418,19 @@ extension InfiniteNotebookViewController {
         let h      = height ?? bounds.height * scale
         let image  = renderPDFPage(page, width: w, height: h)
 
-        let layer = CALayer()
-        layer.frame    = CGRect(x: 0, y: y, width: w, height: h)
-        layer.contents = image.cgImage
-        layer.contentsGravity = .resizeAspect
-        insertBelowDrawing(layer)
-        pdfLayers.append(layer)
+        let imgView = UIImageView(frame: CGRect(x: 0, y: y, width: w, height: h))
+        imgView.image = image
+        imgView.contentMode = .scaleAspectFit
+        imgView.isUserInteractionEnabled = false // Allow pencil & handwriting to draw seamlessly on top
+        imgView.backgroundColor = .white
+        imgView.layer.shadowColor = UIColor.black.cgColor
+        imgView.layer.shadowOpacity = 0.08
+        imgView.layer.shadowOffset = CGSize(width: 0, height: 2)
+        imgView.layer.shadowRadius = 4
+
+        canvasView.insertSubview(imgView, at: 0)
+        pdfViews.append(imgView)
+        pdfLayers.append(imgView.layer)
         return h
     }
 
@@ -436,25 +447,13 @@ extension InfiniteNotebookViewController {
         }
     }
 
-    private func makeImageLayer(image: UIImage, frame: CGRect) -> CALayer {
-        let layer = CALayer()
-        layer.frame           = frame
-        layer.contents        = image.cgImage
-        layer.contentsGravity = .resizeAspect
-        layer.cornerRadius    = 4
-        layer.masksToBounds   = true
-        return layer
-    }
-
-    private func insertBelowDrawing(_ layer: CALayer) {
-        // Find the PencilKit Metal layer (always the topmost sublayer) and insert just below it.
-        // This keeps content layers visible while the ink layer stays on top.
-        let sublayers = canvasView.layer.sublayers ?? []
-        if sublayers.count > 1, let ref = sublayers.last {
-            canvasView.layer.insertSublayer(layer, below: ref)
-        } else {
-            canvasView.layer.addSublayer(layer)
-        }
+    private func makeImageView(image: UIImage, frame: CGRect) -> UIImageView {
+        let imgView = UIImageView(frame: frame)
+        imgView.image = image
+        imgView.contentMode = .scaleAspectFit
+        imgView.isUserInteractionEnabled = false
+        imgView.clipsToBounds = true
+        return imgView
     }
 
     private func nextInsertY() -> CGFloat {
@@ -832,16 +831,17 @@ extension InfiniteNotebookViewController {
 
         let contentFrame = CGRect(x: contentOrigin.x, y: contentOrigin.y,
                                   width: img.size.width, height: img.size.height)
-        let layer = makeImageLayer(image: img, frame: contentFrame)
-        insertBelowDrawing(layer)
-        imageLayers.append(layer)
+        let imgView = makeImageView(image: img, frame: contentFrame)
+        canvasView.insertSubview(imgView, at: 0)
+        imageViews.append(imgView)
+        imageLayers.append(imgView.layer)
 
         let entry = InsertedImage(id: UUID(), filename: filename,
                                   startX: contentOrigin.x, startY: contentOrigin.y,
                                   width: img.size.width, height: img.size.height,
                                   textContent: text, fontSize: fontSize)
         document.insertedImages.append(entry)
-        addImageHandle(for: layer, at: contentFrame, documentIndex: document.insertedImages.count - 1)
+        addImageHandle(for: imgView.layer, at: contentFrame, documentIndex: document.insertedImages.count - 1)
         let needed = contentOrigin.y + img.size.height + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height { canvasView.contentSize.height = needed }
         document.documentHeight = canvasView.contentSize.height
