@@ -19,6 +19,7 @@ final class InfiniteNotebookViewController: UIViewController {
     let toolPicker  = PKToolPicker()
 
     // MARK: - Content layers & views (below the PencilKit Metal layer)
+    private var paperBackgroundView = UIView()
     private var backgroundLayer = CALayer()
     private var pdfViews:    [UIImageView] = []
     private var imageViews:  [UIImageView] = []
@@ -141,11 +142,16 @@ final class InfiniteNotebookViewController: UIViewController {
         canvasView.minimumZoomScale = 0.25
         canvasView.maximumZoomScale = 8.0
         canvasView.drawingPolicy   = .pencilOnly
-        canvasView.backgroundColor = .systemGray6  // solid base prevents black Metal tiles
+        canvasView.backgroundColor = .clear
+        canvasView.isOpaque        = false
         canvasView.delegate        = self
         // 2-finger scroll in pencilOnly mode — prevents single palm touch from panning
         canvasView.panGestureRecognizer.minimumNumberOfTouches = 2
         view.addSubview(canvasView)
+
+        paperBackgroundView.frame = CGRect(origin: .zero, size: canvasView.contentSize)
+        paperBackgroundView.isUserInteractionEnabled = false
+        canvasView.insertSubview(paperBackgroundView, at: 0)
     }
 
     private func setupToolPicker() {
@@ -178,6 +184,7 @@ final class InfiniteNotebookViewController: UIViewController {
     // MARK: - Background
 
     private func setupBackgroundLayer() {
+        paperBackgroundView.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         backgroundLayer.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         if backgroundLayer.superlayer == nil {
             canvasView.layer.insertSublayer(backgroundLayer, at: 0)
@@ -190,14 +197,12 @@ final class InfiniteNotebookViewController: UIViewController {
         let bg   = dark ? UIColor(white: 0.12, alpha: 1) : UIColor.white
         let line = dark ? UIColor(white: 0.30, alpha: 1) : UIColor.systemGray4
         let pattern = UIColor(patternImage: makePattern(document.background, bg: bg, line: line))
-        // PKCanvasView renders its Metal layer using canvasView.backgroundColor as the paper color.
-        // Sublayers inserted below the Metal layer are hidden by it, so the pattern must go here.
-        canvasView.backgroundColor = pattern
-        // Keep backgroundLayer in sync for PDF export rendering (backgroundLayer.render(in:)).
+        paperBackgroundView.backgroundColor = pattern
         backgroundLayer.backgroundColor = pattern.cgColor
     }
 
     private func updateBackgroundFrame() {
+        paperBackgroundView.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         backgroundLayer.frame = CGRect(origin: .zero, size: canvasView.contentSize)
     }
 
@@ -314,10 +319,10 @@ final class InfiniteNotebookViewController: UIViewController {
 extension InfiniteNotebookViewController {
 
     func insertPDF(from url: URL) {
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-
         Task { @MainActor in
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
             let pdfURL: URL
             do {
                 pdfURL = try await DocumentConverter.shared.convertToPDF(sourceURL: url)
@@ -325,9 +330,12 @@ extension InfiniteNotebookViewController {
                 pdfURL = url
             }
 
-            guard let filename = try? self.store.copyPDF(from: pdfURL),
-                  let pdf = PDFDocument(url: self.store.pdfURL(filename: filename))
-            else { return }
+            let pdfAccessing = (pdfURL != url) ? pdfURL.startAccessingSecurityScopedResource() : false
+            defer { if pdfAccessing { pdfURL.stopAccessingSecurityScopedResource() } }
+
+            guard let filename = try? self.store.copyPDF(from: pdfURL) else { return }
+            let storedURL = self.store.pdfURL(filename: filename)
+            guard let pdf = PDFDocument(url: storedURL), pdf.pageCount > 0 else { return }
 
             let startY = self.nextInsertY()
             var y = startY
@@ -365,7 +373,11 @@ extension InfiniteNotebookViewController {
 
         let contentFrame = CGRect(x: 0, y: startY, width: w, height: h)
         let imgView = makeImageView(image: image, frame: contentFrame)
-        canvasView.insertSubview(imgView, at: 0)
+        if paperBackgroundView.superview != nil {
+            canvasView.insertSubview(imgView, aboveSubview: paperBackgroundView)
+        } else {
+            canvasView.insertSubview(imgView, at: 0)
+        }
         imageViews.append(imgView)
         imageLayers.append(imgView.layer)
 
@@ -401,7 +413,11 @@ extension InfiniteNotebookViewController {
         let contentFrame = CGRect(x: entry.startX, y: entry.startY,
                                   width: entry.width, height: entry.height)
         let imgView = makeImageView(image: img, frame: contentFrame)
-        canvasView.insertSubview(imgView, at: 0)
+        if paperBackgroundView.superview != nil {
+            canvasView.insertSubview(imgView, aboveSubview: paperBackgroundView)
+        } else {
+            canvasView.insertSubview(imgView, at: 0)
+        }
         imageViews.append(imgView)
         imageLayers.append(imgView.layer)
         let idx = document.insertedImages.firstIndex(where: { $0.id == entry.id }) ?? (imageViews.count - 1)
@@ -414,8 +430,8 @@ extension InfiniteNotebookViewController {
     private func addPDFLayer(page: PDFPage, at y: CGFloat, height: CGFloat? = nil) -> CGFloat {
         let bounds = page.bounds(for: .cropBox)
         let w      = canvasView.contentSize.width > 0 ? canvasView.contentSize.width : view.bounds.width
-        let scale  = w / bounds.width
-        let h      = height ?? bounds.height * scale
+        let scale  = w / max(bounds.width, 1)
+        let h      = height ?? (bounds.height * scale)
         let image  = renderPDFPage(page, width: w, height: h)
 
         let imgView = UIImageView(frame: CGRect(x: 0, y: y, width: w, height: h))
@@ -428,23 +444,19 @@ extension InfiniteNotebookViewController {
         imgView.layer.shadowOffset = CGSize(width: 0, height: 2)
         imgView.layer.shadowRadius = 4
 
-        canvasView.insertSubview(imgView, at: 0)
+        if paperBackgroundView.superview != nil {
+            canvasView.insertSubview(imgView, aboveSubview: paperBackgroundView)
+        } else {
+            canvasView.insertSubview(imgView, at: 0)
+        }
         pdfViews.append(imgView)
         pdfLayers.append(imgView.layer)
         return h
     }
 
     private func renderPDFPage(_ page: PDFPage, width: CGFloat, height: CGFloat) -> UIImage {
-        let size = CGSize(width: width, height: height)
-        return UIGraphicsImageRenderer(size: size).image { ctx in
-            UIColor.white.setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
-            let b = page.bounds(for: .cropBox)
-            let scale = width / b.width
-            ctx.cgContext.translateBy(x: 0, y: height)
-            ctx.cgContext.scaleBy(x: scale, y: -scale)
-            page.draw(with: .cropBox, to: ctx.cgContext)
-        }
+        let targetSize = CGSize(width: max(width, 100), height: max(height, 100))
+        return page.thumbnail(of: targetSize, for: .cropBox)
     }
 
     private func makeImageView(image: UIImage, frame: CGRect) -> UIImageView {
