@@ -54,6 +54,26 @@ struct StickyNote: Identifiable, Codable {
     var x: CGFloat   // canvas content coordinates
     var y: CGFloat
     var colorIndex: Int
+    var drawingData: Data?
+
+    init(id: UUID = UUID(), text: String = "", x: CGFloat, y: CGFloat, colorIndex: Int = 0, drawingData: Data? = nil) {
+        self.id = id
+        self.text = text
+        self.x = x
+        self.y = y
+        self.colorIndex = colorIndex
+        self.drawingData = drawingData
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id          = try c.decode(UUID.self, forKey: .id)
+        text        = try c.decode(String.self, forKey: .text)
+        x           = try c.decode(CGFloat.self, forKey: .x)
+        y           = try c.decode(CGFloat.self, forKey: .y)
+        colorIndex  = try c.decode(Int.self, forKey: .colorIndex)
+        drawingData = try c.decodeIfPresent(Data.self, forKey: .drawingData)
+    }
 }
 
 // MARK: - Document model
@@ -66,7 +86,7 @@ struct NotebookDocument: Codable {
     var insertedImages:  [InsertedImage] = []
     var mathEnabled:      Bool            = false
     var darkDrawingMode:  Bool            = false
-    var shapeSnapEnabled: Bool            = true
+    var shapeSnapEnabled: Bool            = false
     var bookmarks:       [Bookmark]      = []
     var stickyNotes:     [StickyNote]    = []
 
@@ -80,34 +100,40 @@ struct NotebookDocument: Codable {
 struct InsertedPDF: Identifiable, Codable {
     let id: UUID
     let filename: String
-    let startY: CGFloat
-    let pageHeights: [CGFloat]
+    var startY: CGFloat
+    var pageHeights: [CGFloat]
 
     var endY: CGFloat { startY + pageHeights.reduce(0, +) }
 }
 
 struct InsertedImage: Identifiable, Codable {
     let id: UUID
-    let filename: String
+    var filename: String
     var startX: CGFloat
-    let startY: CGFloat
-    let width: CGFloat
-    let height: CGFloat
+    var startY: CGFloat
+    var width: CGFloat
+    var height: CGFloat
+    var textContent: String?
+    var fontSize: CGFloat?
 
     init(id: UUID = UUID(), filename: String, startX: CGFloat = 0,
-         startY: CGFloat, width: CGFloat, height: CGFloat) {
+         startY: CGFloat, width: CGFloat, height: CGFloat,
+         textContent: String? = nil, fontSize: CGFloat? = nil) {
         self.id = id; self.filename = filename; self.startX = startX
         self.startY = startY; self.width = width; self.height = height
+        self.textContent = textContent; self.fontSize = fontSize
     }
 
     // Backward-compatible decoder: startX defaults to 0 for old documents
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        id       = try c.decode(UUID.self,    forKey: .id)
-        filename = try c.decode(String.self,  forKey: .filename)
-        startX   = try c.decodeIfPresent(CGFloat.self, forKey: .startX) ?? 0
-        startY   = try c.decode(CGFloat.self, forKey: .startY)
-        width    = try c.decode(CGFloat.self, forKey: .width)
-        height   = try c.decode(CGFloat.self, forKey: .height)
+        id          = try c.decode(UUID.self, forKey: .id)
+        filename    = try c.decode(String.self, forKey: .filename)
+        startX      = try c.decodeIfPresent(CGFloat.self, forKey: .startX) ?? 0
+        startY      = try c.decode(CGFloat.self, forKey: .startY)
+        width       = try c.decode(CGFloat.self, forKey: .width)
+        height      = try c.decode(CGFloat.self, forKey: .height)
+        textContent = try c.decodeIfPresent(String.self, forKey: .textContent)
+        fontSize    = try c.decodeIfPresent(CGFloat.self, forKey: .fontSize)
     }
 }

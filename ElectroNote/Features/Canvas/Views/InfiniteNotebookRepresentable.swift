@@ -42,6 +42,10 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
             vm.pendingInkPreset = nil
             vc.canvasView.tool = preset.pkTool
         }
+        if let tool = vm.pendingPKTool {
+            vm.pendingPKTool = nil
+            vc.canvasView.tool = tool
+        }
         if let insertion = vm.pendingTextInsertion {
             vm.pendingTextInsertion = nil
             vc.startTextPlacement(text: insertion.text, fontSize: insertion.fontSize)

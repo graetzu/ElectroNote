@@ -1,17 +1,74 @@
 import SwiftUI
 import Combine
+import PencilKit
+
+enum CanvasToolType: String, CaseIterable, Identifiable {
+    case pen        = "Stift"
+    case marker     = "Marker"
+    case pencil     = "Bleistift"
+    case eraser     = "Radierer"
+    case lasso      = "Lasso"
+
+    var id: String { rawValue }
+    var iconName: String {
+        switch self {
+        case .pen:        return "pencil.tip"
+        case .marker:     return "highlighter"
+        case .pencil:     return "pencil"
+        case .eraser:     return "eraser.fill"
+        case .lasso:      return "lasso"
+        }
+    }
+}
+
+func makePKTool(tool: CanvasToolType, color: Color, width: CGFloat, eraserType: PKEraserTool.EraserType, darkDrawingMode: Bool = false) -> PKTool {
+    let uiColor: UIColor = (color == .black && darkDrawingMode) ? .white : UIColor(color)
+    switch tool {
+    case .pen:
+        return PKInkingTool(.pen, color: uiColor, width: width)
+    case .marker:
+        return PKInkingTool(.marker, color: uiColor, width: max(width * 3.0, 10))
+    case .pencil:
+        return PKInkingTool(.pencil, color: uiColor, width: max(width * 1.5, 2))
+    case .eraser:
+        return PKEraserTool(eraserType)
+    case .lasso:
+        return PKLassoTool()
+    }
+}
 
 @MainActor
 final class InfiniteNotebookViewModel: ObservableObject {
+
+    // MARK: - Pen Toolbar State
+    @Published var activeTool: CanvasToolType = .pen {
+        didSet { applyCurrentTool() }
+    }
+    @Published var selectedColor: Color = .black {
+        didSet { applyCurrentTool() }
+    }
+    @Published var selectedWidth: CGFloat = 3.0 {
+        didSet { applyCurrentTool() }
+    }
+    @Published var eraserType: PKEraserTool.EraserType = .vector {
+        didSet { applyCurrentTool() }
+    }
+    @Published var pendingPKTool: PKTool? = nil
 
     // MARK: - Published state (synced to UIKit VC)
     @Published var pencilOnly:      Bool            = true
     @Published var background:      BackgroundStyle  = .grid
     @Published var lineSpacing:     LineSpacing      = .medium
     @Published var mathEnabled:       Bool            = false
-    @Published var darkDrawingMode:   Bool            = false
-    @Published var shapeSnapEnabled:  Bool            = true
+    @Published var darkDrawingMode:   Bool            = false {
+        didSet { applyCurrentTool() }
+    }
+    @Published var shapeSnapEnabled:  Bool            = false
     @Published var rulerActive:       Bool            = false
+
+    func applyCurrentTool() {
+        pendingPKTool = makePKTool(tool: activeTool, color: selectedColor, width: selectedWidth, eraserType: eraserType, darkDrawingMode: darkDrawingMode)
+    }
 
     // MARK: - UI state
     @Published var saveState:    SaveState = .saved
@@ -39,6 +96,8 @@ final class InfiniteNotebookViewModel: ObservableObject {
 
     // MARK: - Export
     @Published var triggerExport:  Bool = false
+
+
 
     struct TypedTextInsertion {
         let text: String

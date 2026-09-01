@@ -1,8 +1,11 @@
 import SwiftUI
 import Foundation
+import Combine
 
 @MainActor
 final class SyncViewModel: ObservableObject {
+
+    private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Sync state
 
@@ -42,6 +45,13 @@ final class SyncViewModel: ObservableObject {
         loginFlow.onSuccess = { [weak self] creds in
             self?.credentials = creds
         }
+
+        // Forward loginFlow changes so SyncSettingsView re-renders when
+        // loginFlow.loginURL / isLoading / errorMessage change.
+        loginFlow.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
     }
 
     // MARK: - Login / Logout

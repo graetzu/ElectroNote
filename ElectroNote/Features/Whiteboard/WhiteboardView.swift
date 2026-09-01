@@ -7,15 +7,23 @@ import UIKit
 final class WhiteboardViewController: UIViewController {
 
     let canvasView = PKCanvasView()
-    let toolPicker = PKToolPicker()
-    var onInsert: ((UIImage) -> Void)?
+    private var backgroundStyle: BackgroundStyle = .blank
+    private var darkDrawingMode: Bool = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .white
         setupCanvas()
-        setupToolPicker()
-        setupToolbar()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if canvasView.frame != view.bounds {
+            canvasView.frame = view.bounds
+        }
+        if canvasView.contentSize.width < view.bounds.width {
+            canvasView.contentSize = CGSize(width: max(view.bounds.width * 2, 2000), height: max(view.bounds.height * 2, 2000))
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -27,50 +35,73 @@ final class WhiteboardViewController: UIViewController {
         canvasView.frame = view.bounds
         canvasView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         canvasView.backgroundColor = .white
-        canvasView.drawingPolicy = .anyInput  // finger + pencil in whiteboard
+        canvasView.drawingPolicy = .anyInput  // pencil + finger drawing
         canvasView.minimumZoomScale = 0.5
         canvasView.maximumZoomScale = 4.0
+        canvasView.contentSize = CGSize(width: 3000, height: 3000)
+        canvasView.isScrollEnabled = true
         view.addSubview(canvasView)
 
-        // Default to a thick black marker for whiteboard feel
-        canvasView.tool = PKInkingTool(.marker, color: .black, width: 8)
+        // Default tool: Pen
+        canvasView.tool = PKInkingTool(.pen, color: .black, width: 3)
     }
 
-    private func setupToolPicker() {
-        toolPicker.setVisible(true, forFirstResponder: canvasView)
-        toolPicker.addObserver(canvasView)
+    func refreshBackground(style: BackgroundStyle, dark: Bool) {
+        self.backgroundStyle = style
+        self.darkDrawingMode = dark
+        let bg = dark ? UIColor(white: 0.12, alpha: 1) : UIColor.white
+        let line = dark ? UIColor(white: 0.30, alpha: 1) : UIColor.systemGray4
+        let pattern = UIColor(patternImage: makePattern(style, bg: bg, line: line))
+        canvasView.backgroundColor = pattern
+        view.backgroundColor = bg
     }
 
-    private func setupToolbar() {
-        let clearBtn = UIBarButtonItem(
-            image: UIImage(systemName: "trash"),
-            style: .plain, target: self, action: #selector(clearCanvas)
-        )
-        clearBtn.tintColor = .systemRed
-
-        let undoBtn = UIBarButtonItem(
-            image: UIImage(systemName: "arrow.uturn.backward"),
-            style: .plain, target: self, action: #selector(undoAction)
-        )
-        let redoBtn = UIBarButtonItem(
-            image: UIImage(systemName: "arrow.uturn.forward"),
-            style: .plain, target: self, action: #selector(redoAction)
-        )
-        let insertBtn = UIBarButtonItem(
-            title: "Als Bild einfügen", style: .done,
-            target: self, action: #selector(insertImage)
-        )
-        let closeBtn = UIBarButtonItem(
-            image: UIImage(systemName: "xmark"), style: .plain,
-            target: self, action: #selector(closeSheet)
-        )
-
-        navigationItem.leftBarButtonItems  = [closeBtn, clearBtn]
-        navigationItem.rightBarButtonItems = [insertBtn, redoBtn, undoBtn]
-        title = "Whiteboard"
+    private func makePattern(_ style: BackgroundStyle, bg: UIColor, line: UIColor) -> UIImage {
+        let sp: CGFloat = 28
+        switch style {
+        case .blank:
+            return solidColor(bg)
+        case .lined:
+            let s = CGSize(width: 1, height: sp)
+            return UIGraphicsImageRenderer(size: s).image { ctx in
+                bg.setFill(); ctx.fill(CGRect(origin: .zero, size: s))
+                line.setStroke()
+                let p = UIBezierPath(); p.move(to: CGPoint(x: 0, y: sp - 0.5)); p.addLine(to: CGPoint(x: 1, y: sp - 0.5)); p.stroke()
+            }
+        case .grid:
+            let s = CGSize(width: sp, height: sp)
+            return UIGraphicsImageRenderer(size: s).image { ctx in
+                bg.setFill(); ctx.fill(CGRect(origin: .zero, size: s))
+                line.setStroke()
+                let p = UIBezierPath()
+                p.move(to: CGPoint(x: sp - 0.5, y: 0)); p.addLine(to: CGPoint(x: sp - 0.5, y: sp))
+                p.move(to: CGPoint(x: 0, y: sp - 0.5)); p.addLine(to: CGPoint(x: sp, y: sp - 0.5))
+                p.stroke()
+            }
+        case .dotted:
+            let s = CGSize(width: sp, height: sp)
+            return UIGraphicsImageRenderer(size: s).image { ctx in
+                bg.setFill(); ctx.fill(CGRect(origin: .zero, size: s))
+                line.setFill()
+                ctx.fill(CGRect(x: sp/2 - 1, y: sp/2 - 1, width: 2, height: 2))
+            }
+        case .cornell:
+            let s = CGSize(width: sp, height: sp)
+            return UIGraphicsImageRenderer(size: s).image { ctx in
+                bg.setFill(); ctx.fill(CGRect(origin: .zero, size: s))
+                line.setStroke()
+                let p = UIBezierPath(); p.move(to: CGPoint(x: 0, y: sp - 0.5)); p.addLine(to: CGPoint(x: 1, y: sp - 0.5)); p.stroke()
+            }
+        }
     }
 
-    @objc private func clearCanvas() {
+    private func solidColor(_ color: UIColor) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { ctx in
+            color.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+    }
+
+    func clearCanvas() {
         let alert = UIAlertController(title: "Whiteboard löschen?", message: nil, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
         alert.addAction(UIAlertAction(title: "Löschen", style: .destructive) { [weak self] _ in
@@ -79,45 +110,152 @@ final class WhiteboardViewController: UIViewController {
         present(alert, animated: true)
     }
 
-    @objc private func undoAction() {
-        UIApplication.shared.sendAction(#selector(UndoManager.undo), to: nil, from: nil, for: nil)
-    }
-    @objc private func redoAction() {
-        UIApplication.shared.sendAction(#selector(UndoManager.redo), to: nil, from: nil, for: nil)
+    func undo() {
+        canvasView.undoManager?.undo()
     }
 
-    @objc private func insertImage() {
+    func redo() {
+        canvasView.undoManager?.redo()
+    }
+
+    func exportImage(withBackground: Bool = true) -> UIImage {
         let bounds = canvasView.drawing.bounds
         let renderRect = bounds.isNull ? CGRect(origin: .zero, size: view.bounds.size)
                                        : bounds.insetBy(dx: -30, dy: -30)
         let image = canvasView.drawing.image(from: renderRect, scale: 2)
 
-        // Compose on white background
         let renderer = UIGraphicsImageRenderer(size: image.size)
-        let final = renderer.image { ctx in
-            UIColor.white.setFill()
-            ctx.fill(CGRect(origin: .zero, size: image.size))
+        return renderer.image { ctx in
+            if withBackground {
+                let bg = darkDrawingMode ? UIColor(white: 0.12, alpha: 1) : UIColor.white
+                let line = darkDrawingMode ? UIColor(white: 0.30, alpha: 1) : UIColor.systemGray4
+                let pattern = UIColor(patternImage: makePattern(backgroundStyle, bg: bg, line: line))
+                pattern.setFill()
+                ctx.fill(CGRect(origin: .zero, size: image.size))
+            } else {
+                UIColor.white.setFill()
+                ctx.fill(CGRect(origin: .zero, size: image.size))
+            }
             image.draw(at: .zero)
         }
-        onInsert?(final)
-        dismiss(animated: true)
-    }
-
-    @objc private func closeSheet() {
-        dismiss(animated: true)
     }
 }
 
-// MARK: - SwiftUI wrapper
+// MARK: - Whiteboard Representable
 
-struct WhiteboardView: UIViewControllerRepresentable {
-    let onInsert: (UIImage) -> Void
+struct WhiteboardRepresentable: UIViewControllerRepresentable {
+    @Binding var vcRef: WhiteboardViewController?
+    let background: BackgroundStyle
+    let darkDrawingMode: Bool
+    let rulerActive: Bool
 
-    func makeUIViewController(context: Context) -> UINavigationController {
+    func makeUIViewController(context: Context) -> WhiteboardViewController {
         let vc = WhiteboardViewController()
-        vc.onInsert = onInsert
-        return UINavigationController(rootViewController: vc)
+        DispatchQueue.main.async { vcRef = vc }
+        return vc
     }
 
-    func updateUIViewController(_ uiViewController: UINavigationController, context: Context) {}
+    func updateUIViewController(_ vc: WhiteboardViewController, context: Context) {
+        vc.refreshBackground(style: background, dark: darkDrawingMode)
+        if vc.canvasView.isRulerActive != rulerActive {
+            vc.canvasView.isRulerActive = rulerActive
+        }
+    }
+}
+
+// MARK: - Whiteboard SwiftUI View
+
+struct WhiteboardView: View {
+    let onInsert: (UIImage) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var activeTool: CanvasToolType = .marker
+    @State private var selectedColor: Color = .black
+    @State private var selectedWidth: CGFloat = 6.0
+    @State private var eraserType: PKEraserTool.EraserType = .vector
+    @State private var rulerActive: Bool = false
+    @State private var background: BackgroundStyle = .blank
+    @State private var darkDrawingMode: Bool = false
+
+    @State private var vc: WhiteboardViewController?
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .top) {
+                WhiteboardRepresentable(
+                    vcRef: $vc,
+                    background: background,
+                    darkDrawingMode: darkDrawingMode,
+                    rulerActive: rulerActive
+                )
+                .ignoresSafeArea()
+
+                // Dedicated Pen & Tool top bar
+                PenToolbarView(
+                    activeTool: $activeTool,
+                    selectedColor: $selectedColor,
+                    selectedWidth: $selectedWidth,
+                    eraserType: $eraserType,
+                    rulerActive: $rulerActive,
+                    darkDrawingMode: darkDrawingMode,
+                    showRuler: true
+                ) { newTool in
+                    vc?.canvasView.tool = newTool
+                }
+                .padding(.top, 8)
+            }
+            .navigationTitle("Whiteboard")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .navigationBarLeading) {
+                    Button("Schließen") { dismiss() }
+
+                    Button { vc?.clearCanvas() } label: {
+                        Image(systemName: "trash")
+                    }
+                    .tint(.red)
+                    .accessibilityLabel("Löschen")
+
+                    Button { vc?.undo() } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .accessibilityLabel("Rückgängig")
+
+                    Button { vc?.redo() } label: {
+                        Image(systemName: "arrow.uturn.forward")
+                    }
+                    .accessibilityLabel("Wiederholen")
+                }
+
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    // Background style menu
+                    Menu {
+                        Section("Vorlage") {
+                            ForEach(BackgroundStyle.allCases) { style in
+                                Button {
+                                    background = style
+                                } label: {
+                                    Label(style.rawValue, systemImage: style.symbolName)
+                                }
+                            }
+                        }
+                        Section("Modus") {
+                            Toggle("Dunkles Board", isOn: $darkDrawingMode)
+                        }
+                    } label: {
+                        Image(systemName: background.symbolName)
+                    }
+                    .accessibilityLabel("Hintergrund")
+
+                    Button("Als Bild einfügen") {
+                        if let img = vc?.exportImage(withBackground: background != .blank) {
+                            onInsert(img)
+                            dismiss()
+                        }
+                    }
+                    .bold()
+                }
+            }
+        }
+    }
 }

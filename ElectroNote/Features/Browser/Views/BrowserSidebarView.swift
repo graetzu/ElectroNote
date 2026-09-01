@@ -209,34 +209,13 @@ struct BrowserSidebarView: View {
             }
         }
 
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button { showNextcloud = true } label: {
-                Image(systemName: "icloud")
-            }
-            .accessibilityLabel("Nextcloud")
-        }
-
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button { showTagBrowser = true } label: {
-                Image(systemName: "tag")
-            }
-            .accessibilityLabel("Tags")
-        }
-
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button { showTrash = true } label: {
-                Image(systemName: "trash")
-            }
-            .accessibilityLabel("Papierkorb")
-        }
-
-        ToolbarItem(placement: .navigationBarTrailing) {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
             Menu {
-                Button { showNewFolder = true } label: {
-                    Label("Neuer Ordner", systemImage: "folder.badge.plus")
-                }
                 Button { showDocTypePicker = true } label: {
                     Label("Neues Dokument…", systemImage: "note.text.badge.plus")
+                }
+                Button { showNewFolder = true } label: {
+                    Label("Neuer Ordner", systemImage: "folder.badge.plus")
                 }
                 Divider()
                 Button { showPDFPicker = true } label: {
@@ -245,6 +224,22 @@ struct BrowserSidebarView: View {
             } label: {
                 Image(systemName: "plus")
             }
+            .accessibilityLabel("Neu")
+
+            Menu {
+                Button { showNextcloud = true } label: {
+                    Label("Nextcloud", systemImage: "icloud")
+                }
+                Button { showTagBrowser = true } label: {
+                    Label("Tags", systemImage: "tag")
+                }
+                Button { showTrash = true } label: {
+                    Label("Papierkorb", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .accessibilityLabel("Optionen")
         }
     }
 

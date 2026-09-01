@@ -23,6 +23,10 @@ final class InfiniteNotebookViewController: UIViewController {
     private var pdfLayers:   [CALayer] = []
     private var imageLayers: [CALayer] = []
 
+    // MARK: - Transparent UIView handles for image interaction (finger-only)
+    // Each handle mirrors the frame of the corresponding imageLayer in canvas content coords.
+    private var imageHandles: [ImageHandleView] = []
+
     // MARK: - Sticky notes (UIView overlays positioned via KVO on scroll/zoom)
     private var stickyNoteViews: [UUID: StickyNoteView] = [:]
     private var scrollKVOObservers: [NSKeyValueObservation] = []
@@ -36,6 +40,7 @@ final class InfiniteNotebookViewController: UIViewController {
     // MARK: - Math / handwriting
     private var scanTask: Task<Void, Never>?
     private var selectionOverlay: HandwritingSelectionOverlay?
+    private var lastLassoPoints: [CGPoint] = []
     private let evaluator = MathEvaluator()
 
     // MARK: - Native text input
@@ -139,21 +144,10 @@ final class InfiniteNotebookViewController: UIViewController {
         // 2-finger scroll in pencilOnly mode — prevents single palm touch from panning
         canvasView.panGestureRecognizer.minimumNumberOfTouches = 2
         view.addSubview(canvasView)
-        setupScrollKVO()
-    }
-
-    private func setupScrollKVO() {
-        let o1 = canvasView.observe(\.contentOffset, options: .new) { [weak self] _, _ in
-            self?.repositionStickyNotes()
-        }
-        let o2 = canvasView.observe(\.zoomScale, options: .new) { [weak self] _, _ in
-            self?.repositionStickyNotes()
-        }
-        scrollKVOObservers = [o1, o2]
     }
 
     private func setupToolPicker() {
-        toolPicker.setVisible(true, forFirstResponder: canvasView)
+        toolPicker.setVisible(false, forFirstResponder: canvasView)
         toolPicker.addObserver(canvasView)
         toolPicker.addObserver(self)
     }
@@ -358,8 +352,8 @@ extension InfiniteNotebookViewController {
         let ratio   = image.size.height / image.size.width
         let h       = w * ratio
 
-        let layer = makeImageLayer(image: image,
-                                   frame: CGRect(x: 0, y: startY, width: w, height: h))
+        let contentFrame = CGRect(x: 0, y: startY, width: w, height: h)
+        let layer = makeImageLayer(image: image, frame: contentFrame)
         insertBelowDrawing(layer)
         imageLayers.append(layer)
 
@@ -372,6 +366,7 @@ extension InfiniteNotebookViewController {
         let entry = InsertedImage(id: UUID(), filename: filename,
                                   startY: startY, width: w, height: h)
         document.insertedImages.append(entry)
+        addImageHandle(for: layer, at: contentFrame, documentIndex: document.insertedImages.count - 1)
         document.documentHeight = canvasView.contentSize.height
         store.saveDocument(document)
 
@@ -391,11 +386,13 @@ extension InfiniteNotebookViewController {
 
     private func loadImageEntry(_ entry: InsertedImage) {
         guard let img = UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) else { return }
-        let layer = makeImageLayer(image: img,
-                                   frame: CGRect(x: entry.startX, y: entry.startY,
-                                                 width: entry.width, height: entry.height))
+        let contentFrame = CGRect(x: entry.startX, y: entry.startY,
+                                  width: entry.width, height: entry.height)
+        let layer = makeImageLayer(image: img, frame: contentFrame)
         insertBelowDrawing(layer)
         imageLayers.append(layer)
+        let idx = document.insertedImages.firstIndex(where: { $0.id == entry.id }) ?? (imageLayers.count - 1)
+        addImageHandle(for: layer, at: contentFrame, documentIndex: idx)
     }
 
     // MARK: - Layer helpers
@@ -435,10 +432,8 @@ extension InfiniteNotebookViewController {
         layer.frame           = frame
         layer.contents        = image.cgImage
         layer.contentsGravity = .resizeAspect
-        layer.cornerRadius    = 6
+        layer.cornerRadius    = 4
         layer.masksToBounds   = true
-        layer.borderWidth     = 0.5
-        layer.borderColor     = UIColor.systemGray4.cgColor
         return layer
     }
 
@@ -498,21 +493,25 @@ extension InfiniteNotebookViewController {
             overlay?.removeFromSuperview()
             self?.selectionOverlay = nil
         }
-        overlay.onRegionSelected = { [weak self, weak overlay] viewRect in
+        overlay.onLassoSelected = { [weak self, weak overlay] points, viewRect in
             overlay?.removeFromSuperview()
             self?.selectionOverlay = nil
             guard let self else { return }
 
-            // Convert overlay view rect → canvas content coordinates
+            // Convert overlay view points/rect → canvas content coordinates
             let scale  = self.canvasView.zoomScale
             let offset = self.canvasView.contentOffset
+            let contentPoints = points.map { pt in
+                CGPoint(x: (pt.x + offset.x) / scale, y: (pt.y + offset.y) / scale)
+            }
             let contentRect = CGRect(
                 x: (viewRect.minX + offset.x) / scale,
                 y: (viewRect.minY + offset.y) / scale,
                 width:  viewRect.width  / scale,
                 height: viewRect.height / scale
             )
-            Task { await self.recogniseInRegion(contentRect: contentRect) }
+            self.lastLassoPoints = contentPoints
+            Task { await self.recogniseInRegion(contentRect: contentRect, lassoPoints: contentPoints) }
         }
 
         overlay.alpha = 0
@@ -520,7 +519,7 @@ extension InfiniteNotebookViewController {
     }
 
     @MainActor
-    private func recogniseInRegion(contentRect: CGRect) async {
+    private func recogniseInRegion(contentRect: CGRect, lassoPoints: [CGPoint] = []) async {
         guard let composite = compositeVisible(rect: contentRect, drawing: canvasView.drawing) else { return }
 
         // Spinner while recognising
@@ -543,7 +542,7 @@ extension InfiniteNotebookViewController {
 
         guard !items.isEmpty else {
             let alert = UIAlertController(title: "Nichts erkannt",
-                                          message: "Im ausgewählten Bereich wurde keine Handschrift gefunden.",
+                                          message: "Im eingekreisten Bereich wurde keine Handschrift gefunden.",
                                           preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK", style: .default))
             present(alert, animated: true)
@@ -552,6 +551,7 @@ extension InfiniteNotebookViewController {
 
         lastScanItems = items
         lastScanRect  = contentRect
+        lastLassoPoints = lassoPoints
         showBanner(items: items, scanRect: contentRect)
     }
 
@@ -638,8 +638,16 @@ extension InfiniteNotebookViewController {
         banner.onDismiss = { [weak self] in self?.hideBanner() }
         banner.onInsertAsText = { [weak self] in
             guard let self else { return }
-            let img = self.renderTextAsImage(self.lastScanItems)
-            self.insertImage(img)
+            let combined = self.lastScanItems.map(\.copyText).joined(separator: "\n")
+            let origin: CGPoint
+            if !self.lastScanRect.isNull {
+                origin = CGPoint(x: self.lastScanRect.minX, y: self.lastScanRect.maxY + 8)
+            } else {
+                let off = self.canvasView.contentOffset
+                let sc  = self.canvasView.zoomScale
+                origin = CGPoint(x: 20, y: (off.y + 100) / sc)
+            }
+            self.insertTypedText(text: combined, fontSize: 22, contentOrigin: origin)
             self.hideBanner()
         }
         banner.onReplaceHandwriting = { [weak self] in
@@ -703,32 +711,14 @@ extension InfiniteNotebookViewController {
 
     func renderTextAsImage(_ items: [RecognitionBannerView.Item], targetWidth: CGFloat? = nil) -> UIImage {
         let combined = items.map(\.copyText).joined(separator: "\n")
-        let font  = UIFont.systemFont(ofSize: 22, weight: .regular)
-        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.black]
-        let str   = NSAttributedString(string: combined, attributes: attrs)
-        let w     = max(targetWidth ?? (canvasView.contentSize.width - 40), 200)
-        let textH = str.boundingRect(
-            with: CGSize(width: w - 40, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).height
-        let totalH = max(textH + 40, 60)
-
-        let fmt = UIGraphicsImageRendererFormat()
-        fmt.scale = 1
-        fmt.preferredRange = .standard
-        return UIGraphicsImageRenderer(size: CGSize(width: w, height: totalH), format: fmt).image { ctx in
-            UIColor.white.setFill()
-            ctx.fill(CGRect(x: 0, y: 0, width: w, height: totalH))
-            UIColor.systemBlue.setFill()
-            ctx.fill(CGRect(x: 0, y: 0, width: 6, height: totalH))
-            str.draw(in: CGRect(x: 20, y: 20, width: w - 40, height: textH + 4))
-        }
+        return renderTypedText(combined, fontSize: 22, originX: 0)
     }
 
     func replaceHandwriting(in contentRect: CGRect, with items: [RecognitionBannerView.Item]) {
         let regionDesc = contentRect.isNull ? "im sichtbaren Bereich" : "im ausgewählten Bereich"
         let alert = UIAlertController(
             title: "Handschrift ersetzen",
-            message: "Die Handschrift \(regionDesc) wird durch Text ersetzt.",
+            message: "Die Handschrift \(regionDesc) wird durch digitalen Text ersetzt.",
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
@@ -747,33 +737,29 @@ extension InfiniteNotebookViewController {
                 clearRect = contentRect
             }
 
-            // Remove strokes whose renderBounds are fully inside the cleared region
-            let remaining = self.canvasView.drawing.strokes.filter {
-                !clearRect.contains($0.renderBounds)
+            let lassoPolygon = UIBezierPath()
+            if let first = self.lastLassoPoints.first {
+                lassoPolygon.move(to: first)
+                for pt in self.lastLassoPoints.dropFirst() { lassoPolygon.addLine(to: pt) }
+                lassoPolygon.close()
+            }
+
+            // Remove strokes whose midpoint or bounds are within the lasso polygon
+            let remaining = self.canvasView.drawing.strokes.filter { stroke in
+                if !self.lastLassoPoints.isEmpty {
+                    let mid = CGPoint(x: stroke.renderBounds.midX, y: stroke.renderBounds.midY)
+                    return !lassoPolygon.contains(mid) && !clearRect.contains(stroke.renderBounds)
+                } else {
+                    return !clearRect.intersects(stroke.renderBounds)
+                }
             }
             self.canvasView.drawing = PKDrawing(strokes: remaining)
 
-            // Render text at the region's exact width & position
-            let imgW   = clearRect.width > 60 ? clearRect.width : self.canvasView.contentSize.width
-            let startX = clearRect.width > 60 ? clearRect.minX  : 0
-            let img    = self.renderTextAsImage(items, targetWidth: imgW)
-            guard let filename = try? self.store.saveImage(img) else { return }
-
-            let imgH   = imgW * (img.size.height / img.size.width)
+            let combinedText = items.map(\.copyText).joined(separator: "\n")
+            let startX = max(clearRect.minX, 10)
             let startY = max(clearRect.minY, 0)
-            let frame  = CGRect(x: startX, y: startY, width: imgW, height: imgH)
-            let layer  = self.makeImageLayer(image: img, frame: frame)
-            self.insertBelowDrawing(layer)
-            self.imageLayers.append(layer)
-
-            let entry = InsertedImage(id: UUID(), filename: filename,
-                                      startX: startX, startY: startY,
-                                      width: imgW, height: imgH)
-            self.document.insertedImages.append(entry)
-            self.document.documentHeight = self.canvasView.contentSize.height
-            self.store.saveDocument(self.document)
-            self.canvasView.setContentOffset(
-                CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
+            let origin = CGPoint(x: startX, y: startY)
+            self.insertTypedText(text: combinedText, fontSize: 22, contentOrigin: origin)
         })
         present(alert, animated: true)
     }
@@ -818,16 +804,18 @@ extension InfiniteNotebookViewController {
         let img = renderTypedText(text, fontSize: fontSize, originX: contentOrigin.x)
         guard let filename = try? store.saveImage(img) else { return }
 
-        let frame = CGRect(x: contentOrigin.x, y: contentOrigin.y,
-                           width: img.size.width, height: img.size.height)
-        let layer = makeImageLayer(image: img, frame: frame)
+        let contentFrame = CGRect(x: contentOrigin.x, y: contentOrigin.y,
+                                  width: img.size.width, height: img.size.height)
+        let layer = makeImageLayer(image: img, frame: contentFrame)
         insertBelowDrawing(layer)
         imageLayers.append(layer)
 
         let entry = InsertedImage(id: UUID(), filename: filename,
                                   startX: contentOrigin.x, startY: contentOrigin.y,
-                                  width: img.size.width, height: img.size.height)
+                                  width: img.size.width, height: img.size.height,
+                                  textContent: text, fontSize: fontSize)
         document.insertedImages.append(entry)
+        addImageHandle(for: layer, at: contentFrame, documentIndex: document.insertedImages.count - 1)
         let needed = contentOrigin.y + img.size.height + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height { canvasView.contentSize.height = needed }
         document.documentHeight = canvasView.contentSize.height
@@ -839,25 +827,27 @@ extension InfiniteNotebookViewController {
 
     private func renderTypedText(_ text: String, fontSize: CGFloat, originX: CGFloat) -> UIImage {
         let font  = UIFont.systemFont(ofSize: fontSize, weight: .regular)
-        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.black]
+        let textColor = document.darkDrawingMode ? UIColor.white : UIColor.black
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
         let str   = NSAttributedString(string: text, attributes: attrs)
 
-        // Available width from insertion point to right edge, capped at 80% of canvas
-        let available = max(canvasView.contentSize.width - originX - 20, 200)
-        let w  = min(available, canvasView.contentSize.width * 0.85)
-        let pad: CGFloat = 20
+        // Available width from insertion point to right edge
+        let available = max(canvasView.contentSize.width - originX - 10, 100)
+        let w = min(available, canvasView.contentSize.width * 0.9)
+        let padX: CGFloat = 2
+        let padY: CGFloat = 2
         let textH = str.boundingRect(
-            with: CGSize(width: w - pad * 2, height: .greatestFiniteMagnitude),
+            with: CGSize(width: w - padX * 2, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).height
-        let totalH = max(textH + pad * 1.5, fontSize + pad)
+        let totalH = max(textH + padY * 2, fontSize + padY * 2)
 
         let fmt = UIGraphicsImageRendererFormat()
-        fmt.scale = 1
+        fmt.scale = 2
         fmt.preferredRange = .standard
         return UIGraphicsImageRenderer(size: CGSize(width: w, height: totalH), format: fmt).image { ctx in
-            UIColor.white.withAlphaComponent(0).setFill()   // transparent background
+            UIColor.clear.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: w, height: totalH))
-            str.draw(in: CGRect(x: pad, y: pad * 0.75, width: w - pad * 2, height: textH + 4))
+            str.draw(in: CGRect(x: padX, y: padY, width: w - padX * 2, height: textH + 4))
         }
     }
 }
@@ -896,7 +886,7 @@ extension InfiniteNotebookViewController {
 
         let tv = UITextView()
         tv.font = UIFont.systemFont(ofSize: 22)
-        tv.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.0)
+        tv.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.85)
         tv.textColor = document.darkDrawingMode ? .white : .black
         tv.isScrollEnabled = false
         tv.textContainer.lineBreakMode = .byWordWrapping
@@ -904,8 +894,8 @@ extension InfiniteNotebookViewController {
         let availableWidth = max(view.bounds.width - viewPoint.x - 16, 200)
         tv.frame = CGRect(x: viewPoint.x, y: viewPoint.y, width: min(availableWidth, 500), height: 52)
         tv.layer.borderWidth = 1
-        tv.layer.borderColor = UIColor.systemBlue.withAlphaComponent(0.5).cgColor
-        tv.layer.cornerRadius = 6
+        tv.layer.borderColor = UIColor.systemBlue.withAlphaComponent(0.4).cgColor
+        tv.layer.cornerRadius = 4
 
         let toolbar = UIToolbar(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 44))
         toolbar.items = [
@@ -940,11 +930,11 @@ extension InfiniteNotebookViewController {
     func addStickyNote() {
         let scale  = canvasView.zoomScale
         let offset = canvasView.contentOffset
-        // Place at center of visible area, offset by half note size
-        let cx = (offset.x + canvasView.bounds.width  / 2) / scale - 100
-        let cy = (offset.y + canvasView.bounds.height / 2) / scale - 80
+        // Place at center of visible canvas content
+        let cx = (offset.x + canvasView.bounds.width  / 2) / scale - StickyNoteView.noteSize.width / 2
+        let cy = (offset.y + canvasView.bounds.height / 2) / scale - StickyNoteView.noteSize.height / 2
         let note = StickyNote(id: UUID(), text: "",
-                              x: max(0, cx), y: max(0, cy),
+                              x: max(10, cx), y: max(10, cy),
                               colorIndex: document.stickyNotes.count % 4)
         document.stickyNotes.append(note)
         store.saveDocument(document)
@@ -953,13 +943,14 @@ extension InfiniteNotebookViewController {
 
     func mountStickyNoteView(_ note: StickyNote) {
         let v = StickyNoteView(note: note)
-        v.onMoved = { [weak self] screenOrigin in
+        v.frame = CGRect(x: note.x, y: note.y,
+                         width: StickyNoteView.noteSize.width,
+                         height: StickyNoteView.noteSize.height)
+        v.onMoved = { [weak self] contentOrigin in
             guard let self else { return }
-            let sc  = self.canvasView.zoomScale
-            let off = self.canvasView.contentOffset
             if let i = self.document.stickyNotes.firstIndex(where: { $0.id == note.id }) {
-                self.document.stickyNotes[i].x = (screenOrigin.x + off.x) / sc
-                self.document.stickyNotes[i].y = (screenOrigin.y + off.y) / sc
+                self.document.stickyNotes[i].x = contentOrigin.x
+                self.document.stickyNotes[i].y = contentOrigin.y
                 self.store.saveDocument(self.document)
             }
         }
@@ -967,6 +958,13 @@ extension InfiniteNotebookViewController {
             guard let self else { return }
             if let i = self.document.stickyNotes.firstIndex(where: { $0.id == note.id }) {
                 self.document.stickyNotes[i].text = text
+                self.store.saveDocument(self.document)
+            }
+        }
+        v.onDrawingChanged = { [weak self] data in
+            guard let self else { return }
+            if let i = self.document.stickyNotes.firstIndex(where: { $0.id == note.id }) {
+                self.document.stickyNotes[i].drawingData = data
                 self.store.saveDocument(self.document)
             }
         }
@@ -978,20 +976,7 @@ extension InfiniteNotebookViewController {
             self.store.saveDocument(self.document)
         }
         stickyNoteViews[note.id] = v
-        view.addSubview(v)
-        repositionStickyNotes()
-    }
-
-    func repositionStickyNotes() {
-        let offset = canvasView.contentOffset
-        let scale  = canvasView.zoomScale
-        for note in document.stickyNotes {
-            guard let v = stickyNoteViews[note.id] else { continue }
-            v.frame.origin = CGPoint(
-                x: note.x * scale - offset.x,
-                y: note.y * scale - offset.y
-            )
-        }
+        canvasView.addSubview(v)
     }
 }
 
@@ -1296,5 +1281,262 @@ private final class NativeTextViewDelegate: NSObject, UITextViewDelegate {
         // Auto-resize height to fit content while keeping the same width
         let size = textView.sizeThatFits(CGSize(width: textView.frame.width, height: .greatestFiniteMagnitude))
         textView.frame.size.height = max(52, size.height)
+    }
+}
+
+// MARK: - ImageHandleView
+
+/// A transparent UIView overlaid on an image CALayer.
+/// Responds only to finger touches (not Apple Pencil) so the pencil still draws.
+/// Provides drag-to-move and long-press-to-delete for inserted images.
+final class ImageHandleView: UIView {
+
+    /// Canvas-coordinate frame of the image (mirrors the CALayer.frame).
+    var contentFrame: CGRect
+
+    var onMoved: ((CGRect) -> Void)?   // called with new content-coord frame
+    var onDelete: (() -> Void)?
+    var onEdit: (() -> Void)?
+
+    // Keep a reference to the corresponding layer for live updates.
+    private weak var mirroredLayer: CALayer?
+
+    init(contentFrame: CGRect, layer: CALayer) {
+        self.contentFrame   = contentFrame
+        self.mirroredLayer  = layer
+        super.init(frame: .zero)
+
+        backgroundColor    = .clear
+        isOpaque           = false
+        isUserInteractionEnabled = true
+
+        layer.borderWidth  = 0
+        layer.borderColor  = UIColor.systemBlue.withAlphaComponent(0.6).cgColor
+        layer.cornerRadius = 4
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        addGestureRecognizer(pan)
+
+        let dt = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
+        dt.numberOfTapsRequired = 2
+        dt.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        addGestureRecognizer(dt)
+
+        let lp = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
+        lp.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        lp.minimumPressDuration = 0.5
+        addGestureRecognizer(lp)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    // MARK: - Gesture handlers
+
+    @objc private func handleDoubleTap() {
+        onEdit?()
+    }
+
+    @objc private func handlePan(_ gr: UIPanGestureRecognizer) {
+        guard let sv = superview as? PKCanvasView else { return }
+        let delta = gr.translation(in: sv)
+        gr.setTranslation(.zero, in: sv)
+
+        let scale = sv.zoomScale
+
+        // Move the handle view in screen coordinates
+        frame.origin.x += delta.x
+        frame.origin.y += delta.y
+
+        // Move the underlying CALayer in content coordinates
+        let dx = delta.x / scale
+        let dy = delta.y / scale
+        contentFrame.origin.x += dx
+        contentFrame.origin.y += dy
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mirroredLayer?.frame = contentFrame
+        CATransaction.commit()
+
+        if gr.state == .ended || gr.state == .cancelled {
+            onMoved?(contentFrame)
+        }
+    }
+
+    @objc private func handleLongPress(_ gr: UILongPressGestureRecognizer) {
+        guard gr.state == .began else { return }
+        onEdit?()
+    }
+
+    // Only intercept finger touches — pencil passes through to PKCanvasView.
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let touches = event?.allTouches else { return super.hitTest(point, with: event) }
+        let hasOnlyFingers = touches.allSatisfy { $0.type != .pencil }
+        guard hasOnlyFingers else { return nil }
+        return super.hitTest(point, with: event)
+    }
+}
+
+// MARK: - Image Handle Management
+
+extension InfiniteNotebookViewController {
+
+    /// Creates a finger-only UIView handle over an image CALayer in the canvas.
+    /// The handle is added as a subview of `canvasView` so its coordinate space
+    /// matches the canvas content (no offset/zoom correction needed for positioning).
+    func addImageHandle(for layer: CALayer, at contentFrame: CGRect, documentIndex: Int) {
+        let handle = ImageHandleView(contentFrame: contentFrame, layer: layer)
+        handle.frame = contentFrame   // canvasView subviews live in content coordinates
+        canvasView.addSubview(handle)
+        imageHandles.append(handle)
+
+        handle.onEdit = { [weak self] in
+            guard let self else { return }
+            self.editInsertedElement(at: documentIndex)
+        }
+
+        handle.onMoved = { [weak self] newContentFrame in
+            guard let self else { return }
+            // Update the document entry
+            guard documentIndex < self.document.insertedImages.count else { return }
+            self.document.insertedImages[documentIndex].startX  = newContentFrame.minX
+            self.document.insertedImages[documentIndex].startY  = newContentFrame.minY
+            self.document.insertedImages[documentIndex].width   = newContentFrame.width
+            self.document.insertedImages[documentIndex].height  = newContentFrame.height
+            self.store.saveDocument(self.document)
+        }
+
+        handle.onDelete = { [weak self, weak handle] in
+            guard let self, let handle else { return }
+            // Find the index of this handle
+            guard let hi = self.imageHandles.firstIndex(of: handle) else { return }
+            // Remove the CALayer
+            if hi < self.imageLayers.count { self.imageLayers[hi].removeFromSuperlayer() }
+            // Remove from document
+            if hi < self.document.insertedImages.count {
+                let entry = self.document.insertedImages[hi]
+                // Optionally delete the image file too
+                try? FileManager.default.removeItem(at: self.store.imageURL(filename: entry.filename))
+                self.document.insertedImages.remove(at: hi)
+            }
+            self.imageLayers.remove(at: hi)
+            handle.removeFromSuperview()
+            self.imageHandles.remove(at: hi)
+            // Re-wire remaining handles' document indices
+            self.rewireImageHandles()
+            self.store.saveDocument(self.document)
+        }
+    }
+
+    /// After a deletion the document indices shift; re-wire all handle closures.
+    private func rewireImageHandles() {
+        for (hi, handle) in imageHandles.enumerated() {
+            handle.onEdit = { [weak self] in
+                guard let self else { return }
+                self.editInsertedElement(at: hi)
+            }
+            handle.onMoved = { [weak self] newContentFrame in
+                guard let self else { return }
+                guard hi < self.document.insertedImages.count else { return }
+                self.document.insertedImages[hi].startX  = newContentFrame.minX
+                self.document.insertedImages[hi].startY  = newContentFrame.minY
+                self.document.insertedImages[hi].width   = newContentFrame.width
+                self.document.insertedImages[hi].height  = newContentFrame.height
+                self.store.saveDocument(self.document)
+            }
+            handle.onDelete = { [weak self, weak handle] in
+                guard let self, let handle else { return }
+                guard let hi2 = self.imageHandles.firstIndex(of: handle) else { return }
+                if hi2 < self.imageLayers.count { self.imageLayers[hi2].removeFromSuperlayer() }
+                if hi2 < self.document.insertedImages.count {
+                    let entry = self.document.insertedImages[hi2]
+                    try? FileManager.default.removeItem(at: self.store.imageURL(filename: entry.filename))
+                    self.document.insertedImages.remove(at: hi2)
+                }
+                self.imageLayers.remove(at: hi2)
+                handle.removeFromSuperview()
+                self.imageHandles.remove(at: hi2)
+                self.rewireImageHandles()
+                self.store.saveDocument(self.document)
+            }
+        }
+    }
+
+    func editInsertedElement(at index: Int) {
+        guard index < document.insertedImages.count else { return }
+        let entry = document.insertedImages[index]
+
+        let alert = UIAlertController(
+            title: entry.textContent != nil ? "Text bearbeiten" : "Objekt",
+            message: nil,
+            preferredStyle: .actionSheet
+        )
+
+        if let text = entry.textContent {
+            alert.addAction(UIAlertAction(title: "Text bearbeiten", style: .default) { [weak self] _ in
+                self?.promptEditText(at: index, currentText: text, fontSize: entry.fontSize ?? 22)
+            })
+        }
+
+        alert.addAction(UIAlertAction(title: "Löschen", style: .destructive) { [weak self] _ in
+            guard let self, index < self.imageHandles.count else { return }
+            self.imageHandles[index].onDelete?()
+        })
+        alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
+
+        if let pop = alert.popoverPresentationController, index < imageHandles.count {
+            pop.sourceView = imageHandles[index]
+            pop.sourceRect = imageHandles[index].bounds
+        }
+        present(alert, animated: true)
+    }
+
+    private func promptEditText(at index: Int, currentText: String, fontSize: CGFloat) {
+        let alert = UIAlertController(title: "Text bearbeiten", message: nil, preferredStyle: .alert)
+        alert.addTextField { tf in
+            tf.text = currentText
+            tf.placeholder = "Text eingeben…"
+            tf.font = UIFont.systemFont(ofSize: 18)
+            tf.autocapitalizationType = .sentences
+            tf.clearButtonMode = .whileEditing
+        }
+        alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Speichern", style: .default) { [weak self] _ in
+            guard let self,
+                  let newText = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !newText.isEmpty else { return }
+            self.updateInsertedText(at: index, newText: newText, fontSize: fontSize)
+        })
+        present(alert, animated: true)
+    }
+
+    func updateInsertedText(at index: Int, newText: String, fontSize: CGFloat) {
+        guard index < document.insertedImages.count,
+              index < imageLayers.count,
+              index < imageHandles.count else { return }
+
+        let entry = document.insertedImages[index]
+        let newImg = renderTypedText(newText, fontSize: fontSize, originX: entry.startX)
+        guard let newFilename = try? store.saveImage(newImg) else { return }
+
+        try? FileManager.default.removeItem(at: store.imageURL(filename: entry.filename))
+
+        let newFrame = CGRect(x: entry.startX, y: entry.startY, width: newImg.size.width, height: newImg.size.height)
+
+        let layer = imageLayers[index]
+        layer.contents = newImg.cgImage
+        layer.frame = newFrame
+
+        let handle = imageHandles[index]
+        handle.frame = newFrame
+        handle.contentFrame = newFrame
+
+        document.insertedImages[index].filename = newFilename
+        document.insertedImages[index].width = newImg.size.width
+        document.insertedImages[index].height = newImg.size.height
+        document.insertedImages[index].textContent = newText
+        document.insertedImages[index].fontSize = fontSize
+
+        store.saveDocument(document)
     }
 }

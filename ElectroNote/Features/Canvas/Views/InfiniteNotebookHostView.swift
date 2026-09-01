@@ -13,42 +13,48 @@ struct InfiniteNotebookHostView: View {
     }
 
     var body: some View {
-        InfiniteNotebookRepresentable(store: store, vm: vm)
-            .ignoresSafeArea()
-            .navigationTitle(item.name)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { toolbarItems }
-            .sheet(isPresented: $vm.showPDFPicker) {
-                DocumentPicker(contentTypes: [.pdf]) { url in
-                    vm.pendingPDFURL = url
-                }
+        ZStack(alignment: .top) {
+            InfiniteNotebookRepresentable(store: store, vm: vm)
+                .ignoresSafeArea()
+
+            // Second Top Bar: Pen, Marker, Pencil, Eraser, Lasso, Colors & Widths
+            PenToolbarView(vm: vm)
+                .padding(.top, 8)
+        }
+        .navigationTitle(item.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { toolbarItems }
+        .sheet(isPresented: $vm.showPDFPicker) {
+            DocumentPicker(contentTypes: [.pdf]) { url in
+                vm.pendingPDFURL = url
             }
-            .sheet(isPresented: $vm.showPlotter) {
-                PlotInserterView { image in
-                    vm.pendingImage = image
-                }
-                .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $vm.showPlotter) {
+            PlotInserterView { image in
+                vm.pendingImage = image
             }
-            .sheet(isPresented: $vm.showWhiteboard) {
-                WhiteboardView { image in
-                    vm.pendingImage = image
-                }
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $vm.showWhiteboard) {
+            WhiteboardView { image in
+                vm.pendingImage = image
             }
-            .sheet(isPresented: $vm.showPAP) {
-                PAPDesignerView { image in
-                    vm.pendingImage = image
-                }
+        }
+        .sheet(isPresented: $vm.showPAP) {
+            PAPDesignerView { image in
+                vm.pendingImage = image
             }
-            .sheet(isPresented: $vm.showMindMap) {
-                MindMapDesignerView { image in
-                    vm.pendingImage = image
-                }
+        }
+        .sheet(isPresented: $vm.showMindMap) {
+            MindMapDesignerView { image in
+                vm.pendingImage = image
             }
-            .sheet(isPresented: $vm.showTextInsertion) {
-                TextInsertionSheet(isPresented: $vm.showTextInsertion) { text, fontSize in
-                    vm.pendingTextInsertion = .init(text: text, fontSize: fontSize)
-                }
+        }
+        .sheet(isPresented: $vm.showTextInsertion) {
+            TextInsertionSheet(isPresented: $vm.showTextInsertion) { text, fontSize in
+                vm.pendingTextInsertion = .init(text: text, fontSize: fontSize)
             }
+        }
     }
 
     // MARK: - Toolbar
@@ -200,5 +206,200 @@ struct InfiniteNotebookHostView: View {
             }
             .accessibilityLabel("Mehr")
         }
+    }
+}
+
+// MARK: - Dedicated Pen & Tool Top Bar
+
+struct PenToolbarView: View {
+    @Binding var activeTool: CanvasToolType
+    @Binding var selectedColor: Color
+    @Binding var selectedWidth: CGFloat
+    @Binding var eraserType: PKEraserTool.EraserType
+    @Binding var rulerActive: Bool
+    var darkDrawingMode: Bool = false
+    var showRuler: Bool = true
+    var onToolChanged: ((PKTool) -> Void)? = nil
+
+    private let quickColors: [Color] = [
+        .black,
+        .blue,
+        .red,
+        .green,
+        .yellow,
+        .orange,
+        .purple
+    ]
+
+    private let strokeWidths: [(label: String, width: CGFloat, dotSize: CGFloat)] = [
+        ("Fein", 1.5, 4),
+        ("Normal", 3.0, 7),
+        ("Mittel", 5.5, 11),
+        ("Dick", 9.0, 16)
+    ]
+
+    init(activeTool: Binding<CanvasToolType>,
+         selectedColor: Binding<Color>,
+         selectedWidth: Binding<CGFloat>,
+         eraserType: Binding<PKEraserTool.EraserType>,
+         rulerActive: Binding<Bool> = .constant(false),
+         darkDrawingMode: Bool = false,
+         showRuler: Bool = true,
+         onToolChanged: ((PKTool) -> Void)? = nil) {
+        self._activeTool = activeTool
+        self._selectedColor = selectedColor
+        self._selectedWidth = selectedWidth
+        self._eraserType = eraserType
+        self._rulerActive = rulerActive
+        self.darkDrawingMode = darkDrawingMode
+        self.showRuler = showRuler
+        self.onToolChanged = onToolChanged
+    }
+
+    init(vm: InfiniteNotebookViewModel) {
+        self._activeTool = Binding(get: { vm.activeTool }, set: { vm.activeTool = $0 })
+        self._selectedColor = Binding(get: { vm.selectedColor }, set: { vm.selectedColor = $0 })
+        self._selectedWidth = Binding(get: { vm.selectedWidth }, set: { vm.selectedWidth = $0 })
+        self._eraserType = Binding(get: { vm.eraserType }, set: { vm.eraserType = $0 })
+        self._rulerActive = Binding(get: { vm.rulerActive }, set: { vm.rulerActive = $0 })
+        self.darkDrawingMode = vm.darkDrawingMode
+        self.showRuler = true
+        self.onToolChanged = nil
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Tool selector
+            HStack(spacing: 4) {
+                ForEach(CanvasToolType.allCases) { tool in
+                    Button {
+                        if activeTool == tool && tool == .eraser {
+                            eraserType = eraserType == .vector ? .bitmap : .vector
+                        } else {
+                            activeTool = tool
+                        }
+                        notifyToolChange()
+                    } label: {
+                        VStack(spacing: 2) {
+                            Image(systemName: tool.iconName)
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(width: 36, height: 32)
+                                .background(
+                                    activeTool == tool ?
+                                    Color.accentColor.opacity(0.18) : Color.clear
+                                )
+                                .foregroundColor(
+                                    activeTool == tool ?
+                                    Color.accentColor : Color.primary.opacity(0.75)
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                            if activeTool == tool && tool == .eraser {
+                                Text(eraserType == .vector ? "Strich" : "Pixel")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    .accessibilityLabel(tool.rawValue)
+                }
+            }
+
+            if activeTool != .eraser && activeTool != .lasso {
+                Divider()
+                    .frame(height: 22)
+
+                // Quick Color palette
+                HStack(spacing: 6) {
+                    ForEach(quickColors, id: \.self) { color in
+                        let displayColor = (color == .black && darkDrawingMode) ? Color.white : color
+                        Button {
+                            selectedColor = color
+                            notifyToolChange()
+                        } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(displayColor)
+                                    .frame(width: 22, height: 22)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.primary.opacity(0.25), lineWidth: 1)
+                                    )
+
+                                if selectedColor == color {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(displayColor == .white || displayColor == .yellow ? .black : .white)
+                                }
+                            }
+                        }
+                        .accessibilityLabel("Farbe")
+                    }
+
+                    // Native ColorPicker for unlimited color options
+                    ColorPicker("", selection: Binding(get: { selectedColor }, set: { selectedColor = $0; notifyToolChange() }))
+                        .labelsHidden()
+                        .scaleEffect(0.85)
+                }
+
+                Divider()
+                    .frame(height: 22)
+
+                // Stroke width buttons
+                HStack(spacing: 8) {
+                    ForEach(strokeWidths, id: \.width) { item in
+                        Button {
+                            selectedWidth = item.width
+                            notifyToolChange()
+                        } label: {
+                            Circle()
+                                .fill(selectedWidth == item.width ? Color.accentColor : Color.primary.opacity(0.4))
+                                .frame(width: item.dotSize, height: item.dotSize)
+                                .frame(width: 26, height: 26)
+                                .background(
+                                    selectedWidth == item.width ?
+                                    Color.accentColor.opacity(0.15) : Color.clear
+                                )
+                                .clipShape(Circle())
+                        }
+                        .accessibilityLabel(item.label)
+                    }
+                }
+            }
+
+            if showRuler {
+                Divider()
+                    .frame(height: 22)
+
+                // Lineal (Ruler) Toggle
+                Button {
+                    rulerActive.toggle()
+                } label: {
+                    Image(systemName: "ruler")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 32, height: 32)
+                        .background(rulerActive ? Color.brown.opacity(0.2) : Color.clear)
+                        .foregroundColor(rulerActive ? Color.brown : Color.primary.opacity(0.7))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .accessibilityLabel("Lineal")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(
+            .ultraThinMaterial,
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
+        )
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 3)
+    }
+
+    private func notifyToolChange() {
+        let tool = makePKTool(tool: activeTool, color: selectedColor, width: selectedWidth, eraserType: eraserType, darkDrawingMode: darkDrawingMode)
+        onToolChanged?(tool)
     }
 }

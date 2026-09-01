@@ -1,4 +1,5 @@
 import SwiftUI
+import PencilKit
 
 // MARK: - Shape types
 
@@ -97,7 +98,37 @@ final class PAPDesignerViewModel: ObservableObject {
     @Published var connectFromId: UUID? = nil
     @Published var editingNode: PAPNode? = nil
 
+    private var undoStack: [([PAPNode], [PAPEdge])] = []
+    private var redoStack: [([PAPNode], [PAPEdge])] = []
+
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
+
+    func pushUndo() {
+        undoStack.append((nodes, edges))
+        redoStack.removeAll()
+    }
+
+    func undo() {
+        guard let prev = undoStack.popLast() else { return }
+        redoStack.append((nodes, edges))
+        nodes = prev.0
+        edges = prev.1
+        selectedId = nil
+        connectFromId = nil
+    }
+
+    func redo() {
+        guard let next = redoStack.popLast() else { return }
+        undoStack.append((nodes, edges))
+        nodes = next.0
+        edges = next.1
+        selectedId = nil
+        connectFromId = nil
+    }
+
     func addNode(_ type: PAPShapeType, near anchor: CGPoint) {
+        pushUndo()
         let label: String
         switch type {
         case .start:    label = "Start"
@@ -117,6 +148,7 @@ final class PAPDesignerViewModel: ObservableObject {
         if connectMode {
             if let from = connectFromId, from != id {
                 if !edges.contains(where: { $0.fromId == from && $0.toId == id }) {
+                    pushUndo()
                     edges.append(PAPEdge(fromId: from, toId: id))
                 }
                 connectFromId = nil
@@ -130,18 +162,22 @@ final class PAPDesignerViewModel: ObservableObject {
 
     func deleteSelected() {
         guard let id = selectedId else { return }
+        pushUndo()
         nodes.removeAll { $0.id == id }
         edges.removeAll { $0.fromId == id || $0.toId == id }
         selectedId = nil
     }
 
     func setEdgeLabel(_ edge: PAPEdge, label: String) {
-        if let i = edges.firstIndex(where: { $0.id == edge.id }) { edges[i].label = label }
+        if let i = edges.firstIndex(where: { $0.id == edge.id }) {
+            pushUndo()
+            edges[i].label = label
+        }
     }
 
     // MARK: Export
 
-    func renderToImage() -> UIImage? {
+    func renderToImage(drawing: PKDrawing? = nil) -> UIImage? {
         guard !nodes.isEmpty else { return nil }
         let pad: CGFloat = 50
         let minX = (nodes.map { $0.cx - $0.type.defaultWidth/2  }.min() ?? 0) - pad
@@ -156,7 +192,17 @@ final class PAPDesignerViewModel: ObservableObject {
             .background(Color.white)
         let renderer = ImageRenderer(content: view)
         renderer.scale = 2
-        return renderer.uiImage
+        guard let baseImage = renderer.uiImage else { return nil }
+
+        if let drawing = drawing, !drawing.bounds.isNull && !drawing.strokes.isEmpty {
+            let drawingImage = drawing.image(from: CGRect(x: minX, y: minY, width: w, height: h), scale: 2)
+            let finalRenderer = UIGraphicsImageRenderer(size: baseImage.size)
+            return finalRenderer.image { _ in
+                baseImage.draw(at: .zero)
+                drawingImage.draw(in: CGRect(origin: .zero, size: baseImage.size))
+            }
+        }
+        return baseImage
     }
 }
 
@@ -282,12 +328,56 @@ struct AnyShape: Shape {
     func path(in rect: CGRect) -> Path { _path(rect) }
 }
 
+// MARK: - Transparent PencilKit Canvas for PAP Annotations
+
+final class PAPCanvasView: PKCanvasView {
+    var isDrawingMode: Bool = false
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let touches = event?.allTouches else { return super.hitTest(point, with: event) }
+        let hasPencil = touches.contains { $0.type == .pencil }
+        if hasPencil || isDrawingMode {
+            return super.hitTest(point, with: event)
+        }
+        // When not in drawing mode, pass finger touches through to the PAP nodes below
+        return nil
+    }
+}
+
+struct PAPDrawingCanvasView: UIViewRepresentable {
+    @Binding var canvasViewRef: PAPCanvasView?
+    let isDrawingMode: Bool
+
+    func makeUIView(context: Context) -> PAPCanvasView {
+        let cv = PAPCanvasView()
+        cv.backgroundColor = .clear
+        cv.isOpaque = false
+        cv.drawingPolicy = .anyInput
+        cv.tool = PKInkingTool(.pen, color: .black, width: 3)
+        cv.isDrawingMode = isDrawingMode
+        DispatchQueue.main.async { canvasViewRef = cv }
+        return cv
+    }
+
+    func updateUIView(_ uiView: PAPCanvasView, context: Context) {
+        uiView.isDrawingMode = isDrawingMode
+    }
+}
+
 // MARK: - Main designer view
 
 struct PAPDesignerView: View {
     @StateObject private var vm = PAPDesignerViewModel()
     let onInsert: (UIImage) -> Void
     @Environment(\.dismiss) private var dismiss
+
+    @State private var canvasView: PAPCanvasView?
+    @State private var isDrawingMode: Bool = false
+    @State private var activeTool: CanvasToolType = .pen
+    @State private var selectedPenColor: Color = .black
+    @State private var selectedWidth: CGFloat = 3.0
+    @State private var eraserType: PKEraserTool.EraserType = .vector
+    @State private var rulerActive: Bool = false
 
     @State private var canvasOffset = CGPoint(x: 60, y: 30)
     @State private var scale: CGFloat = 1.0
@@ -305,7 +395,7 @@ struct PAPDesignerView: View {
 
                 Divider()
 
-                // Canvas
+                // Canvas with drawing overlay & pen toolbar
                 canvas
             }
             .navigationTitle("PAP-Designer")
@@ -376,56 +466,77 @@ struct PAPDesignerView: View {
     // MARK: Canvas
 
     var canvas: some View {
-        ZStack(alignment: .topLeading) {
-            // Grid background
-            Canvas { ctx, size in
-                let step: CGFloat = 30
-                var path = Path()
-                var x: CGFloat = 0
-                while x < size.width { path.move(to: CGPoint(x: x, y: 0)); path.addLine(to: CGPoint(x: x, y: size.height)); x += step }
-                var y: CGFloat = 0
-                while y < size.height { path.move(to: CGPoint(x: 0, y: y)); path.addLine(to: CGPoint(x: size.width, y: y)); y += step }
-                ctx.stroke(path, with: .color(Color(white: 0.88)), lineWidth: 0.5)
-            }
-            .background(Color(white: 0.97))
-            .contentShape(Rectangle())
-            .onTapGesture { vm.selectedId = nil; vm.connectFromId = nil }
+        ZStack(alignment: .top) {
+            ZStack(alignment: .topLeading) {
+                // Grid background
+                Canvas { ctx, size in
+                    let step: CGFloat = 30
+                    var path = Path()
+                    var x: CGFloat = 0
+                    while x < size.width { path.move(to: CGPoint(x: x, y: 0)); path.addLine(to: CGPoint(x: x, y: size.height)); x += step }
+                    var y: CGFloat = 0
+                    while y < size.height { path.move(to: CGPoint(x: 0, y: y)); path.addLine(to: CGPoint(x: size.width, y: y)); y += step }
+                    ctx.stroke(path, with: .color(Color(white: 0.88)), lineWidth: 0.5)
+                }
+                .background(Color(white: 0.97))
+                .contentShape(Rectangle())
+                .onTapGesture { vm.selectedId = nil; vm.connectFromId = nil }
 
-            // Edges
-            ForEach(vm.edges) { edge in
-                edgeView(edge)
+                // Edges
+                ForEach(vm.edges) { edge in
+                    edgeView(edge)
+                }
+
+                // Nodes
+                ForEach(vm.nodes) { node in
+                    PAPNodeView(node: node, isSelected: vm.selectedId == node.id ||
+                                vm.connectFromId == node.id)
+                        .position(x: node.cx, y: node.cy)
+                        .onTapGesture { vm.tap(id: node.id) }
+                        .onLongPressGesture {
+                            vm.selectedId = node.id
+                            editLabelText = node.label
+                            editingEdge = nil
+                            showEditLabel = true
+                        }
+                        .gesture(
+                            DragGesture()
+                                .onChanged { v in
+                                    if !vm.connectMode && !isDrawingMode { vm.move(id: node.id, to: v.location) }
+                                }
+                        )
+                }
+
+                // Connect hint
+                if vm.connectMode {
+                    Text(vm.connectFromId == nil ? "Quelle antippen" : "Ziel antippen")
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(.blue.opacity(0.85))
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                        .padding(8)
+                }
             }
 
-            // Nodes
-            ForEach(vm.nodes) { node in
-                PAPNodeView(node: node, isSelected: vm.selectedId == node.id ||
-                            vm.connectFromId == node.id)
-                    .position(x: node.cx, y: node.cy)
-                    .onTapGesture { vm.tap(id: node.id) }
-                    .onLongPressGesture {
-                        vm.selectedId = node.id
-                        editLabelText = node.label
-                        editingEdge = nil
-                        showEditLabel = true
-                    }
-                    .gesture(
-                        DragGesture()
-                            .onChanged { v in
-                                if !vm.connectMode { vm.move(id: node.id, to: v.location) }
-                            }
-                    )
-            }
+            // Transparent PencilKit drawing layer for freehand handwriting / note-taking
+            PAPDrawingCanvasView(canvasViewRef: $canvasView, isDrawingMode: isDrawingMode)
 
-            // Connect hint
-            if vm.connectMode {
-                Text(vm.connectFromId == nil ? "Quelle antippen" : "Ziel antippen")
-                    .font(.caption)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(.blue.opacity(0.85))
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-                    .padding(8)
+            // Top Pen Toolbar for PAP annotations / handwriting
+            if isDrawingMode {
+                PenToolbarView(
+                    activeTool: $activeTool,
+                    selectedColor: $selectedPenColor,
+                    selectedWidth: $selectedWidth,
+                    eraserType: $eraserType,
+                    rulerActive: $rulerActive,
+                    darkDrawingMode: false,
+                    showRuler: true
+                ) { newTool in
+                    canvasView?.tool = newTool
+                }
+                .padding(.top, 8)
             }
         }
         .clipped()
@@ -476,18 +587,54 @@ struct PAPDesignerView: View {
 
     @ToolbarContentBuilder
     var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .cancellationAction) {
+        ToolbarItemGroup(placement: .navigationBarLeading) {
             Button("Abbrechen") { dismiss() }
+
+            Button {
+                if let cv = canvasView, cv.undoManager?.canUndo == true {
+                    cv.undoManager?.undo()
+                } else {
+                    vm.undo()
+                }
+            } label: {
+                Image(systemName: "arrow.uturn.backward")
+            }
+            .disabled(!vm.canUndo && (canvasView?.undoManager?.canUndo != true))
+            .accessibilityLabel("Rückgängig")
+
+            Button {
+                if let cv = canvasView, cv.undoManager?.canRedo == true {
+                    cv.undoManager?.redo()
+                } else {
+                    vm.redo()
+                }
+            } label: {
+                Image(systemName: "arrow.uturn.forward")
+            }
+            .disabled(!vm.canRedo && (canvasView?.undoManager?.canRedo != true))
+            .accessibilityLabel("Wiederholen")
         }
-        ToolbarItem(placement: .navigationBarTrailing) {
+
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            // Mode toggle: Diagram mode vs Note drawing mode
+            Button {
+                isDrawingMode.toggle()
+            } label: {
+                Label(isDrawingMode ? "Notizen aktiv" : "Notizen",
+                      systemImage: isDrawingMode ? "pencil.and.scribble" : "pencil")
+            }
+            .tint(isDrawingMode ? .blue : .primary)
+
             Button(role: .destructive) { vm.deleteSelected() } label: {
                 Image(systemName: "trash")
             }
             .disabled(vm.selectedId == nil)
-        }
-        ToolbarItem(placement: .confirmationAction) {
+
             Button("Einfügen") {
-                if let img = vm.renderToImage() { onInsert(img); dismiss() }
+                if let img = vm.renderToImage(drawing: canvasView?.drawing) {
+                    onInsert(img)
+                    dismiss()
+                }
             }
             .bold()
             .disabled(vm.nodes.isEmpty)
