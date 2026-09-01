@@ -192,56 +192,149 @@ struct NextcloudFileBrowserView: View {
     @ObservedObject var vm: SyncViewModel
     let onPDFImport: (URL) -> Void
     @State private var importingFile: DAVFile?
+    @State private var searchText = ""
+
+    private var filteredItems: [DAVFile] {
+        if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+            return vm.browserItems
+        } else {
+            return vm.browserItems.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if vm.browserLoading {
-                    ProgressView("Lädt…").frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let err = vm.browserError {
-                    ContentUnavailableView(err, systemImage: "xmark.icloud")
-                } else if vm.browserItems.isEmpty {
-                    ContentUnavailableView("Leer", systemImage: "folder")
-                } else {
-                    fileList
+            VStack(spacing: 0) {
+                // Breadcrumb path header
+                breadcrumbBar
+
+                Divider()
+
+                Group {
+                    if vm.browserLoading && vm.browserItems.isEmpty {
+                        ProgressView("Dateien werden geladen…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if let err = vm.browserError {
+                        ContentUnavailableView(err, systemImage: "xmark.icloud")
+                    } else if filteredItems.isEmpty {
+                        ContentUnavailableView(
+                            "Keine Dateien gefunden",
+                            systemImage: searchText.isEmpty ? "folder" : "magnifyingglass",
+                            description: Text(searchText.isEmpty ? "Dieser Ordner ist leer." : "Keine Treffer für '\(searchText)'.")
+                        )
+                    } else {
+                        fileList
+                    }
                 }
             }
+            .searchable(text: $searchText, prompt: "Dateien & Ordner suchen…")
             .navigationTitle(vm.browserPath.last?.name ?? "Nextcloud")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    if vm.browserPath.isEmpty {
-                        EmptyView()
-                    } else {
+                    if !vm.browserPath.isEmpty {
                         Button {
                             vm.navigateUp()
                         } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: "chevron.left")
-                                Text(vm.browserPath.dropLast().last?.name ?? "Nextcloud")
+                                Text("Zurück")
                             }
                         }
                     }
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        Task { await vm.refresh() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(vm.browserLoading)
+                }
+            }
+            .onAppear {
+                if vm.browserItems.isEmpty {
+                    vm.openBrowser()
                 }
             }
         }
     }
 
+    private var breadcrumbBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                Button {
+                    vm.navigateTo(index: -1)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "icloud.fill")
+                        Text("Root")
+                    }
+                    .font(.caption.weight(vm.browserPath.isEmpty ? .bold : .regular))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(vm.browserPath.isEmpty ? Color.blue.opacity(0.15) : Color.clear)
+                    .clipShape(Capsule())
+                }
+
+                ForEach(Array(vm.browserPath.enumerated()), id: \.element.davPath) { index, folder in
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+
+                    let isLast = index == vm.browserPath.count - 1
+                    Button {
+                        vm.navigateTo(index: index)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "folder.fill")
+                            Text(folder.name)
+                        }
+                        .font(.caption.weight(isLast ? .bold : .regular))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(isLast ? Color.blue.opacity(0.15) : Color.clear)
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+        .background(Color(.secondarySystemBackground))
+    }
+
     private var fileList: some View {
-        List(vm.browserItems, id: \.davPath) { file in
+        List(filteredItems, id: \.davPath) { file in
             if file.isDirectory {
                 Button {
+                    searchText = ""
                     vm.navigateInto(file)
                 } label: {
-                    Label(file.name, systemImage: file.systemImage)
-                        .foregroundStyle(.primary)
+                    HStack {
+                        Label(file.name, systemImage: file.systemImage)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             } else if file.isImportable {
                 HStack {
                     Label {
-                        Text(file.name)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(file.name)
+                                .font(.body)
+                                .foregroundColor(.primary)
+                            Text(file.isPDF ? "PDF-Dokument" : "Office / Dokument")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
                     } icon: {
-                        Image(systemName: file.systemImage).foregroundStyle(file.isPDF ? .red : .blue)
+                        Image(systemName: file.systemImage)
+                            .foregroundStyle(file.isPDF ? .red : .blue)
                     }
                     Spacer()
                     if importingFile?.davPath == file.davPath {
@@ -264,6 +357,9 @@ struct NextcloudFileBrowserView: View {
                 Label(file.name, systemImage: file.systemImage)
                     .foregroundStyle(.secondary)
             }
+        }
+        .refreshable {
+            await vm.refresh()
         }
     }
 }

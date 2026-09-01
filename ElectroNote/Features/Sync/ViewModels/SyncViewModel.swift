@@ -112,6 +112,20 @@ final class SyncViewModel: ObservableObject {
         Task { await loadItems(path: currentBrowsePath) }
     }
 
+    func navigateTo(index: Int) {
+        guard index >= 0 && index < browserPath.count else {
+            browserPath = []
+            Task { await loadItems(path: "") }
+            return
+        }
+        browserPath = Array(browserPath.prefix(index + 1))
+        Task { await loadItems(path: currentBrowsePath) }
+    }
+
+    func refresh() async {
+        await loadItems(path: currentBrowsePath)
+    }
+
     private func loadItems(path: String) async {
         guard let creds = credentials else { return }
         browserLoading = true
