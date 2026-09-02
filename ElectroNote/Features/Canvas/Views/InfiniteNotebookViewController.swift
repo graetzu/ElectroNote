@@ -20,6 +20,7 @@ final class InfiniteNotebookViewController: UIViewController {
 
     // MARK: - Content layers & views (below the PencilKit Metal layer)
     private var paperBackgroundView = UIView()
+    private var pageBreakContainer  = UIView()
     private var backgroundLayer = CALayer()
     private var pdfViews:    [UIImageView] = []
     private var imageViews:  [UIImageView] = []
@@ -189,7 +190,7 @@ final class InfiniteNotebookViewController: UIViewController {
 
     }
 
-    // MARK: - Background
+    // MARK: - Background & Page Breaks
 
     private func setupBackgroundLayer() {
         paperBackgroundView.frame = CGRect(origin: .zero, size: canvasView.contentSize)
@@ -197,6 +198,70 @@ final class InfiniteNotebookViewController: UIViewController {
         if backgroundLayer.superlayer == nil {
             canvasView.layer.insertSublayer(backgroundLayer, at: 0)
         }
+        setupPageBreakDividers()
+    }
+
+    private func setupPageBreakDividers() {
+        pageBreakContainer.isUserInteractionEnabled = false
+        pageBreakContainer.backgroundColor = .clear
+        if pageBreakContainer.superview == nil {
+            paperBackgroundView.addSubview(pageBreakContainer)
+        }
+        updatePageBreakDividers()
+    }
+
+    private func updatePageBreakDividers() {
+        pageBreakContainer.frame = CGRect(origin: .zero, size: canvasView.contentSize)
+        pageBreakContainer.subviews.forEach { $0.removeFromSuperview() }
+
+        let pageH = NotebookDocument.pageHeight // 842 pt
+        let totalH = canvasView.contentSize.height
+        let width = canvasView.contentSize.width
+        let dark = document.darkDrawingMode
+
+        var pageNum = 1
+        var y = pageH
+        while y < totalH {
+            let divider = makePageBreakView(y: y, width: width, pageNumber: pageNum, dark: dark)
+            pageBreakContainer.addSubview(divider)
+            pageNum += 1
+            y += pageH
+        }
+    }
+
+    private func makePageBreakView(y: CGFloat, width: CGFloat, pageNumber: Int, dark: Bool) -> UIView {
+        let container = UIView(frame: CGRect(x: 0, y: y - 10, width: width, height: 20))
+        container.isUserInteractionEnabled = false
+
+        // Dashed horizontal page break line
+        let line = CAShapeLayer()
+        let path = UIBezierPath()
+        path.move(to: CGPoint(x: 16, y: 10))
+        path.addLine(to: CGPoint(x: width - 16, y: 10))
+        line.path = path.cgPath
+        line.strokeColor = (dark ? UIColor(white: 0.40, alpha: 0.5) : UIColor(white: 0.60, alpha: 0.6)).cgColor
+        line.lineWidth = 1.0
+        line.lineDashPattern = [6, 4]
+        container.layer.addSublayer(line)
+
+        // Pill badge in center with page break info
+        let label = UILabel()
+        label.text = "A4 Seite \(pageNumber) Ende"
+        label.font = UIFont.systemFont(ofSize: 10, weight: .semibold)
+        label.textColor = dark ? UIColor(white: 0.70, alpha: 1) : UIColor(white: 0.40, alpha: 1)
+        label.backgroundColor = dark ? UIColor(white: 0.18, alpha: 0.95) : UIColor(white: 0.96, alpha: 0.95)
+        label.textAlignment = .center
+        label.layer.cornerRadius = 8
+        label.layer.borderWidth = 0.5
+        label.layer.borderColor = (dark ? UIColor(white: 0.35, alpha: 0.8) : UIColor(white: 0.75, alpha: 0.8)).cgColor
+        label.clipsToBounds = true
+        label.sizeToFit()
+
+        let badgeW = label.frame.width + 16
+        label.frame = CGRect(x: (width - badgeW) * 0.5, y: 1, width: badgeW, height: 18)
+        container.addSubview(label)
+
+        return container
     }
 
     // Called whenever background style or dark mode changes
@@ -220,12 +285,14 @@ final class InfiniteNotebookViewController: UIViewController {
         paperBackgroundView.layer.borderColor = (dark ? UIColor(white: 0.28, alpha: 0.8) : UIColor(white: 0.80, alpha: 0.8)).cgColor
 
         backgroundLayer.backgroundColor = pattern.cgColor
+        updatePageBreakDividers()
         centerCanvasContent()
     }
 
     private func updateBackgroundFrame() {
         paperBackgroundView.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         backgroundLayer.frame = CGRect(origin: .zero, size: canvasView.contentSize)
+        updatePageBreakDividers()
         centerCanvasContent()
     }
 
@@ -654,7 +721,7 @@ extension InfiniteNotebookViewController {
         }
 
         guard let composite = compositeVisible(rect: scanRect, drawing: drawing) else { return }
-        let obs = await runVision(on: composite)
+        let obs = await runVision(on: composite, mathMode: mathOnly)
         guard !obs.isEmpty else { return }
 
         var items: [RecognitionBannerView.Item] = []
@@ -663,8 +730,12 @@ extension InfiniteNotebookViewController {
             guard let text = o.topCandidates(1).first?.string, !text.isEmpty else { continue }
             if mathOnly {
                 let expr = leftOfEquals(text)
-                guard looksLikeMath(expr), case .success(let v) = evaluator.evaluate(expr) else { continue }
-                items.append(.init(label: "\(text) = \(fmt(v))", copyText: fmt(v)))
+                if looksLikeMath(expr), case .success(let v) = evaluator.evaluate(expr) {
+                    let formattedResult = fmt(v)
+                    let cleanText = text.trimmingCharacters(in: .whitespaces)
+                    let label = cleanText.contains("=") ? "\(cleanText) \(formattedResult)" : "\(cleanText) = \(formattedResult)"
+                    items.append(.init(label: label, copyText: formattedResult))
+                }
             } else {
                 items.append(.init(label: text, copyText: text))
             }
@@ -687,7 +758,7 @@ extension InfiniteNotebookViewController {
         }
     }
 
-    private func runVision(on image: UIImage) async -> [VNRecognizedTextObservation] {
+    private func runVision(on image: UIImage, mathMode: Bool = false) async -> [VNRecognizedTextObservation] {
         guard let cg = image.cgImage else { return [] }
         return await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -695,14 +766,49 @@ extension InfiniteNotebookViewController {
                     cont.resume(returning: (r.results as? [VNRecognizedTextObservation]) ?? [])
                 }
                 req.recognitionLevel = .accurate
-                req.recognitionLanguages = ["de-DE", "en-US", "en-GB"]
-                req.usesLanguageCorrection = true
-                req.automaticallyDetectsLanguage = true
+                if mathMode {
+                    req.usesLanguageCorrection = false
+                    req.recognitionLanguages = ["en-US"]
+                    req.automaticallyDetectsLanguage = false
+                } else {
+                    req.recognitionLanguages = ["de-DE", "en-US", "en-GB"]
+                    req.usesLanguageCorrection = true
+                    req.automaticallyDetectsLanguage = true
+                }
                 do {
                     try VNImageRequestHandler(cgImage: cg, orientation: .up, options: [:]).perform([req])
                 } catch {
                     cont.resume(returning: [])
                 }
+            }
+        }
+    }
+
+    // MARK: - Auto-Scroll on Edge Writing
+
+    func checkWritingEdgeAutoScroll() {
+        guard let lastStroke = canvasView.drawing.strokes.last else { return }
+        let strokeBounds = lastStroke.renderBounds
+        guard !strokeBounds.isNull && strokeBounds.width > 0 else { return }
+
+        let strokeMaxPoint = CGPoint(x: strokeBounds.maxX, y: strokeBounds.maxY)
+        let visiblePoint = canvasView.convert(strokeMaxPoint, to: canvasView.superview ?? view)
+        let bounds = canvasView.bounds
+
+        // 1. Bottom edge auto-scroll (advance downwards)
+        if visiblePoint.y > bounds.height - 110 {
+            let stepY: CGFloat = 160
+            let targetY = canvasView.contentOffset.y + stepY
+            canvasView.setContentOffset(CGPoint(x: canvasView.contentOffset.x, y: targetY), animated: true)
+        }
+
+        // 2. Right edge auto-scroll when zoomed in
+        if canvasView.zoomScale > 1.05 && visiblePoint.x > bounds.width - 80 {
+            let maxOffsetX = max(0, canvasView.contentSize.width * canvasView.zoomScale - bounds.width)
+            let stepX: CGFloat = bounds.width * 0.35
+            let targetX = min(maxOffsetX, canvasView.contentOffset.x + stepX)
+            if targetX > canvasView.contentOffset.x {
+                canvasView.setContentOffset(CGPoint(x: targetX, y: canvasView.contentOffset.y), animated: true)
             }
         }
     }
@@ -771,10 +877,21 @@ extension InfiniteNotebookViewController {
     // MARK: - Math helpers
 
     private func looksLikeMath(_ t: String) -> Bool {
-        let ops = CharacterSet(charactersIn: "+-*/×÷^%")
-        return t.unicodeScalars.contains(where: ops.contains) &&
-               t.unicodeScalars.contains(where: CharacterSet.decimalDigits.contains)
+        let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let ops = CharacterSet(charactersIn: "+-*/×÷^%:=()√")
+        let hasMathKeywords = trimmed.localizedCaseInsensitiveContains("sqrt") ||
+                              trimmed.localizedCaseInsensitiveContains("sin") ||
+                              trimmed.localizedCaseInsensitiveContains("cos") ||
+                              trimmed.localizedCaseInsensitiveContains("tan") ||
+                              trimmed.localizedCaseInsensitiveContains("log") ||
+                              trimmed.localizedCaseInsensitiveContains("pi") ||
+                              trimmed.contains("π")
+        let hasDigits = trimmed.unicodeScalars.contains(where: CharacterSet.decimalDigits.contains)
+        let hasOps = trimmed.unicodeScalars.contains(where: ops.contains)
+        return hasDigits && (hasOps || hasMathKeywords)
     }
+
     private func leftOfEquals(_ t: String) -> String {
         t.range(of: "=").map { String(t[t.startIndex..<$0.lowerBound]) } ?? t
     }
@@ -1113,6 +1230,7 @@ extension InfiniteNotebookViewController: PKCanvasViewDelegate {
         guard !isSnappingShape else { return }
         onDrawingChanged?()
         extendIfNeeded()
+        checkWritingEdgeAutoScroll()
         scheduleScan()
         NotificationCenter.default.post(name: .electroNoteDrawingBegan, object: nil)
         scheduleShapeSnap()
