@@ -166,6 +166,27 @@ final class InfiniteNotebookViewController: UIViewController {
         paperBackgroundView.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         paperBackgroundView.isUserInteractionEnabled = false
         canvasView.insertSubview(paperBackgroundView, at: 0)
+
+        setupEraserGestures()
+    }
+
+    private func setupEraserGestures() {
+        let eraserPan = UIPanGestureRecognizer(target: self, action: #selector(handleEraserTouch(_:)))
+        eraserPan.cancelsTouchesInView = false
+        eraserPan.maximumNumberOfTouches = 1
+        eraserPan.delegate = self
+        canvasView.addGestureRecognizer(eraserPan)
+
+        let eraserTap = UITapGestureRecognizer(target: self, action: #selector(handleEraserTouch(_:)))
+        eraserTap.cancelsTouchesInView = false
+        eraserTap.delegate = self
+        canvasView.addGestureRecognizer(eraserTap)
+    }
+
+    @objc private func handleEraserTouch(_ gr: UIGestureRecognizer) {
+        guard canvasView.tool is PKEraserTool else { return }
+        let ptInCanvas = gr.location(in: canvasView)
+        eraseInsertedElements(near: ptInCanvas)
     }
 
     private func setupToolPicker() {
@@ -1761,5 +1782,58 @@ extension InfiniteNotebookViewController {
         document.insertedImages[index].fontSize = fontSize
 
         store.saveDocument(document)
+    }
+
+    // MARK: - Eraser for Typed Text & Inserted Elements
+
+    func eraseInsertedElements(near point: CGPoint, radius: CGFloat = 28) {
+        guard !document.insertedImages.isEmpty else { return }
+        let hitRect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
+
+        var toDelete: [Int] = []
+        for (i, entry) in document.insertedImages.enumerated() {
+            let frame = CGRect(x: entry.startX, y: entry.startY, width: entry.width, height: entry.height)
+            if frame.intersects(hitRect) {
+                toDelete.append(i)
+            }
+        }
+
+        guard !toDelete.isEmpty else { return }
+
+        for idx in toDelete.reversed() {
+            if idx < imageViews.count {
+                let imgView = imageViews[idx]
+                UIView.animate(withDuration: 0.15, animations: {
+                    imgView.alpha = 0
+                    imgView.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+                }) { _ in
+                    imgView.removeFromSuperview()
+                }
+                imageViews.remove(at: idx)
+            }
+            if idx < imageLayers.count {
+                imageLayers[idx].removeFromSuperlayer()
+                imageLayers.remove(at: idx)
+            }
+            if idx < imageHandles.count {
+                imageHandles[idx].removeFromSuperview()
+                imageHandles.remove(at: idx)
+            }
+            if idx < document.insertedImages.count {
+                let entry = document.insertedImages[idx]
+                try? FileManager.default.removeItem(at: store.imageURL(filename: entry.filename))
+                document.insertedImages.remove(at: idx)
+            }
+        }
+        rewireImageHandles()
+        store?.saveDocument(document)
+    }
+}
+
+// MARK: - UIGestureRecognizerDelegate
+
+extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        return true
     }
 }
