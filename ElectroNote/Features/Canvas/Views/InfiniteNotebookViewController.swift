@@ -23,13 +23,12 @@ final class InfiniteNotebookViewController: UIViewController {
     private var pageBreakContainer  = UIView()
     private var backgroundLayer = CALayer()
     private var pdfViews:    [UIImageView] = []
-    private var imageViews:  [UIImageView] = []
     private var pdfLayers:   [CALayer] = []
-    private var imageLayers: [CALayer] = []
 
-    // MARK: - Transparent UIView handles for image interaction (finger-only)
-    // Each handle mirrors the frame of the corresponding imageLayer in canvas content coords.
-    private var imageHandles: [ImageHandleView] = []
+    // MARK: - Inserted images & text elements keyed by document entry ID (safe)
+    private var imageViews:   [UUID: UIImageView]     = [:]
+    private var imageLayers:  [UUID: CALayer]         = [:]
+    private var imageHandles: [UUID: ImageHandleView] = [:]
 
     // MARK: - Sticky notes (UIView overlays positioned via KVO on scroll/zoom)
     private var stickyNoteViews: [UUID: StickyNoteView] = [:]
@@ -166,27 +165,6 @@ final class InfiniteNotebookViewController: UIViewController {
         paperBackgroundView.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         paperBackgroundView.isUserInteractionEnabled = false
         canvasView.insertSubview(paperBackgroundView, at: 0)
-
-        setupEraserGestures()
-    }
-
-    private func setupEraserGestures() {
-        let eraserPan = UIPanGestureRecognizer(target: self, action: #selector(handleEraserTouch(_:)))
-        eraserPan.cancelsTouchesInView = false
-        eraserPan.maximumNumberOfTouches = 1
-        eraserPan.delegate = self
-        canvasView.addGestureRecognizer(eraserPan)
-
-        let eraserTap = UITapGestureRecognizer(target: self, action: #selector(handleEraserTouch(_:)))
-        eraserTap.cancelsTouchesInView = false
-        eraserTap.delegate = self
-        canvasView.addGestureRecognizer(eraserTap)
-    }
-
-    @objc private func handleEraserTouch(_ gr: UIGestureRecognizer) {
-        guard canvasView.tool is PKEraserTool else { return }
-        let ptInCanvas = gr.location(in: canvasView)
-        eraseInsertedElements(near: ptInCanvas)
     }
 
     private func setupToolPicker() {
@@ -507,6 +485,7 @@ extension InfiniteNotebookViewController {
         let ratio   = image.size.height / image.size.width
         let h       = w * ratio
 
+        let id = UUID()
         let contentFrame = CGRect(x: 0, y: startY, width: w, height: h)
         let imgView = makeImageView(image: image, frame: contentFrame)
         if paperBackgroundView.superview != nil {
@@ -514,8 +493,8 @@ extension InfiniteNotebookViewController {
         } else {
             canvasView.insertSubview(imgView, at: 0)
         }
-        imageViews.append(imgView)
-        imageLayers.append(imgView.layer)
+        imageViews[id] = imgView
+        imageLayers[id] = imgView.layer
 
         let needed = startY + h + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height {
@@ -523,10 +502,10 @@ extension InfiniteNotebookViewController {
             updateBackgroundFrame()
         }
 
-        let entry = InsertedImage(id: UUID(), filename: filename,
+        let entry = InsertedImage(id: id, filename: filename,
                                   startY: startY, width: w, height: h)
         document.insertedImages.append(entry)
-        addImageHandle(for: imgView.layer, at: contentFrame, documentIndex: document.insertedImages.count - 1)
+        addImageHandle(for: imgView.layer, at: contentFrame, id: id)
         document.documentHeight = canvasView.contentSize.height
         store.saveDocument(document)
 
@@ -554,10 +533,11 @@ extension InfiniteNotebookViewController {
         } else {
             canvasView.insertSubview(imgView, at: 0)
         }
-        imageViews.append(imgView)
-        imageLayers.append(imgView.layer)
-        let idx = document.insertedImages.firstIndex(where: { $0.id == entry.id }) ?? (imageViews.count - 1)
-        addImageHandle(for: imgView.layer, at: contentFrame, documentIndex: idx)
+        imageViews[entry.id] = imgView
+        imageLayers[entry.id] = imgView.layer
+        if entry.textContent == nil {
+            addImageHandle(for: imgView.layer, at: contentFrame, id: entry.id)
+        }
     }
 
     // MARK: - Layer helpers
@@ -1037,6 +1017,7 @@ extension InfiniteNotebookViewController {
         let img = renderTypedText(text, fontSize: fontSize, originX: contentOrigin.x)
         guard let filename = try? store.saveImage(img) else { return }
 
+        let id = UUID()
         let contentFrame = CGRect(x: contentOrigin.x, y: contentOrigin.y,
                                   width: img.size.width, height: img.size.height)
         let imgView = makeImageView(image: img, frame: contentFrame)
@@ -1049,16 +1030,16 @@ extension InfiniteNotebookViewController {
         } else {
             canvasView.insertSubview(imgView, at: 0)
         }
-        imageViews.append(imgView)
-        imageLayers.append(imgView.layer)
+        imageViews[id] = imgView
+        imageLayers[id] = imgView.layer
 
-        let entry = InsertedImage(id: UUID(), filename: filename,
+        let entry = InsertedImage(id: id, filename: filename,
                                   startX: contentOrigin.x, startY: contentOrigin.y,
                                   width: img.size.width, height: img.size.height,
                                   textContent: text, fontSize: fontSize)
         document.insertedImages.append(entry)
         if addHandle {
-            addImageHandle(for: imgView.layer, at: contentFrame, documentIndex: document.insertedImages.count - 1)
+            addImageHandle(for: imgView.layer, at: contentFrame, id: id)
         }
         let needed = contentOrigin.y + img.size.height + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height { canvasView.contentSize.height = needed }
@@ -1359,7 +1340,7 @@ extension InfiniteNotebookViewController {
                 // Render background layer
                 backgroundLayer.render(in: pdfCtx)
                 // Render image layers
-                imageLayers.forEach { $0.render(in: pdfCtx) }
+                imageLayers.values.forEach { $0.render(in: pdfCtx) }
                 // Render PDF layers
                 pdfLayers.forEach { $0.render(in: pdfCtx) }
                 // Render drawing for this page's slice
@@ -1628,87 +1609,69 @@ extension InfiniteNotebookViewController {
     /// Creates a finger-only UIView handle over an image CALayer in the canvas.
     /// The handle is added as a subview of `canvasView` so its coordinate space
     /// matches the canvas content (no offset/zoom correction needed for positioning).
-    func addImageHandle(for layer: CALayer, at contentFrame: CGRect, documentIndex: Int) {
+    func addImageHandle(for layer: CALayer, at contentFrame: CGRect, id: UUID) {
         let handle = ImageHandleView(contentFrame: contentFrame, layer: layer)
         handle.frame = contentFrame   // canvasView subviews live in content coordinates
         canvasView.addSubview(handle)
-        imageHandles.append(handle)
+        imageHandles[id] = handle
 
         handle.onEdit = { [weak self] in
             guard let self else { return }
-            self.editInsertedElement(at: documentIndex)
+            self.editInsertedElement(id: id)
         }
 
         handle.onMoved = { [weak self] newContentFrame in
             guard let self else { return }
-            // Update the document entry
-            guard documentIndex < self.document.insertedImages.count else { return }
-            self.document.insertedImages[documentIndex].startX  = newContentFrame.minX
-            self.document.insertedImages[documentIndex].startY  = newContentFrame.minY
-            self.document.insertedImages[documentIndex].width   = newContentFrame.width
-            self.document.insertedImages[documentIndex].height  = newContentFrame.height
+            guard let idx = self.document.insertedImages.firstIndex(where: { $0.id == id }) else { return }
+            self.document.insertedImages[idx].startX  = newContentFrame.minX
+            self.document.insertedImages[idx].startY  = newContentFrame.minY
+            self.document.insertedImages[idx].width   = newContentFrame.width
+            self.document.insertedImages[idx].height  = newContentFrame.height
             self.store.saveDocument(self.document)
         }
 
-        handle.onDelete = { [weak self, weak handle] in
-            guard let self, let handle else { return }
-            // Find the index of this handle
-            guard let hi = self.imageHandles.firstIndex(of: handle) else { return }
-            // Remove the CALayer
-            if hi < self.imageLayers.count { self.imageLayers[hi].removeFromSuperlayer() }
-            // Remove from document
-            if hi < self.document.insertedImages.count {
-                let entry = self.document.insertedImages[hi]
-                // Optionally delete the image file too
-                try? FileManager.default.removeItem(at: self.store.imageURL(filename: entry.filename))
-                self.document.insertedImages.remove(at: hi)
-            }
-            self.imageLayers.remove(at: hi)
-            handle.removeFromSuperview()
-            self.imageHandles.remove(at: hi)
-            // Re-wire remaining handles' document indices
-            self.rewireImageHandles()
-            self.store.saveDocument(self.document)
+        handle.onDelete = { [weak self] in
+            guard let self else { return }
+            self.deleteInsertedElement(id: id)
         }
     }
 
-    /// After a deletion the document indices shift; re-wire all handle closures.
-    private func rewireImageHandles() {
-        for (hi, handle) in imageHandles.enumerated() {
-            handle.onEdit = { [weak self] in
-                guard let self else { return }
-                self.editInsertedElement(at: hi)
+    func deleteInsertedElement(id: UUID) {
+        if let imgView = imageViews.removeValue(forKey: id) {
+            UIView.animate(withDuration: 0.15, animations: {
+                imgView.alpha = 0
+            }) { _ in
+                imgView.removeFromSuperview()
             }
-            handle.onMoved = { [weak self] newContentFrame in
-                guard let self else { return }
-                guard hi < self.document.insertedImages.count else { return }
-                self.document.insertedImages[hi].startX  = newContentFrame.minX
-                self.document.insertedImages[hi].startY  = newContentFrame.minY
-                self.document.insertedImages[hi].width   = newContentFrame.width
-                self.document.insertedImages[hi].height  = newContentFrame.height
-                self.store.saveDocument(self.document)
-            }
-            handle.onDelete = { [weak self, weak handle] in
-                guard let self, let handle else { return }
-                guard let hi2 = self.imageHandles.firstIndex(of: handle) else { return }
-                if hi2 < self.imageLayers.count { self.imageLayers[hi2].removeFromSuperlayer() }
-                if hi2 < self.document.insertedImages.count {
-                    let entry = self.document.insertedImages[hi2]
-                    try? FileManager.default.removeItem(at: self.store.imageURL(filename: entry.filename))
-                    self.document.insertedImages.remove(at: hi2)
-                }
-                self.imageLayers.remove(at: hi2)
-                handle.removeFromSuperview()
-                self.imageHandles.remove(at: hi2)
-                self.rewireImageHandles()
-                self.store.saveDocument(self.document)
+        }
+        imageLayers.removeValue(forKey: id)?.removeFromSuperlayer()
+        imageHandles.removeValue(forKey: id)?.removeFromSuperview()
+
+        if let idx = document.insertedImages.firstIndex(where: { $0.id == id }) {
+            let entry = document.insertedImages.remove(at: idx)
+            try? FileManager.default.removeItem(at: store.imageURL(filename: entry.filename))
+        }
+        store?.saveDocument(document)
+    }
+
+    func eraseInsertedElements(near point: CGPoint, radius: CGFloat = 35) {
+        guard !document.insertedImages.isEmpty else { return }
+        let hitRect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
+        let matchingIDs = document.insertedImages.compactMap { entry -> UUID? in
+            let frame = CGRect(x: entry.startX, y: entry.startY, width: entry.width, height: entry.height)
+            return frame.intersects(hitRect) ? entry.id : nil
+        }
+        guard !matchingIDs.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            for id in matchingIDs {
+                self.deleteInsertedElement(id: id)
             }
         }
     }
 
-    func editInsertedElement(at index: Int) {
-        guard index < document.insertedImages.count else { return }
-        let entry = document.insertedImages[index]
+    func editInsertedElement(id: UUID) {
+        guard let entry = document.insertedImages.first(where: { $0.id == id }) else { return }
 
         let alert = UIAlertController(
             title: entry.textContent != nil ? "Text bearbeiten" : "Objekt",
@@ -1718,24 +1681,23 @@ extension InfiniteNotebookViewController {
 
         if let text = entry.textContent {
             alert.addAction(UIAlertAction(title: "Text bearbeiten", style: .default) { [weak self] _ in
-                self?.promptEditText(at: index, currentText: text, fontSize: entry.fontSize ?? 22)
+                self?.promptEditText(id: id, currentText: text, fontSize: entry.fontSize ?? 22)
             })
         }
 
         alert.addAction(UIAlertAction(title: "Löschen", style: .destructive) { [weak self] _ in
-            guard let self, index < self.imageHandles.count else { return }
-            self.imageHandles[index].onDelete?()
+            self?.deleteInsertedElement(id: id)
         })
         alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
 
-        if let pop = alert.popoverPresentationController, index < imageHandles.count {
-            pop.sourceView = imageHandles[index]
-            pop.sourceRect = imageHandles[index].bounds
+        if let pop = alert.popoverPresentationController, let handle = imageHandles[id] {
+            pop.sourceView = handle
+            pop.sourceRect = handle.bounds
         }
         present(alert, animated: true)
     }
 
-    private func promptEditText(at index: Int, currentText: String, fontSize: CGFloat) {
+    private func promptEditText(id: UUID, currentText: String, fontSize: CGFloat) {
         let alert = UIAlertController(title: "Text bearbeiten", message: nil, preferredStyle: .alert)
         alert.addTextField { tf in
             tf.text = currentText
@@ -1749,91 +1711,36 @@ extension InfiniteNotebookViewController {
             guard let self,
                   let newText = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !newText.isEmpty else { return }
-            self.updateInsertedText(at: index, newText: newText, fontSize: fontSize)
+            self.updateInsertedText(id: id, newText: newText, fontSize: fontSize)
         })
         present(alert, animated: true)
     }
 
-    func updateInsertedText(at index: Int, newText: String, fontSize: CGFloat) {
-        guard index < document.insertedImages.count,
-              index < imageLayers.count,
-              index < imageHandles.count else { return }
+    func updateInsertedText(id: UUID, newText: String, fontSize: CGFloat) {
+        guard let idx = document.insertedImages.firstIndex(where: { $0.id == id }),
+              let layer = imageLayers[id] else { return }
 
-        let entry = document.insertedImages[index]
+        let entry = document.insertedImages[idx]
         let newImg = renderTypedText(newText, fontSize: fontSize, originX: entry.startX)
         guard let newFilename = try? store.saveImage(newImg) else { return }
 
         try? FileManager.default.removeItem(at: store.imageURL(filename: entry.filename))
 
         let newFrame = CGRect(x: entry.startX, y: entry.startY, width: newImg.size.width, height: newImg.size.height)
-
-        let layer = imageLayers[index]
         layer.contents = newImg.cgImage
         layer.frame = newFrame
 
-        let handle = imageHandles[index]
-        handle.frame = newFrame
-        handle.contentFrame = newFrame
+        if let handle = imageHandles[id] {
+            handle.frame = newFrame
+            handle.contentFrame = newFrame
+        }
 
-        document.insertedImages[index].filename = newFilename
-        document.insertedImages[index].width = newImg.size.width
-        document.insertedImages[index].height = newImg.size.height
-        document.insertedImages[index].textContent = newText
-        document.insertedImages[index].fontSize = fontSize
+        document.insertedImages[idx].filename = newFilename
+        document.insertedImages[idx].width = newImg.size.width
+        document.insertedImages[idx].height = newImg.size.height
+        document.insertedImages[idx].textContent = newText
+        document.insertedImages[idx].fontSize = fontSize
 
         store.saveDocument(document)
-    }
-
-    // MARK: - Eraser for Typed Text & Inserted Elements
-
-    func eraseInsertedElements(near point: CGPoint, radius: CGFloat = 28) {
-        guard !document.insertedImages.isEmpty else { return }
-        let hitRect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
-
-        var toDelete: [Int] = []
-        for (i, entry) in document.insertedImages.enumerated() {
-            let frame = CGRect(x: entry.startX, y: entry.startY, width: entry.width, height: entry.height)
-            if frame.intersects(hitRect) {
-                toDelete.append(i)
-            }
-        }
-
-        guard !toDelete.isEmpty else { return }
-
-        for idx in toDelete.reversed() {
-            if idx < imageViews.count {
-                let imgView = imageViews[idx]
-                UIView.animate(withDuration: 0.15, animations: {
-                    imgView.alpha = 0
-                    imgView.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
-                }) { _ in
-                    imgView.removeFromSuperview()
-                }
-                imageViews.remove(at: idx)
-            }
-            if idx < imageLayers.count {
-                imageLayers[idx].removeFromSuperlayer()
-                imageLayers.remove(at: idx)
-            }
-            if idx < imageHandles.count {
-                imageHandles[idx].removeFromSuperview()
-                imageHandles.remove(at: idx)
-            }
-            if idx < document.insertedImages.count {
-                let entry = document.insertedImages[idx]
-                try? FileManager.default.removeItem(at: store.imageURL(filename: entry.filename))
-                document.insertedImages.remove(at: idx)
-            }
-        }
-        rewireImageHandles()
-        store?.saveDocument(document)
-    }
-}
-
-// MARK: - UIGestureRecognizerDelegate
-
-extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        return true
     }
 }
