@@ -34,6 +34,7 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
         if let img = vm.pendingImage    { vm.pendingImage  = nil; vc.insertImage(img) }
 
         if vm.triggerHandwritingRecognition { vm.triggerHandwritingRecognition = false; vc.recogniseHandwriting() }
+        if vm.triggerMathRecognition        { vm.triggerMathRecognition = false;        vc.recogniseMathSelection() }
         if vm.triggerAddStickyNote          { vm.triggerAddStickyNote = false;          vc.addStickyNote() }
         if vm.triggerAddBookmark            { vm.triggerAddBookmark   = false;          vc.addBookmark() }
         if vm.triggerShowBookmarks          { vm.triggerShowBookmarks = false;          vc.showBookmarkList() }

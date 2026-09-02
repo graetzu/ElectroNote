@@ -210,6 +210,9 @@ struct InfiniteNotebookHostView: View {
                     Button { vm.triggerHandwritingRecognition = true } label: {
                         Label("Handschrift erkennen", systemImage: "text.viewfinder")
                     }
+                    Button { vm.triggerMathRecognition = true } label: {
+                        Label("Mathe / Formel berechnen", systemImage: "function")
+                    }
                     Button { vm.showPDFPicker = true } label: {
                         Label("Dokument einfügen (PDF, Word, Excel, PPT…)", systemImage: "doc.badge.plus")
                     }
@@ -313,6 +316,9 @@ struct PenToolbarView: View {
         self.onToolChanged = onToolChanged
     }
 
+    var onTextRecognition: (() -> Void)? = nil
+    var onMathRecognition: (() -> Void)? = nil
+
     init(vm: InfiniteNotebookViewModel) {
         self._activeTool = Binding(get: { vm.activeTool }, set: { vm.activeTool = $0 })
         self._selectedColor = Binding(get: { vm.selectedColor }, set: { vm.selectedColor = $0 })
@@ -322,6 +328,8 @@ struct PenToolbarView: View {
         self.darkDrawingMode = vm.darkDrawingMode
         self.showRuler = true
         self.onToolChanged = nil
+        self.onTextRecognition = { [weak vm] in vm?.triggerHandwritingRecognition = true }
+        self.onMathRecognition = { [weak vm] in vm?.triggerMathRecognition = true }
     }
 
     var body: some View {
@@ -359,6 +367,45 @@ struct PenToolbarView: View {
                         }
                     }
                     .accessibilityLabel(tool.rawValue)
+                }
+            }
+
+            if activeTool == .lasso {
+                Divider()
+                    .frame(height: 22)
+
+                HStack(spacing: 6) {
+                    Button {
+                        onTextRecognition?()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "text.viewfinder")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Text")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.blue.opacity(0.15))
+                        .foregroundColor(.blue)
+                        .clipShape(Capsule())
+                    }
+
+                    Button {
+                        onMathRecognition?()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "function")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Mathe")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.purple.opacity(0.15))
+                        .foregroundColor(.purple)
+                        .clipShape(Capsule())
+                    }
                 }
             }
 

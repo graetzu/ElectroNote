@@ -607,13 +607,17 @@ extension InfiniteNotebookViewController {
     }
 
     func recogniseHandwriting() {
-        showSelectionOverlay()
+        showSelectionOverlay(mode: .handwriting)
+    }
+
+    func recogniseMathSelection() {
+        showSelectionOverlay(mode: .math)
     }
 
     // MARK: - Selection overlay
 
-    private func showSelectionOverlay() {
-        let overlay = HandwritingSelectionOverlay()
+    private func showSelectionOverlay(mode: SelectionMode = .handwriting) {
+        let overlay = HandwritingSelectionOverlay(mode: mode)
         overlay.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(overlay)
         NSLayoutConstraint.activate([
@@ -649,7 +653,7 @@ extension InfiniteNotebookViewController {
             )
 
             self.lastLassoPoints = contentPoints
-            Task { await self.recogniseInRegion(contentRect: contentRect, lassoPoints: contentPoints) }
+            Task { await self.recogniseInRegion(contentRect: contentRect, lassoPoints: contentPoints, mathMode: mode == .math) }
         }
 
         overlay.alpha = 0
@@ -657,7 +661,7 @@ extension InfiniteNotebookViewController {
     }
 
     @MainActor
-    private func recogniseInRegion(contentRect: CGRect, lassoPoints: [CGPoint] = []) async {
+    private func recogniseInRegion(contentRect: CGRect, lassoPoints: [CGPoint] = [], mathMode: Bool = false) async {
         let lassoPolygon = UIBezierPath()
         if let first = lassoPoints.first {
             lassoPolygon.move(to: first)
@@ -696,7 +700,7 @@ extension InfiniteNotebookViewController {
         ])
         spinner.startAnimating()
 
-        let obs = await runVision(on: composite, mathMode: false)
+        let obs = await runVision(on: composite, mathMode: mathMode)
         spinner.removeFromSuperview()
 
         var items: [RecognitionBannerView.Item] = []

@@ -1,23 +1,43 @@
 import UIKit
 
-/// Fullscreen lasso selection overlay for selecting handwriting.
+enum SelectionMode {
+    case handwriting
+    case math
+
+    var title: String {
+        switch self {
+        case .handwriting: return "Handschrift mit dem Lasso umkreisen"
+        case .math:        return "Mathe-Formel mit dem Lasso umkreisen"
+        }
+    }
+
+    var tintColor: UIColor {
+        switch self {
+        case .handwriting: return .systemBlue
+        case .math:        return .systemPurple
+        }
+    }
+}
+
+/// Fullscreen lasso selection overlay for selecting handwriting or math equations.
 /// The user draws a freehand lasso around the handwriting using finger or Apple Pencil.
 final class HandwritingSelectionOverlay: UIView {
 
     var onLassoSelected: (([CGPoint], CGRect) -> Void)?
     var onCancel: (() -> Void)?
 
+    let mode: SelectionMode
     private var lassoPoints: [CGPoint] = []
 
     // MARK: - Subviews
 
-    private let hintLabel: UILabel = {
+    private lazy var hintLabel: UILabel = {
         let l = UILabel()
-        l.text = "Handschrift mit dem Lasso umkreisen"
+        l.text = mode.title
         l.textAlignment  = .center
         l.textColor      = .white
         l.font           = .systemFont(ofSize: 15, weight: .semibold)
-        l.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.85)
+        l.backgroundColor = mode.tintColor.withAlphaComponent(0.90)
         l.layer.cornerRadius = 14
         l.clipsToBounds  = true
         l.translatesAutoresizingMaskIntoConstraints = false
@@ -37,7 +57,8 @@ final class HandwritingSelectionOverlay: UIView {
 
     // MARK: - Init
 
-    init() {
+    init(mode: SelectionMode = .handwriting) {
+        self.mode = mode
         super.init(frame: .zero)
         isOpaque = false
         backgroundColor = .clear
@@ -131,13 +152,13 @@ final class HandwritingSelectionOverlay: UIView {
         outer.fill()
 
         // Subtle fill inside lasso
-        UIColor.systemBlue.withAlphaComponent(0.12).setFill()
+        mode.tintColor.withAlphaComponent(0.12).setFill()
         path.fill()
 
         // Dashed glowing lasso stroke
         ctx.saveGState()
         ctx.setLineDash(phase: 0, lengths: [6, 4])
-        ctx.setStrokeColor(UIColor.systemBlue.cgColor)
+        ctx.setStrokeColor(mode.tintColor.cgColor)
         ctx.setLineWidth(2.5)
         ctx.addPath(path.cgPath)
         ctx.strokePath()
@@ -145,7 +166,7 @@ final class HandwritingSelectionOverlay: UIView {
 
         // Start point indicator
         if let first = lassoPoints.first {
-            UIColor.systemBlue.setFill()
+            mode.tintColor.setFill()
             UIBezierPath(ovalIn: CGRect(x: first.x - 4, y: first.y - 4, width: 8, height: 8)).fill()
         }
     }
