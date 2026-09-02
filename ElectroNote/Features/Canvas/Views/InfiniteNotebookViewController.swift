@@ -120,6 +120,11 @@ final class InfiniteNotebookViewController: UIViewController {
         if canvasView.frame != view.bounds {
             canvasView.frame = view.bounds
         }
+        let currentW = max(view.bounds.width, 834)
+        if canvasView.contentSize.width != currentW && currentW > 0 {
+            canvasView.contentSize.width = currentW
+            updateBackgroundFrame()
+        }
         if !didLoad {
             didLoad = true
             loadDocument()
@@ -178,7 +183,8 @@ final class InfiniteNotebookViewController: UIViewController {
 
         let drawingMaxY = canvasView.drawing.bounds.isNull ? 0 : canvasView.drawing.bounds.maxY
         let h = max(document.documentHeight, drawingMaxY + Self.initialHeight * 0.5)
-        canvasView.contentSize = CGSize(width: view.bounds.width, height: h)
+        let w = max(view.bounds.width > 0 ? view.bounds.width : 834, 834)
+        canvasView.contentSize = CGSize(width: w, height: h)
 
         canvasView.overrideUserInterfaceStyle = document.darkDrawingMode ? .dark : .light
         setupBackgroundLayer()
@@ -214,9 +220,9 @@ final class InfiniteNotebookViewController: UIViewController {
         pageBreakContainer.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         pageBreakContainer.subviews.forEach { $0.removeFromSuperview() }
 
-        let pageH = NotebookDocument.pageHeight // 842 pt
-        let totalH = canvasView.contentSize.height
         let width = canvasView.contentSize.width
+        let pageH = width * 1.41421356 // Proportional ISO A4 ratio (1 : √2)
+        let totalH = canvasView.contentSize.height
         let dark = document.darkDrawingMode
 
         var pageNum = 1
@@ -277,6 +283,7 @@ final class InfiniteNotebookViewController: UIViewController {
 
         paperBackgroundView.backgroundColor = pattern
         paperBackgroundView.layer.cornerRadius = 4
+        paperBackgroundView.layer.masksToBounds = true
         paperBackgroundView.layer.shadowColor = UIColor.black.cgColor
         paperBackgroundView.layer.shadowOpacity = dark ? 0.45 : 0.18
         paperBackgroundView.layer.shadowOffset = CGSize(width: 0, height: 4)
@@ -366,11 +373,11 @@ final class InfiniteNotebookViewController: UIViewController {
     }
 
     private func cornellImage(spacing: CGFloat, bg: UIColor, line: UIColor) -> UIImage {
-        // Full-page tile so each A4 section shows the Cornell layout
-        let w = NotebookDocument.pageWidth
-        let h = NotebookDocument.pageHeight
-        let cueCol: CGFloat  = 175  // left cue/keywords column width
-        let summaryH: CGFloat = 160 // summary strip at page bottom
+        // Dynamic A4 section matching current canvas width
+        let w = canvasView.contentSize.width > 0 ? canvasView.contentSize.width : max(view.bounds.width, 834)
+        let h = w * 1.41421356 // Proportional ISO A4
+        let cueCol: CGFloat   = max(w * 0.28, 175)
+        let summaryH: CGFloat = max(h * 0.18, 160)
 
         return UIGraphicsImageRenderer(size: CGSize(width: w, height: h)).image { ctx in
             bg.setFill()
@@ -785,27 +792,21 @@ extension InfiniteNotebookViewController {
     }
 
     // MARK: - Auto-Scroll on Edge Writing
-
     func checkWritingEdgeAutoScroll() {
+        // Bottom extension happens smoothly in extendIfNeeded without jumping contentOffset
+        guard canvasView.zoomScale > 1.3 else { return }
         guard let lastStroke = canvasView.drawing.strokes.last else { return }
         let strokeBounds = lastStroke.renderBounds
         guard !strokeBounds.isNull && strokeBounds.width > 0 else { return }
 
-        let strokeMaxPoint = CGPoint(x: strokeBounds.maxX, y: strokeBounds.maxY)
+        let strokeMaxPoint = CGPoint(x: strokeBounds.maxX, y: strokeBounds.midY)
         let visiblePoint = canvasView.convert(strokeMaxPoint, to: canvasView.superview ?? view)
         let bounds = canvasView.bounds
 
-        // 1. Bottom edge auto-scroll (advance downwards)
-        if visiblePoint.y > bounds.height - 110 {
-            let stepY: CGFloat = 160
-            let targetY = canvasView.contentOffset.y + stepY
-            canvasView.setContentOffset(CGPoint(x: canvasView.contentOffset.x, y: targetY), animated: true)
-        }
-
-        // 2. Right edge auto-scroll when zoomed in
-        if canvasView.zoomScale > 1.05 && visiblePoint.x > bounds.width - 80 {
+        // Right edge gentle pan only when deeply zoomed in and writing at far edge
+        if visiblePoint.x > bounds.width - 50 {
             let maxOffsetX = max(0, canvasView.contentSize.width * canvasView.zoomScale - bounds.width)
-            let stepX: CGFloat = bounds.width * 0.35
+            let stepX: CGFloat = bounds.width * 0.25
             let targetX = min(maxOffsetX, canvasView.contentOffset.x + stepX)
             if targetX > canvasView.contentOffset.x {
                 canvasView.setContentOffset(CGPoint(x: targetX, y: canvasView.contentOffset.y), animated: true)
