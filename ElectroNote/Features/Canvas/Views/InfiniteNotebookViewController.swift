@@ -107,7 +107,9 @@ final class InfiniteNotebookViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemGray5
+        let dark = document.darkDrawingMode
+        view.backgroundColor = dark ? UIColor(red: 0.11, green: 0.12, blue: 0.14, alpha: 1.0)
+                                    : UIColor(red: 0.88, green: 0.90, blue: 0.92, alpha: 1.0)
         setupCanvas()
         setupToolPicker()
     }
@@ -121,12 +123,14 @@ final class InfiniteNotebookViewController: UIViewController {
             didLoad = true
             loadDocument()
         }
+        centerCanvasContent()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         canvasView.becomeFirstResponder()
         applyDrawingPolicy()
+        centerCanvasContent()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -137,6 +141,10 @@ final class InfiniteNotebookViewController: UIViewController {
     // MARK: - Setup
 
     private func setupCanvas() {
+        let dark = document.darkDrawingMode
+        view.backgroundColor = dark ? UIColor(red: 0.11, green: 0.12, blue: 0.14, alpha: 1.0)
+                                    : UIColor(red: 0.88, green: 0.90, blue: 0.92, alpha: 1.0)
+
         canvasView.frame = view.bounds
         canvasView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         canvasView.minimumZoomScale = 0.25
@@ -194,16 +202,49 @@ final class InfiniteNotebookViewController: UIViewController {
     // Called whenever background style or dark mode changes
     private func refreshBackground() {
         let dark = document.darkDrawingMode
-        let bg   = dark ? UIColor(white: 0.12, alpha: 1) : UIColor.white
-        let line = dark ? UIColor(white: 0.30, alpha: 1) : UIColor.systemGray4
-        let pattern = UIColor(patternImage: makePattern(document.background, bg: bg, line: line))
+        let deskColor = dark ? UIColor(red: 0.11, green: 0.12, blue: 0.14, alpha: 1.0)
+                             : UIColor(red: 0.88, green: 0.90, blue: 0.92, alpha: 1.0)
+        view.backgroundColor = deskColor
+
+        let paperBg = dark ? UIColor(white: 0.16, alpha: 1) : UIColor.white
+        let line    = dark ? UIColor(white: 0.32, alpha: 1) : UIColor.systemGray4
+        let pattern = UIColor(patternImage: makePattern(document.background, bg: paperBg, line: line))
+
         paperBackgroundView.backgroundColor = pattern
+        paperBackgroundView.layer.cornerRadius = 4
+        paperBackgroundView.layer.shadowColor = UIColor.black.cgColor
+        paperBackgroundView.layer.shadowOpacity = dark ? 0.45 : 0.18
+        paperBackgroundView.layer.shadowOffset = CGSize(width: 0, height: 4)
+        paperBackgroundView.layer.shadowRadius = 14
+        paperBackgroundView.layer.borderWidth = 1.0
+        paperBackgroundView.layer.borderColor = (dark ? UIColor(white: 0.28, alpha: 0.8) : UIColor(white: 0.80, alpha: 0.8)).cgColor
+
         backgroundLayer.backgroundColor = pattern.cgColor
+        centerCanvasContent()
     }
 
     private func updateBackgroundFrame() {
         paperBackgroundView.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         backgroundLayer.frame = CGRect(origin: .zero, size: canvasView.contentSize)
+        centerCanvasContent()
+    }
+
+    private func centerCanvasContent() {
+        let boundsSize = canvasView.bounds.size
+        guard boundsSize.width > 0 && boundsSize.height > 0 else { return }
+
+        let scaledWidth  = canvasView.contentSize.width * canvasView.zoomScale
+        let scaledHeight = canvasView.contentSize.height * canvasView.zoomScale
+
+        let offsetX = max((boundsSize.width - scaledWidth) * 0.5, 0)
+        let offsetY = max((boundsSize.height - scaledHeight) * 0.5, 0)
+
+        canvasView.contentInset = UIEdgeInsets(
+            top: max(offsetY, 24),
+            left: max(offsetX, 16),
+            bottom: max(offsetY, 24),
+            right: max(offsetX, 16)
+        )
     }
 
     private func makePattern(_ style: BackgroundStyle, bg: UIColor, line: UIColor) -> UIImage {
@@ -1075,6 +1116,10 @@ extension InfiniteNotebookViewController: PKCanvasViewDelegate {
         scheduleScan()
         NotificationCenter.default.post(name: .electroNoteDrawingBegan, object: nil)
         scheduleShapeSnap()
+    }
+
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        centerCanvasContent()
     }
 }
 
