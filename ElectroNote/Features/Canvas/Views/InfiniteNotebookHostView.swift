@@ -1,5 +1,6 @@
 import SwiftUI
 import PencilKit
+import PhotosUI
 
 struct InfiniteNotebookHostView: View {
     let item: DocumentItem
@@ -7,6 +8,8 @@ struct InfiniteNotebookHostView: View {
     @StateObject private var vm = InfiniteNotebookViewModel()
     @StateObject private var syncVM = SyncViewModel()
     @State private var showNextcloudSheet = false
+    @State private var showClipArtPicker  = false
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
     private let store: NotebookDocumentStore
 
     init(item: DocumentItem) {
@@ -48,6 +51,26 @@ struct InfiniteNotebookHostView: View {
                 SyncSettingsView { url in
                     showNextcloudSheet = false
                     vm.pendingPDFURL = url
+                }
+            }
+        }
+        .sheet(isPresented: $showClipArtPicker) {
+            ClipArtPickerView { entry in
+                let config = UIImage.SymbolConfiguration(pointSize: 120, weight: .regular)
+                if let img = UIImage(systemName: entry.id, withConfiguration: config) {
+                    vm.pendingImage = img
+                }
+            }
+        }
+        .onChange(of: selectedPhotoItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                if let data = try? await newItem.loadTransferable(type: Data.self),
+                   let img = UIImage(data: data) {
+                    await MainActor.run {
+                        vm.pendingImage = img
+                        selectedPhotoItem = nil
+                    }
                 }
             }
         }
@@ -172,6 +195,15 @@ struct InfiniteNotebookHostView: View {
                 }
 
                 Section("Einfügen") {
+                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                        Label("Bild / Foto einfügen (Mediathek)", systemImage: "photo.badge.plus")
+                    }
+                    Button { showClipArtPicker = true } label: {
+                        Label("Symbol / ClipArt einfügen", systemImage: "star.square")
+                    }
+                    Button { vm.showTextInsertion = true } label: {
+                        Label("Text einfügen", systemImage: "text.cursor")
+                    }
                     Button { vm.triggerAddStickyNote = true } label: {
                         Label("Haftzettel", systemImage: "note.text.badge.plus")
                     }

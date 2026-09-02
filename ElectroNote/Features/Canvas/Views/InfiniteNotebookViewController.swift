@@ -706,8 +706,8 @@ extension InfiniteNotebookViewController {
             if looksLikeMath(expr), case .success(let v) = evaluator.evaluate(expr) {
                 let formattedResult = fmt(v)
                 let cleanText = text.trimmingCharacters(in: .whitespaces)
-                let label = cleanText.contains("=") ? "\(cleanText) \(formattedResult)" : "\(cleanText) = \(formattedResult)"
-                items.append(.init(label: label, copyText: formattedResult))
+                let fullEquation = cleanText.contains("=") ? "\(cleanText) \(formattedResult)" : "\(cleanText) = \(formattedResult)"
+                items.append(.init(label: fullEquation, copyText: fullEquation))
             } else {
                 items.append(.init(label: text, copyText: text))
             }
@@ -764,8 +764,8 @@ extension InfiniteNotebookViewController {
                 if looksLikeMath(expr), case .success(let v) = evaluator.evaluate(expr) {
                     let formattedResult = fmt(v)
                     let cleanText = text.trimmingCharacters(in: .whitespaces)
-                    let label = cleanText.contains("=") ? "\(cleanText) \(formattedResult)" : "\(cleanText) = \(formattedResult)"
-                    items.append(.init(label: label, copyText: formattedResult))
+                    let fullEquation = cleanText.contains("=") ? "\(cleanText) \(formattedResult)" : "\(cleanText) = \(formattedResult)"
+                    items.append(.init(label: fullEquation, copyText: fullEquation))
                 }
             } else {
                 items.append(.init(label: text, copyText: text))
