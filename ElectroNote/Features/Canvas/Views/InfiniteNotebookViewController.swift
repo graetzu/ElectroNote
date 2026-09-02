@@ -633,9 +633,20 @@ extension InfiniteNotebookViewController {
             self?.selectionOverlay = nil
             guard let self else { return }
 
-            // Precise conversion using canvasView.convert
-            let contentPoints = points.map { self.canvasView.convert($0, from: self.view) }
-            let contentRect   = self.canvasView.convert(viewRect, from: self.view)
+            // Convert from screen view coordinates to unscaled PKDrawing canvas coordinates
+            let scale = max(self.canvasView.zoomScale, 0.01)
+            let offsetX = self.canvasView.contentOffset.x
+            let offsetY = self.canvasView.contentOffset.y
+
+            let contentPoints = points.map { pt in
+                CGPoint(x: (pt.x + offsetX) / scale, y: (pt.y + offsetY) / scale)
+            }
+            let contentRect = CGRect(
+                x: (viewRect.minX + offsetX) / scale,
+                y: (viewRect.minY + offsetY) / scale,
+                width: max(viewRect.width / scale, 20),
+                height: max(viewRect.height / scale, 20)
+            )
 
             self.lastLassoPoints = contentPoints
             Task { await self.recogniseInRegion(contentRect: contentRect, lassoPoints: contentPoints) }
@@ -666,14 +677,16 @@ extension InfiniteNotebookViewController {
         let scanRect: CGRect
         if !relevantStrokes.isEmpty {
             let strokeUnion = relevantStrokes.reduce(CGRect.null) { $0.union($1.renderBounds) }
-            scanRect = strokeUnion.insetBy(dx: -20, dy: -20)
+            scanRect = strokeUnion.insetBy(dx: -25, dy: -25)
         } else {
-            scanRect = contentRect.insetBy(dx: -20, dy: -20)
+            scanRect = contentRect.insetBy(dx: -25, dy: -25)
         }
 
-        guard let composite = compositeVisible(rect: scanRect, drawing: canvasView.drawing) else { return }
+        guard let composite = compositeVisible(rect: scanRect, drawing: canvasView.drawing) else {
+            showNoTextAlert()
+            return
+        }
 
-        // Spinner while recognising
         let spinner = UIActivityIndicatorView(style: .large)
         spinner.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(spinner)
@@ -683,20 +696,25 @@ extension InfiniteNotebookViewController {
         ])
         spinner.startAnimating()
 
-        let obs = await runVision(on: composite)
+        let obs = await runVision(on: composite, mathMode: false)
         spinner.removeFromSuperview()
 
-        let items: [RecognitionBannerView.Item] = obs.compactMap {
-            guard let text = $0.topCandidates(1).first?.string, !text.isEmpty else { return nil }
-            return .init(label: text, copyText: text)
+        var items: [RecognitionBannerView.Item] = []
+        for o in obs {
+            guard let text = o.topCandidates(1).first?.string, !text.isEmpty else { continue }
+            let expr = leftOfEquals(text)
+            if looksLikeMath(expr), case .success(let v) = evaluator.evaluate(expr) {
+                let formattedResult = fmt(v)
+                let cleanText = text.trimmingCharacters(in: .whitespaces)
+                let label = cleanText.contains("=") ? "\(cleanText) \(formattedResult)" : "\(cleanText) = \(formattedResult)"
+                items.append(.init(label: label, copyText: formattedResult))
+            } else {
+                items.append(.init(label: text, copyText: text))
+            }
         }
 
         guard !items.isEmpty else {
-            let alert = UIAlertController(title: "Nichts erkannt",
-                                          message: "Im eingekreisten Bereich wurde keine Handschrift gefunden.",
-                                          preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            present(alert, animated: true)
+            showNoTextAlert()
             return
         }
 
@@ -706,21 +724,27 @@ extension InfiniteNotebookViewController {
         showBanner(items: items, scanRect: scanRect)
     }
 
+    private func showNoTextAlert() {
+        let alert = UIAlertController(title: "Nichts erkannt",
+                                      message: "Im ausgewählten Bereich wurde keine Handschrift gefunden.",
+                                      preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
     @MainActor
     private func performScan(mathOnly: Bool) async {
         let drawing = canvasView.drawing
+        guard !drawing.strokes.isEmpty else { return }
 
         let scanRect: CGRect
         if mathOnly {
-            let scale = canvasView.zoomScale
-            let visible = CGRect(
-                x: canvasView.contentOffset.x / scale,
-                y: canvasView.contentOffset.y / scale,
-                width:  canvasView.bounds.width  / scale,
-                height: canvasView.bounds.height / scale
-            )
-            guard drawing.strokes.contains(where: { $0.renderBounds.intersects(visible) }) else { return }
-            scanRect = visible
+            guard let lastStroke = drawing.strokes.last else { return }
+            let nearby = drawing.strokes.filter {
+                $0.renderBounds.intersects(lastStroke.renderBounds.insetBy(dx: -350, dy: -80))
+            }
+            let union = nearby.reduce(lastStroke.renderBounds) { $0.union($1.renderBounds) }
+            scanRect = union.insetBy(dx: -30, dy: -30)
         } else {
             let b = drawing.bounds
             guard !b.isNull, b.width > 0, b.height > 0 else { return }
@@ -755,13 +779,20 @@ extension InfiniteNotebookViewController {
     }
 
     private func compositeVisible(rect: CGRect, drawing: PKDrawing) -> UIImage? {
-        guard rect.width > 0, rect.height > 0 else { return nil }
+        let validCanvasRect = CGRect(origin: .zero, size: canvasView.contentSize)
+        let validRect = rect.intersection(validCanvasRect)
+        guard !validRect.isNull, validRect.width >= 10, validRect.height >= 10 else { return nil }
         let scale: CGFloat = 2.0
-        let ink  = drawing.image(from: rect, scale: scale)
+        let ink = drawing.image(from: validRect, scale: scale)
         guard ink.size.width > 0 && ink.size.height > 0 else { return nil }
+
+        // Render black ink on pure white background for maximum Vision OCR contrast
         return UIGraphicsImageRenderer(size: ink.size).image { ctx in
-            UIColor.white.setFill(); ctx.fill(CGRect(origin: .zero, size: ink.size))
-            ink.draw(at: .zero)
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: ink.size))
+            let tintedInk = ink.withRenderingMode(.alwaysTemplate)
+            UIColor.black.set()
+            tintedInk.draw(in: CGRect(origin: .zero, size: ink.size))
         }
     }
 
@@ -773,15 +804,9 @@ extension InfiniteNotebookViewController {
                     cont.resume(returning: (r.results as? [VNRecognizedTextObservation]) ?? [])
                 }
                 req.recognitionLevel = .accurate
-                if mathMode {
-                    req.usesLanguageCorrection = false
-                    req.recognitionLanguages = ["en-US"]
-                    req.automaticallyDetectsLanguage = false
-                } else {
-                    req.recognitionLanguages = ["de-DE", "en-US", "en-GB"]
-                    req.usesLanguageCorrection = true
-                    req.automaticallyDetectsLanguage = true
-                }
+                req.recognitionLanguages = ["de-DE", "en-US"]
+                req.usesLanguageCorrection = !mathMode
+                req.automaticallyDetectsLanguage = !mathMode
                 do {
                     try VNImageRequestHandler(cgImage: cg, orientation: .up, options: [:]).perform([req])
                 } catch {

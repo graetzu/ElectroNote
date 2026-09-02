@@ -44,6 +44,9 @@ final class MathEvaluator {
         if s.hasSuffix("=") { s = String(s.dropLast()).trimmingCharacters(in: .whitespaces) }
         guard !s.isEmpty else { return "" }
 
+        // Decimal comma (e.g. 3,5 + 2 -> 3.5 + 2)
+        s = s.replacingOccurrences(of: ",", with: ".")
+
         // Functions – longest matches first to avoid partial replacement
         let fnMap: [(String, String)] = [
             ("sqrt(",  "Math.sqrt("),
@@ -64,8 +67,9 @@ final class MathEvaluator {
             s = s.replacingOccurrences(of: from, with: to)
         }
 
-        // Constants
+        // Constants & symbols
         s = s.replacingOccurrences(of: "π", with: "Math.PI")
+        s = s.replacingOccurrences(of: "pi", with: "Math.PI")
         s = s.replacingOccurrences(of: "Ω", with: "")     // strip unit symbols
         s = s.replacingOccurrences(of: "²", with: "**2")
         s = s.replacingOccurrences(of: "³", with: "**3")
@@ -74,7 +78,10 @@ final class MathEvaluator {
         s = s.replacingOccurrences(of: "^",  with: "**")
         s = s.replacingOccurrences(of: "×",  with: "*")
         s = s.replacingOccurrences(of: "·",  with: "*")
+        s = s.replacingOccurrences(of: " x ", with: " * ")
+        s = s.replacingOccurrences(of: " X ", with: " * ")
         s = s.replacingOccurrences(of: "÷",  with: "/")
+        s = s.replacingOccurrences(of: ":",  with: "/")
         s = s.replacingOccurrences(of: "−",  with: "-")  // Unicode minus
 
         return s
