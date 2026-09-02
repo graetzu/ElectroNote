@@ -851,17 +851,17 @@ extension InfiniteNotebookViewController {
             let combined = self.lastScanItems.map(\.copyText).joined(separator: "\n")
             let origin: CGPoint
             if !self.lastScanRect.isNull {
-                origin = CGPoint(x: self.lastScanRect.minX, y: self.lastScanRect.maxY + 8)
+                origin = CGPoint(x: self.lastScanRect.minX, y: self.lastScanRect.minY)
             } else {
                 let off = self.canvasView.contentOffset
-                let sc  = self.canvasView.zoomScale
+                let sc  = max(self.canvasView.zoomScale, 0.01)
                 origin = CGPoint(x: 20, y: (off.y + 100) / sc)
             }
-            self.insertTypedText(text: combined, fontSize: 22, contentOrigin: origin)
+            self.insertTypedText(text: combined, fontSize: 22, contentOrigin: origin, addHandle: false)
             self.hideBanner()
         }
         banner.onReplaceHandwriting = { [weak self] in
-            guard let self, !self.lastScanRect.isNull else { return }
+            guard let self, !self.lastScanItems.isEmpty else { return }
             self.replaceHandwriting(in: self.lastScanRect, with: self.lastScanItems)
             self.hideBanner()
         }
@@ -936,53 +936,40 @@ extension InfiniteNotebookViewController {
     }
 
     func replaceHandwriting(in contentRect: CGRect, with items: [RecognitionBannerView.Item]) {
-        let regionDesc = contentRect.isNull ? "im sichtbaren Bereich" : "im ausgewählten Bereich"
-        let alert = UIAlertController(
-            title: "Handschrift ersetzen",
-            message: "Die Handschrift \(regionDesc) wird durch digitalen Text ersetzt.",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Ersetzen", style: .destructive) { [weak self] _ in
-            guard let self else { return }
+        let clearRect: CGRect
+        if contentRect.isNull {
+            let sc = max(canvasView.zoomScale, 0.01)
+            let off = canvasView.contentOffset
+            clearRect = CGRect(x: off.x / sc, y: off.y / sc,
+                               width:  canvasView.bounds.width  / sc,
+                               height: canvasView.bounds.height / sc)
+        } else {
+            clearRect = contentRect
+        }
 
-            // Determine which region to clear
-            let clearRect: CGRect
-            if contentRect.isNull {
-                let sc = self.canvasView.zoomScale
-                let off = self.canvasView.contentOffset
-                clearRect = CGRect(x: off.x / sc, y: off.y / sc,
-                                   width:  self.canvasView.bounds.width  / sc,
-                                   height: self.canvasView.bounds.height / sc)
+        let lassoPolygon = UIBezierPath()
+        if let first = lastLassoPoints.first {
+            lassoPolygon.move(to: first)
+            for pt in lastLassoPoints.dropFirst() { lassoPolygon.addLine(to: pt) }
+            lassoPolygon.close()
+        }
+
+        // Remove strokes whose midpoint or bounds are within the cleared area
+        let remaining = canvasView.drawing.strokes.filter { stroke in
+            if !lastLassoPoints.isEmpty {
+                let mid = CGPoint(x: stroke.renderBounds.midX, y: stroke.renderBounds.midY)
+                return !lassoPolygon.contains(mid) && !clearRect.contains(stroke.renderBounds)
             } else {
-                clearRect = contentRect
+                return !clearRect.intersects(stroke.renderBounds)
             }
+        }
+        canvasView.drawing = PKDrawing(strokes: remaining)
 
-            let lassoPolygon = UIBezierPath()
-            if let first = self.lastLassoPoints.first {
-                lassoPolygon.move(to: first)
-                for pt in self.lastLassoPoints.dropFirst() { lassoPolygon.addLine(to: pt) }
-                lassoPolygon.close()
-            }
-
-            // Remove strokes whose midpoint or bounds are within the lasso polygon
-            let remaining = self.canvasView.drawing.strokes.filter { stroke in
-                if !self.lastLassoPoints.isEmpty {
-                    let mid = CGPoint(x: stroke.renderBounds.midX, y: stroke.renderBounds.midY)
-                    return !lassoPolygon.contains(mid) && !clearRect.contains(stroke.renderBounds)
-                } else {
-                    return !clearRect.intersects(stroke.renderBounds)
-                }
-            }
-            self.canvasView.drawing = PKDrawing(strokes: remaining)
-
-            let combinedText = items.map(\.copyText).joined(separator: "\n")
-            let startX = max(clearRect.minX, 10)
-            let startY = max(clearRect.minY, 0)
-            let origin = CGPoint(x: startX, y: startY)
-            self.insertTypedText(text: combinedText, fontSize: 22, contentOrigin: origin)
-        })
-        present(alert, animated: true)
+        let combinedText = items.map(\.copyText).joined(separator: "\n")
+        let startX = max(clearRect.minX, 10)
+        let startY = max(clearRect.minY, 0)
+        let origin = CGPoint(x: startX, y: startY)
+        insertTypedText(text: combinedText, fontSize: 22, contentOrigin: origin, addHandle: false)
     }
 }
 
@@ -1008,7 +995,7 @@ extension InfiniteNotebookViewController {
             overlay?.removeFromSuperview()
             guard let self else { return }
             let contentPt = self.viewPointToContent(viewPoint)
-            self.insertTypedText(text: text, fontSize: fontSize, contentOrigin: contentPt)
+            self.insertTypedText(text: text, fontSize: fontSize, contentOrigin: contentPt, addHandle: false)
         }
 
         overlay.alpha = 0
@@ -1016,19 +1003,27 @@ extension InfiniteNotebookViewController {
     }
 
     private func viewPointToContent(_ pt: CGPoint) -> CGPoint {
-        let sc  = canvasView.zoomScale
+        let sc  = max(canvasView.zoomScale, 0.01)
         let off = canvasView.contentOffset
         return CGPoint(x: (pt.x + off.x) / sc, y: (pt.y + off.y) / sc)
     }
 
-    private func insertTypedText(text: String, fontSize: CGFloat, contentOrigin: CGPoint) {
+    private func insertTypedText(text: String, fontSize: CGFloat, contentOrigin: CGPoint, addHandle: Bool = false) {
         let img = renderTypedText(text, fontSize: fontSize, originX: contentOrigin.x)
         guard let filename = try? store.saveImage(img) else { return }
 
         let contentFrame = CGRect(x: contentOrigin.x, y: contentOrigin.y,
                                   width: img.size.width, height: img.size.height)
         let imgView = makeImageView(image: img, frame: contentFrame)
-        canvasView.insertSubview(imgView, at: 0)
+        imgView.layer.borderWidth = 0
+        imgView.layer.borderColor = nil
+        imgView.backgroundColor = .clear
+
+        if paperBackgroundView.superview != nil {
+            canvasView.insertSubview(imgView, aboveSubview: paperBackgroundView)
+        } else {
+            canvasView.insertSubview(imgView, at: 0)
+        }
         imageViews.append(imgView)
         imageLayers.append(imgView.layer)
 
@@ -1037,14 +1032,13 @@ extension InfiniteNotebookViewController {
                                   width: img.size.width, height: img.size.height,
                                   textContent: text, fontSize: fontSize)
         document.insertedImages.append(entry)
-        addImageHandle(for: imgView.layer, at: contentFrame, documentIndex: document.insertedImages.count - 1)
+        if addHandle {
+            addImageHandle(for: imgView.layer, at: contentFrame, documentIndex: document.insertedImages.count - 1)
+        }
         let needed = contentOrigin.y + img.size.height + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height { canvasView.contentSize.height = needed }
         document.documentHeight = canvasView.contentSize.height
         store.saveDocument(document)
-
-        canvasView.setContentOffset(
-            CGPoint(x: 0, y: max(0, contentOrigin.y - 40)), animated: true)
     }
 
     private func renderTypedText(_ text: String, fontSize: CGFloat, originX: CGFloat) -> UIImage {
@@ -1056,12 +1050,10 @@ extension InfiniteNotebookViewController {
         // Available width from insertion point to right edge
         let available = max(canvasView.contentSize.width - originX - 10, 100)
         let w = min(available, canvasView.contentSize.width * 0.9)
-        let padX: CGFloat = 2
-        let padY: CGFloat = 2
         let textH = str.boundingRect(
-            with: CGSize(width: w - padX * 2, height: .greatestFiniteMagnitude),
+            with: CGSize(width: w, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).height
-        let totalH = max(textH + padY * 2, fontSize + padY * 2)
+        let totalH = max(textH + 4, fontSize + 4)
 
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 2
@@ -1069,7 +1061,7 @@ extension InfiniteNotebookViewController {
         return UIGraphicsImageRenderer(size: CGSize(width: w, height: totalH), format: fmt).image { ctx in
             UIColor.clear.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: w, height: totalH))
-            str.draw(in: CGRect(x: padX, y: padY, width: w - padX * 2, height: textH + 4))
+            str.draw(in: CGRect(x: 0, y: 0, width: w, height: textH + 4))
         }
     }
 }
