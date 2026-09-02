@@ -10,13 +10,6 @@ struct ContentView: View {
         NavigationSplitView(columnVisibility: $sidebarVisibility) {
             BrowserSidebarView(viewModel: browserVM, selectedItem: $selectedItem)
                 .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 400)
-                .toolbar {
-                    ToolbarItem(placement: .bottomBar) {
-                        Button { showMath = true } label: {
-                            Label("Mathe", systemImage: "function")
-                        }
-                    }
-                }
         } detail: {
             if let item = selectedItem {
                 switch item.type {
