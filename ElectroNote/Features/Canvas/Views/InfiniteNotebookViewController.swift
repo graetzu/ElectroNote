@@ -538,7 +538,7 @@ extension InfiniteNotebookViewController {
         let entry = InsertedImage(id: id, filename: filename,
                                   startX: startX, startY: startY, width: w, height: h)
         document.insertedImages.append(entry)
-        addImageHandle(for: imgView, layer: imgView.layer, at: contentFrame, id: id)
+        addImageHandle(for: imgView, at: contentFrame, id: id)
         document.documentHeight = canvasView.contentSize.height
         store.saveDocument(document)
 
@@ -727,7 +727,7 @@ extension InfiniteNotebookViewController {
         }
         imageViews[entry.id] = imgView
         imageLayers[entry.id] = imgView.layer
-        addImageHandle(for: imgView, layer: imgView.layer, at: contentFrame, id: entry.id)
+        addImageHandle(for: imgView, at: contentFrame, id: entry.id)
     }
 
     // MARK: - Layer helpers
@@ -1238,7 +1238,7 @@ extension InfiniteNotebookViewController {
                                   width: img.size.width, height: img.size.height,
                                   textContent: text, fontSize: fontSize)
         document.insertedImages.append(entry)
-        addImageHandle(for: imgView, layer: imgView.layer, at: contentFrame, id: id)
+        addImageHandle(for: imgView, at: contentFrame, id: id)
         let needed = contentOrigin.y + img.size.height + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height { canvasView.contentSize.height = needed }
         document.documentHeight = canvasView.contentSize.height
@@ -1713,7 +1713,8 @@ private final class NativeTextViewDelegate: NSObject, UITextViewDelegate {
 // MARK: - ImageHandleView
 
 /// An interactive UIView overlaid on an inserted image, clip-art, or typed text block.
-/// Provides smooth drag-to-move, double-tap-to-edit, and long-press actions.
+/// Provides smooth drag-to-move, double-tap-to-edit, and long-press actions via finger touches.
+/// Passes Apple Pencil touches directly to PKCanvasView for uninterrupted, high-performance drawing.
 final class ImageHandleView: UIView {
 
     /// Canvas-coordinate frame of the element.
@@ -1723,17 +1724,15 @@ final class ImageHandleView: UIView {
     var onDelete: (() -> Void)?
     var onEdit: (() -> Void)?
 
-    private weak var mirroredView: UIView?
-    private weak var mirroredLayer: CALayer?
+    private weak var targetView: UIView?
 
-    init(contentFrame: CGRect, view: UIView?, layer: CALayer?) {
-        self.contentFrame   = contentFrame
-        self.mirroredView   = view
-        self.mirroredLayer  = layer
+    init(contentFrame: CGRect, targetView: UIView?) {
+        self.contentFrame = contentFrame
+        self.targetView   = targetView
         super.init(frame: contentFrame)
 
-        backgroundColor    = .clear
-        isOpaque           = false
+        backgroundColor = .clear
+        isOpaque = false
         isUserInteractionEnabled = true
 
         self.layer.borderWidth  = 0
@@ -1741,25 +1740,16 @@ final class ImageHandleView: UIView {
         self.layer.cornerRadius = 6
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
-        pan.allowedTouchTypes = [
-            NSNumber(value: UITouch.TouchType.direct.rawValue),
-            NSNumber(value: UITouch.TouchType.pencil.rawValue)
-        ]
+        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         addGestureRecognizer(pan)
 
         let dt = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
         dt.numberOfTapsRequired = 2
-        dt.allowedTouchTypes = [
-            NSNumber(value: UITouch.TouchType.direct.rawValue),
-            NSNumber(value: UITouch.TouchType.pencil.rawValue)
-        ]
+        dt.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         addGestureRecognizer(dt)
 
         let lp = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
-        lp.allowedTouchTypes = [
-            NSNumber(value: UITouch.TouchType.direct.rawValue),
-            NSNumber(value: UITouch.TouchType.pencil.rawValue)
-        ]
+        lp.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         lp.minimumPressDuration = 0.45
         addGestureRecognizer(lp)
     }
@@ -1786,12 +1776,7 @@ final class ImageHandleView: UIView {
         contentFrame.origin.y += delta.y
 
         frame = contentFrame
-        mirroredView?.frame = contentFrame
-
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        mirroredLayer?.frame = contentFrame
-        CATransaction.commit()
+        targetView?.frame = contentFrame
 
         if gr.state == .ended || gr.state == .cancelled {
             layer.borderWidth = 0
@@ -1805,10 +1790,13 @@ final class ImageHandleView: UIView {
         onEdit?()
     }
 
-    // Expand hit target margin so even short/small text lines are effortless to touch and drag
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        let expanded = bounds.insetBy(dx: -16, dy: -12)
-        return expanded.contains(point)
+    // Always pass Apple Pencil touches through to PKCanvasView for native drawing
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if let touches = event?.allTouches, touches.contains(where: { $0.type == .pencil }) {
+            return nil
+        }
+        guard bounds.insetBy(dx: -16, dy: -12).contains(point) else { return nil }
+        return self
     }
 }
 
@@ -1817,8 +1805,8 @@ final class ImageHandleView: UIView {
 extension InfiniteNotebookViewController {
 
     /// Creates an interactive UIView handle over an element in the canvas.
-    func addImageHandle(for view: UIView?, layer: CALayer?, at contentFrame: CGRect, id: UUID) {
-        let handle = ImageHandleView(contentFrame: contentFrame, view: view, layer: layer)
+    func addImageHandle(for targetView: UIView?, at contentFrame: CGRect, id: UUID) {
+        let handle = ImageHandleView(contentFrame: contentFrame, targetView: targetView)
         handle.frame = contentFrame
         canvasView.addSubview(handle)
         imageHandles[id] = handle
