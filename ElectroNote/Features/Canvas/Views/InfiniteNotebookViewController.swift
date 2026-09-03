@@ -536,7 +536,7 @@ extension InfiniteNotebookViewController {
         let entry = InsertedImage(id: id, filename: filename,
                                   startX: startX, startY: startY, width: w, height: h)
         document.insertedImages.append(entry)
-        addImageHandle(for: imgView.layer, at: contentFrame, id: id)
+        addImageHandle(for: imgView, layer: imgView.layer, at: contentFrame, id: id)
         document.documentHeight = canvasView.contentSize.height
         store.saveDocument(document)
 
@@ -725,9 +725,7 @@ extension InfiniteNotebookViewController {
         }
         imageViews[entry.id] = imgView
         imageLayers[entry.id] = imgView.layer
-        if entry.textContent == nil {
-            addImageHandle(for: imgView.layer, at: contentFrame, id: entry.id)
-        }
+        addImageHandle(for: imgView, layer: imgView.layer, at: contentFrame, id: entry.id)
     }
 
     // MARK: - Layer helpers
@@ -1238,9 +1236,7 @@ extension InfiniteNotebookViewController {
                                   width: img.size.width, height: img.size.height,
                                   textContent: text, fontSize: fontSize)
         document.insertedImages.append(entry)
-        if addHandle {
-            addImageHandle(for: imgView.layer, at: contentFrame, id: id)
-        }
+        addImageHandle(for: imgView, layer: imgView.layer, at: contentFrame, id: id)
         let needed = contentOrigin.y + img.size.height + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height { canvasView.contentSize.height = needed }
         document.documentHeight = canvasView.contentSize.height
@@ -1714,46 +1710,55 @@ private final class NativeTextViewDelegate: NSObject, UITextViewDelegate {
 
 // MARK: - ImageHandleView
 
-/// A transparent UIView overlaid on an image CALayer.
-/// Responds only to finger touches (not Apple Pencil) so the pencil still draws.
-/// Provides drag-to-move and long-press-to-delete for inserted images.
+/// An interactive UIView overlaid on an inserted image, clip-art, or typed text block.
+/// Provides smooth drag-to-move, double-tap-to-edit, and long-press actions.
 final class ImageHandleView: UIView {
 
-    /// Canvas-coordinate frame of the image (mirrors the CALayer.frame).
+    /// Canvas-coordinate frame of the element.
     var contentFrame: CGRect
 
-    var onMoved: ((CGRect) -> Void)?   // called with new content-coord frame
+    var onMoved: ((CGRect) -> Void)?
     var onDelete: (() -> Void)?
     var onEdit: (() -> Void)?
 
-    // Keep a reference to the corresponding layer for live updates.
+    private weak var mirroredView: UIView?
     private weak var mirroredLayer: CALayer?
 
-    init(contentFrame: CGRect, layer: CALayer) {
+    init(contentFrame: CGRect, view: UIView?, layer: CALayer?) {
         self.contentFrame   = contentFrame
+        self.mirroredView   = view
         self.mirroredLayer  = layer
-        super.init(frame: .zero)
+        super.init(frame: contentFrame)
 
         backgroundColor    = .clear
         isOpaque           = false
         isUserInteractionEnabled = true
 
-        layer.borderWidth  = 0
-        layer.borderColor  = UIColor.systemBlue.withAlphaComponent(0.6).cgColor
-        layer.cornerRadius = 4
+        self.layer.borderWidth  = 0
+        self.layer.borderColor  = UIColor.systemBlue.withAlphaComponent(0.75).cgColor
+        self.layer.cornerRadius = 6
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
-        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        pan.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.pencil.rawValue)
+        ]
         addGestureRecognizer(pan)
 
         let dt = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
         dt.numberOfTapsRequired = 2
-        dt.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        dt.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.pencil.rawValue)
+        ]
         addGestureRecognizer(dt)
 
         let lp = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
-        lp.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-        lp.minimumPressDuration = 0.5
+        lp.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.pencil.rawValue)
+        ]
+        lp.minimumPressDuration = 0.45
         addGestureRecognizer(lp)
     }
 
@@ -1766,27 +1771,29 @@ final class ImageHandleView: UIView {
     }
 
     @objc private func handlePan(_ gr: UIPanGestureRecognizer) {
-        guard let sv = superview as? PKCanvasView else { return }
+        guard let sv = superview else { return }
         let delta = gr.translation(in: sv)
         gr.setTranslation(.zero, in: sv)
 
-        let scale = sv.zoomScale
+        if gr.state == .began {
+            layer.borderWidth = 1.5
+            layer.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.06).cgColor
+        }
 
-        // Move the handle view in screen coordinates
-        frame.origin.x += delta.x
-        frame.origin.y += delta.y
+        contentFrame.origin.x += delta.x
+        contentFrame.origin.y += delta.y
 
-        // Move the underlying CALayer in content coordinates
-        let dx = delta.x / scale
-        let dy = delta.y / scale
-        contentFrame.origin.x += dx
-        contentFrame.origin.y += dy
+        frame = contentFrame
+        mirroredView?.frame = contentFrame
+
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         mirroredLayer?.frame = contentFrame
         CATransaction.commit()
 
         if gr.state == .ended || gr.state == .cancelled {
+            layer.borderWidth = 0
+            layer.backgroundColor = UIColor.clear.cgColor
             onMoved?(contentFrame)
         }
     }
@@ -1795,26 +1802,16 @@ final class ImageHandleView: UIView {
         guard gr.state == .began else { return }
         onEdit?()
     }
-
-    // Only intercept finger touches — pencil passes through to PKCanvasView.
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard let touches = event?.allTouches else { return super.hitTest(point, with: event) }
-        let hasOnlyFingers = touches.allSatisfy { $0.type != .pencil }
-        guard hasOnlyFingers else { return nil }
-        return super.hitTest(point, with: event)
-    }
 }
 
 // MARK: - Image Handle Management
 
 extension InfiniteNotebookViewController {
 
-    /// Creates a finger-only UIView handle over an image CALayer in the canvas.
-    /// The handle is added as a subview of `canvasView` so its coordinate space
-    /// matches the canvas content (no offset/zoom correction needed for positioning).
-    func addImageHandle(for layer: CALayer, at contentFrame: CGRect, id: UUID) {
-        let handle = ImageHandleView(contentFrame: contentFrame, layer: layer)
-        handle.frame = contentFrame   // canvasView subviews live in content coordinates
+    /// Creates an interactive UIView handle over an element in the canvas.
+    func addImageHandle(for view: UIView?, layer: CALayer?, at contentFrame: CGRect, id: UUID) {
+        let handle = ImageHandleView(contentFrame: contentFrame, view: view, layer: layer)
+        handle.frame = contentFrame
         canvasView.addSubview(handle)
         imageHandles[id] = handle
 

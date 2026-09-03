@@ -100,7 +100,10 @@ final class StickyNoteView: UIView, UITextViewDelegate, PKCanvasViewDelegate {
 
         // Pan gesture on header for moving the note
         let panHeader = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-        panHeader.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        panHeader.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.pencil.rawValue)
+        ]
         headerView.addGestureRecognizer(panHeader)
 
         updateModeUI()
