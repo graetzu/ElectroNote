@@ -195,6 +195,9 @@ struct InfiniteNotebookHostView: View {
                 }
 
                 Section("Einfügen") {
+                    Button { vm.triggerPaste = true } label: {
+                        Label("Aus Zwischenablage einfügen (Bild/Text)", systemImage: "doc.on.clipboard")
+                    }
                     PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                         Label("Bild / Foto einfügen (Mediathek)", systemImage: "photo.badge.plus")
                     }
@@ -316,6 +319,7 @@ struct PenToolbarView: View {
         self.onToolChanged = onToolChanged
     }
 
+    var onPaste: (() -> Void)? = nil
     var onTextRecognition: (() -> Void)? = nil
     var onMathRecognition: (() -> Void)? = nil
 
@@ -328,6 +332,7 @@ struct PenToolbarView: View {
         self.darkDrawingMode = vm.darkDrawingMode
         self.showRuler = true
         self.onToolChanged = nil
+        self.onPaste = { [weak vm] in vm?.triggerPaste = true }
         self.onTextRecognition = { [weak vm] in vm?.triggerHandwritingRecognition = true }
         self.onMathRecognition = { [weak vm] in vm?.triggerMathRecognition = true }
     }
@@ -375,6 +380,22 @@ struct PenToolbarView: View {
                     .frame(height: 22)
 
                 HStack(spacing: 6) {
+                    Button {
+                        onPaste?()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "doc.on.clipboard")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Einfügen")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.green.opacity(0.15))
+                        .foregroundColor(.green)
+                        .clipShape(Capsule())
+                    }
+
                     Button {
                         onTextRecognition?()
                     } label: {

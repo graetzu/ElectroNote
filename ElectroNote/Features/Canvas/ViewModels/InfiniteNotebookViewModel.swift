@@ -78,6 +78,7 @@ final class InfiniteNotebookViewModel: ObservableObject {
     @Published var pendingImage:  UIImage? = nil
     @Published var triggerHandwritingRecognition: Bool = false
     @Published var triggerMathRecognition:        Bool = false
+    @Published var triggerPaste:                  Bool = false
     @Published var triggerAddStickyNote:          Bool = false
     @Published var triggerAddBookmark:            Bool = false
     @Published var triggerShowBookmarks:          Bool = false

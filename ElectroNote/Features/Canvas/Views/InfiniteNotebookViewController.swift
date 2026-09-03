@@ -143,6 +143,35 @@ final class InfiniteNotebookViewController: UIViewController {
         save()
     }
 
+    // MARK: - Keyboard Shortcuts
+
+    override var canBecomeFirstResponder: Bool { true }
+
+    override var keyCommands: [UIKeyCommand]? {
+        [
+            UIKeyCommand(title: "Einfügen", action: #selector(handleKeyboardPaste), input: "v", modifierFlags: .command),
+            UIKeyCommand(title: "Kopieren", action: #selector(handleKeyboardCopy), input: "c", modifierFlags: .command),
+            UIKeyCommand(title: "Rückgängig", action: #selector(handleKeyboardUndo), input: "z", modifierFlags: .command),
+            UIKeyCommand(title: "Wiederholen", action: #selector(handleKeyboardRedo), input: "z", modifierFlags: [.command, .shift])
+        ]
+    }
+
+    @objc private func handleKeyboardPaste() {
+        pasteFromClipboard()
+    }
+
+    @objc private func handleKeyboardCopy() {
+        copyLassoSelection()
+    }
+
+    @objc private func handleKeyboardUndo() {
+        canvasView.undoManager?.undo()
+    }
+
+    @objc private func handleKeyboardRedo() {
+        canvasView.undoManager?.redo()
+    }
+
     // MARK: - Setup
 
     private func setupCanvas() {
@@ -477,16 +506,18 @@ extension InfiniteNotebookViewController {
         }
     }
 
-    func insertImage(_ image: UIImage) {
+    func insertImage(_ image: UIImage, at explicitOrigin: CGPoint? = nil) {
         guard let filename = try? store.saveImage(image) else { return }
 
-        let startY  = nextInsertY()
-        let w       = canvasView.contentSize.width
-        let ratio   = image.size.height / image.size.width
-        let h       = w * ratio
+        let startX: CGFloat = explicitOrigin?.x ?? 0
+        let startY: CGFloat = explicitOrigin?.y ?? nextInsertY()
+        let maxW = explicitOrigin != nil ? min(canvasView.contentSize.width * 0.7, image.size.width) : canvasView.contentSize.width
+        let ratio = image.size.height / max(image.size.width, 1)
+        let w = max(min(maxW, canvasView.contentSize.width - startX), 100)
+        let h = w * ratio
 
         let id = UUID()
-        let contentFrame = CGRect(x: 0, y: startY, width: w, height: h)
+        let contentFrame = CGRect(x: startX, y: startY, width: w, height: h)
         let imgView = makeImageView(image: image, frame: contentFrame)
         if paperBackgroundView.superview != nil {
             canvasView.insertSubview(imgView, aboveSubview: paperBackgroundView)
@@ -503,13 +534,172 @@ extension InfiniteNotebookViewController {
         }
 
         let entry = InsertedImage(id: id, filename: filename,
-                                  startY: startY, width: w, height: h)
+                                  startX: startX, startY: startY, width: w, height: h)
         document.insertedImages.append(entry)
         addImageHandle(for: imgView.layer, at: contentFrame, id: id)
         document.documentHeight = canvasView.contentSize.height
         store.saveDocument(document)
 
-        canvasView.setContentOffset(CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
+        if explicitOrigin == nil {
+            canvasView.setContentOffset(CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
+        }
+    }
+
+    // MARK: - Clipboard Copy & Paste
+
+    func pasteFromClipboard(at explicitOrigin: CGPoint? = nil) {
+        let pb = UIPasteboard.general
+        let origin: CGPoint
+        if let explicitOrigin {
+            origin = explicitOrigin
+        } else {
+            let sc = max(canvasView.zoomScale, 0.01)
+            let off = canvasView.contentOffset
+            origin = CGPoint(
+                x: max(20, (off.x + canvasView.bounds.width * 0.15) / sc),
+                y: max(20, (off.y + canvasView.bounds.height * 0.25) / sc)
+            )
+        }
+
+        // 1. Paste image
+        if let img = pb.image {
+            insertImage(img, at: origin)
+            showToastBanner(text: "Bild aus Zwischenablage eingefügt", icon: "photo")
+            return
+        }
+
+        // 2. Paste text
+        if let str = pb.string, !str.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let cleanStr = str.trimmingCharacters(in: .whitespacesAndNewlines)
+            insertTypedText(text: cleanStr, fontSize: 22, contentOrigin: origin, addHandle: false)
+            showToastBanner(text: "Text aus Zwischenablage eingefügt", icon: "doc.text")
+            return
+        }
+
+        // 3. Paste PDF / File URL
+        if let url = pb.url, url.pathExtension.lowercased() == "pdf" {
+            insertPDF(from: url)
+            showToastBanner(text: "PDF eingefügt", icon: "doc.richtext")
+            return
+        }
+
+        showToastBanner(text: "Zwischenablage ist leer", icon: "info.circle")
+    }
+
+    func showToastBanner(text: String, icon: String) {
+        let toast = UIView()
+        toast.backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.96)
+        toast.layer.cornerRadius = 14
+        toast.layer.shadowColor = UIColor.black.cgColor
+        toast.layer.shadowOpacity = 0.18
+        toast.layer.shadowOffset = CGSize(width: 0, height: 4)
+        toast.layer.shadowRadius = 10
+        toast.layer.borderWidth = 0.5
+        toast.layer.borderColor = UIColor.separator.cgColor
+        toast.translatesAutoresizingMaskIntoConstraints = false
+
+        let iconView = UIImageView(image: UIImage(systemName: icon))
+        iconView.tintColor = .systemBlue
+        iconView.contentMode = .scaleAspectFit
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        let label = UILabel()
+        label.text = text
+        label.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+        label.textColor = .label
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = UIStackView(arrangedSubviews: [iconView, label])
+        stack.axis = .horizontal
+        stack.spacing = 8
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        toast.addSubview(stack)
+        view.addSubview(toast)
+
+        NSLayoutConstraint.activate([
+            toast.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 14),
+            toast.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            stack.leadingAnchor.constraint(equalTo: toast.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: toast.trailingAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: toast.topAnchor, constant: 9),
+            stack.bottomAnchor.constraint(equalTo: toast.bottomAnchor, constant: -9),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+        ])
+
+        toast.alpha = 0
+        toast.transform = CGAffineTransform(translationX: 0, y: -20)
+        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
+            toast.alpha = 1
+            toast.transform = .identity
+        } completion: { _ in
+            UIView.animate(withDuration: 0.3, delay: 2.0, options: []) {
+                toast.alpha = 0
+                toast.transform = CGAffineTransform(translationX: 0, y: -20)
+            } completion: { _ in
+                toast.removeFromSuperview()
+            }
+        }
+    }
+
+    func duplicateLassoSelection() {
+        guard !lastLassoPoints.isEmpty || !lastScanRect.isNull else { return }
+        let clearRect = lastScanRect
+
+        let lassoPolygon = UIBezierPath()
+        if let first = lastLassoPoints.first {
+            lassoPolygon.move(to: first)
+            for pt in lastLassoPoints.dropFirst() { lassoPolygon.addLine(to: pt) }
+            lassoPolygon.close()
+        }
+
+        let selectedStrokes = canvasView.drawing.strokes.filter { stroke in
+            if !lastLassoPoints.isEmpty {
+                let mid = CGPoint(x: stroke.renderBounds.midX, y: stroke.renderBounds.midY)
+                return lassoPolygon.contains(mid) || clearRect.contains(stroke.renderBounds)
+            } else {
+                return clearRect.intersects(stroke.renderBounds)
+            }
+        }
+
+        let transform = CGAffineTransform(translationX: 30, y: 30)
+        let newStrokes = selectedStrokes.map { stroke -> PKStroke in
+            var newStroke = stroke
+            newStroke.transform = stroke.transform.concatenating(transform)
+            return newStroke
+        }
+        canvasView.drawing.strokes.append(contentsOf: newStrokes)
+
+        let matchingImages = document.insertedImages.filter { entry in
+            let frame = CGRect(x: entry.startX, y: entry.startY, width: entry.width, height: entry.height)
+            return frame.intersects(clearRect)
+        }
+        for entry in matchingImages {
+            if let img = UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) {
+                let newOrigin = CGPoint(x: entry.startX + 30, y: entry.startY + 30)
+                if let text = entry.textContent {
+                    insertTypedText(text: text, fontSize: entry.fontSize ?? 22, contentOrigin: newOrigin, addHandle: false)
+                } else {
+                    insertImage(img, at: newOrigin)
+                }
+            }
+        }
+
+        showToastBanner(text: "Auswahl dupliziert", icon: "doc.on.doc")
+    }
+
+    func copyLassoSelection() {
+        guard !lastScanItems.isEmpty || !lastScanRect.isNull else { return }
+        let combinedText = lastScanItems.map(\.copyText).joined(separator: "\n")
+        if !combinedText.isEmpty {
+            UIPasteboard.general.string = combinedText
+        }
+        if let img = compositeVisible(rect: lastScanRect, drawing: canvasView.drawing) {
+            UIPasteboard.general.image = img
+        }
+        showToastBanner(text: "In Zwischenablage kopiert", icon: "doc.on.doc")
     }
 
     // MARK: - Load on open
@@ -851,6 +1041,16 @@ extension InfiniteNotebookViewController {
 
         let banner = RecognitionBannerView(items: items)
         banner.onDismiss = { [weak self] in self?.hideBanner() }
+        banner.onCopy = { [weak self] in
+            guard let self else { return }
+            self.copyLassoSelection()
+            self.hideBanner()
+        }
+        banner.onDuplicate = { [weak self] in
+            guard let self else { return }
+            self.duplicateLassoSelection()
+            self.hideBanner()
+        }
         banner.onInsertAsText = { [weak self] in
             guard let self else { return }
             let combined = self.lastScanItems.map(\.copyText).joined(separator: "\n")
@@ -1384,6 +1584,8 @@ final class RecognitionBannerView: UIView {
     }
 
     var onDismiss: (() -> Void)?
+    var onCopy: (() -> Void)?
+    var onDuplicate: (() -> Void)?
     var onInsertAsText: (() -> Void)?
     var onReplaceHandwriting: (() -> Void)?
 
@@ -1404,6 +1606,16 @@ final class RecognitionBannerView: UIView {
         titleLabel.textColor = .secondaryLabel
         titleRow.addArrangedSubview(titleLabel)
 
+        let copyBtn = makeButton(title: "Kopieren", image: "doc.on.doc", tint: .systemBlue) { [weak self] in
+            self?.onCopy?()
+        }
+        titleRow.addArrangedSubview(copyBtn)
+
+        let dupeBtn = makeButton(title: "Duplizieren", image: "plus.square.on.square", tint: .systemTeal) { [weak self] in
+            self?.onDuplicate?()
+        }
+        titleRow.addArrangedSubview(dupeBtn)
+
         let insertBtn = makeButton(title: "Als Text", image: "text.badge.plus", tint: .systemIndigo) { [weak self] in
             self?.onInsertAsText?()
         }
@@ -1413,15 +1625,6 @@ final class RecognitionBannerView: UIView {
             self?.onReplaceHandwriting?()
         }
         titleRow.addArrangedSubview(replaceBtn)
-
-        // Copy-all only if multiple items
-        if items.count > 1 {
-            let allText = items.map(\.copyText).joined(separator: "\n")
-            let copyAll = makeButton(title: "Alles kopieren", tint: .systemBlue) { [allText] in
-                UIPasteboard.general.string = allText
-            }
-            titleRow.addArrangedSubview(copyAll)
-        }
 
         let close = makeButton(title: nil, image: "xmark.circle.fill", tint: .tertiaryLabel) { [weak self] in
             self?.onDismiss?()

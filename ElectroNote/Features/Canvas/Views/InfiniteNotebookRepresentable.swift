@@ -35,6 +35,7 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
 
         if vm.triggerHandwritingRecognition { vm.triggerHandwritingRecognition = false; vc.recogniseHandwriting() }
         if vm.triggerMathRecognition        { vm.triggerMathRecognition = false;        vc.recogniseMathSelection() }
+        if vm.triggerPaste                  { vm.triggerPaste = false;                  vc.pasteFromClipboard() }
         if vm.triggerAddStickyNote          { vm.triggerAddStickyNote = false;          vc.addStickyNote() }
         if vm.triggerAddBookmark            { vm.triggerAddBookmark   = false;          vc.addBookmark() }
         if vm.triggerShowBookmarks          { vm.triggerShowBookmarks = false;          vc.showBookmarkList() }
