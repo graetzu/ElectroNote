@@ -1802,6 +1802,12 @@ final class ImageHandleView: UIView {
         guard gr.state == .began else { return }
         onEdit?()
     }
+
+    // Expand hit target margin so even short/small text lines are effortless to touch and drag
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        let expanded = bounds.insetBy(dx: -16, dy: -12)
+        return expanded.contains(point)
+    }
 }
 
 // MARK: - Image Handle Management
@@ -1883,7 +1889,27 @@ extension InfiniteNotebookViewController {
             alert.addAction(UIAlertAction(title: "Text bearbeiten", style: .default) { [weak self] _ in
                 self?.promptEditText(id: id, currentText: text, fontSize: entry.fontSize ?? 22)
             })
+            alert.addAction(UIAlertAction(title: "Kopieren", style: .default) { [weak self] _ in
+                UIPasteboard.general.string = text
+                self?.showToastBanner(text: "Text kopiert", icon: "doc.on.doc")
+            })
+        } else if let img = UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) {
+            alert.addAction(UIAlertAction(title: "Bild kopieren", style: .default) { [weak self] _ in
+                UIPasteboard.general.image = img
+                self?.showToastBanner(text: "Bild kopiert", icon: "doc.on.doc")
+            })
         }
+
+        alert.addAction(UIAlertAction(title: "Duplizieren", style: .default) { [weak self] _ in
+            guard let self else { return }
+            let newOrigin = CGPoint(x: entry.startX + 24, y: entry.startY + 24)
+            if let text = entry.textContent {
+                self.insertTypedText(text: text, fontSize: entry.fontSize ?? 22, contentOrigin: newOrigin)
+            } else if let img = UIImage(contentsOfFile: self.store.imageURL(filename: entry.filename).path) {
+                self.insertImage(img, at: newOrigin)
+            }
+            self.showToastBanner(text: "Dupliziert", icon: "plus.square.on.square")
+        })
 
         alert.addAction(UIAlertAction(title: "Löschen", style: .destructive) { [weak self] _ in
             self?.deleteInsertedElement(id: id)
