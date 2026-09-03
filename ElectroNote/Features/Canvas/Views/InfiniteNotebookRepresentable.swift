@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PencilKit
 
 struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
 
@@ -9,6 +10,8 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> InfiniteNotebookViewController {
         let vc   = InfiniteNotebookViewController()
         vc.store = store
+        let toolColor = vm.darkDrawingMode ? UIColor.white : UIColor(vm.selectedColor)
+        vc.canvasView.tool = PKInkingTool(.pen, color: toolColor, width: vm.selectedWidth)
         vc.onDrawingChanged = { [weak vm] in
             Task { @MainActor in vm?.markUnsaved() }
         }

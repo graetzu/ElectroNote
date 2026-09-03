@@ -70,6 +70,10 @@ final class InfiniteNotebookViewModel: ObservableObject {
         pendingPKTool = makePKTool(tool: activeTool, color: selectedColor, width: selectedWidth, eraserType: eraserType, darkDrawingMode: darkDrawingMode)
     }
 
+    init() {
+        applyCurrentTool()
+    }
+
     // MARK: - UI state
     @Published var saveState:    SaveState = .saved
     @Published var showPDFPicker: Bool     = false

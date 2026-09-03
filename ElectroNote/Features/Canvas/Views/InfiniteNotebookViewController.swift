@@ -187,6 +187,8 @@ final class InfiniteNotebookViewController: UIViewController {
         canvasView.backgroundColor = .clear
         canvasView.isOpaque        = false
         canvasView.delegate        = self
+        let initialColor = dark ? UIColor.white : UIColor.black
+        canvasView.tool            = PKInkingTool(.pen, color: initialColor, width: 3.0)
         // 2-finger scroll in pencilOnly mode — prevents single palm touch from panning
         canvasView.panGestureRecognizer.minimumNumberOfTouches = 2
         view.addSubview(canvasView)

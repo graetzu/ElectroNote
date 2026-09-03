@@ -117,14 +117,55 @@ struct InfiniteNotebookHostView: View {
                 .accessibilityLabel("Wiederholen")
         }
 
-        // Right: always-visible core controls
+        // Right: always-visible core controls & direct feature buttons
         ToolbarItemGroup(placement: .navigationBarTrailing) {
 
-            // Save indicator
+            // Save status indicator with clear description
             Label(vm.saveState.label, systemImage: vm.saveState.symbol)
                 .font(.caption)
                 .foregroundStyle(vm.saveState == .unsaved ? .orange : .secondary)
                 .labelStyle(.iconOnly)
+                .help("Automatischer Speicherstatus")
+
+            // Direktauswahl 1: Formen (Automatische Formerkennung / Shape Snap)
+            Toggle(isOn: $vm.shapeSnapEnabled) {
+                HStack(spacing: 4) {
+                    Image(systemName: vm.shapeSnapEnabled ? "square.and.circle.fill" : "square.and.circle")
+                    Text("Formen")
+                        .font(.system(size: 13, weight: .medium))
+                }
+            }
+            .toggleStyle(.button)
+            .tint(.orange)
+            .accessibilityLabel("Formen-Korrektur")
+
+            // Direktauswahl 2: Handschrift (Handschrift in Text umwandeln)
+            Button {
+                vm.triggerHandwritingRecognition = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "text.viewfinder")
+                    Text("Handschrift")
+                        .font(.system(size: 13, weight: .medium))
+                }
+            }
+            .buttonStyle(.bordered)
+            .tint(.blue)
+            .accessibilityLabel("Handschrift erkennen")
+
+            // Direktauswahl 3: Mathe (Mathe-Erkennung & Formeln lösen)
+            Button {
+                vm.triggerMathRecognition = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "function")
+                    Text("Mathe")
+                        .font(.system(size: 13, weight: .medium))
+                }
+            }
+            .buttonStyle(.bordered)
+            .tint(.purple)
+            .accessibilityLabel("Mathe-Formel berechnen")
 
             // Background template + line spacing
             Menu {
