@@ -203,17 +203,41 @@ struct OrthogonalRoutingEngine {
             return ([start, corner1, end], dir, label)
         }
 
-        // Case 5: Loop Back / Rücksprung nach oben (r2 <= r1 - Schleifen)
+        // Case 5: Direct Straight Up (Same Column, row directly above, fromPort == .top)
+        if c1 == c2 && r2 < r1 && fromPort == .top && r1 - 1 == r2 {
+            let start = CGPoint(x: p1.x, y: p1.y - h1)
+            let end   = CGPoint(x: p2.x, y: p2.y + h2)
+            let label = CGPoint(x: p1.x + 16, y: (start.y + end.y) / 2)
+            return ([start, end], .up, label)
+        }
+
+        // Case 6: Loop Back / Rücksprung nach oben (r2 <= r1 - Schleifen)
         if r2 <= r1 {
+            if fromPort == .top && c1 != c2 {
+                // Exits top, goes to target row Y, then horizontally into target side
+                let start = CGPoint(x: p1.x, y: p1.y - h1)
+                let corner1 = CGPoint(x: p1.x, y: p2.y)
+                let end = CGPoint(x: c2 > c1 ? p2.x - w2 : p2.x + w2, y: p2.y)
+                let dir: ArrowDirection = c2 > c1 ? .right : .left
+                let label = CGPoint(x: p1.x + (c2 > c1 ? 16 : -16), y: (start.y + p2.y) / 2)
+                return ([start, corner1, end], dir, label)
+            }
+
             if c1 <= c2 {
                 // Bypass on the left side
-                let bypassX = min(p1.x, p2.x) - w1 - 38
+                let bypassX = min(p1.x, p2.x) - (c1 == c2 ? (w1 + 38) : 0)
                 let start: CGPoint
                 var points: [CGPoint] = []
                 if fromPort == .left {
                     start = CGPoint(x: p1.x - w1, y: p1.y)
                     points.append(start)
                     points.append(CGPoint(x: bypassX, y: p1.y))
+                } else if fromPort == .top {
+                    start = CGPoint(x: p1.x, y: p1.y - h1)
+                    points.append(start)
+                    let topY = p1.y - h1 - 16
+                    points.append(CGPoint(x: p1.x, y: topY))
+                    points.append(CGPoint(x: bypassX, y: topY))
                 } else {
                     start = CGPoint(x: p1.x, y: p1.y + h1)
                     points.append(start)
@@ -228,12 +252,18 @@ struct OrthogonalRoutingEngine {
                 return (points, .right, label)
             } else {
                 // Bypass on the right side
-                let bypassX = max(p1.x, p2.x) + w1 + 38
+                let bypassX = max(p1.x, p2.x) + (c1 == c2 ? (w1 + 38) : 0)
                 var points: [CGPoint] = []
                 if fromPort == .right {
                     let start = CGPoint(x: p1.x + w1, y: p1.y)
                     points.append(start)
                     points.append(CGPoint(x: bypassX, y: p1.y))
+                } else if fromPort == .top {
+                    let start = CGPoint(x: p1.x, y: p1.y - h1)
+                    points.append(start)
+                    let topY = p1.y - h1 - 16
+                    points.append(CGPoint(x: p1.x, y: topY))
+                    points.append(CGPoint(x: bypassX, y: topY))
                 } else {
                     let start = CGPoint(x: p1.x, y: p1.y + h1)
                     points.append(start)
@@ -525,6 +555,84 @@ final class PAPDesignerViewModel: ObservableObject {
         selectedId = newNode.id
     }
 
+    /// Branches upwards from a decision to a new block above (for loops / retry logic)
+    func branchUp(fromDecision: PAPNode, type: PAPShapeType = .process, label: String? = nil, edgeLabel: String = "nein", port: PAPBranchPort = .top) {
+        pushUndo()
+        let targetCol: Int
+        switch port {
+        case .left:  targetCol = max(0, fromDecision.col - 1)
+        case .right: targetCol = min(5, fromDecision.col + 1)
+        default:     targetCol = fromDecision.col
+        }
+        let targetRow = max(0, fromDecision.row - 1)
+
+        for i in 0..<nodes.count {
+            if nodes[i].col == targetCol && nodes[i].row >= targetRow {
+                nodes[i].row += 1
+            }
+        }
+
+        let defaultLabel: String
+        switch type {
+        case .start:        defaultLabel = "Start"
+        case .end:          defaultLabel = "Ende"
+        case .process:      defaultLabel = "Wiederholung"
+        case .io:           defaultLabel = "Eingabe"
+        case .decision:     defaultLabel = "Bedingung 2?"
+        case .subroutine:   defaultLabel = "Unterprogramm()"
+        case .connector:    defaultLabel = ""
+        }
+
+        let newNode = PAPNode(
+            type: type,
+            label: label ?? defaultLabel,
+            col: targetCol,
+            row: targetRow,
+            tag: type == .io ? "E" : ""
+        )
+        nodes.append(newNode)
+
+        edges.append(PAPEdge(fromId: fromDecision.id, toId: newNode.id, label: edgeLabel, fromPort: port))
+        selectedId = newNode.id
+    }
+
+    /// Inserts a block directly above in the same column at (col, row) and shifts original block down
+    func insertAbove(fromNode: PAPNode, type: PAPShapeType, label: String? = nil, tag: String = "", edgeLabel: String = "") {
+        pushUndo()
+        let targetCol = fromNode.col
+        let targetRow = fromNode.row
+
+        // Shift down the original node and all nodes below it
+        for i in 0..<nodes.count {
+            if nodes[i].col == targetCol && nodes[i].row >= targetRow {
+                nodes[i].row += 1
+            }
+        }
+
+        let defaultLabel: String
+        switch type {
+        case .start:        defaultLabel = "Start"
+        case .end:          defaultLabel = "Ende"
+        case .process:      defaultLabel = "Anweisung"
+        case .io:           defaultLabel = tag.isEmpty ? "Eingabe" : (tag == "A" ? "Ausgabe" : "Eingabe")
+        case .decision:     defaultLabel = "Bedingung?"
+        case .subroutine:   defaultLabel = "Unterprogramm()"
+        case .connector:    defaultLabel = ""
+        }
+
+        let newNode = PAPNode(
+            type: type,
+            label: label ?? defaultLabel,
+            col: targetCol,
+            row: targetRow,
+            tag: tag.isEmpty && type == .io ? "E" : tag
+        )
+        nodes.append(newNode)
+
+        edges.append(PAPEdge(fromId: newNode.id, toId: fromNode.id, label: edgeLabel, fromPort: .bottom))
+        selectedId = newNode.id
+    }
+
     /// Adds a standalone node snapped to a grid column & row
     func addNode(type: PAPShapeType, col: Int = 1, row: Int? = nil, label: String? = nil) {
         pushUndo()
@@ -583,9 +691,16 @@ final class PAPDesignerViewModel: ObservableObject {
         pushUndo()
         let port: PAPBranchPort
         if fromNode.type == .decision {
-            if toNode.col > fromNode.col { port = .right }
-            else if toNode.col < fromNode.col { port = .left }
-            else { port = .bottom }
+            if toNode.row < fromNode.row {
+                // Connecting to a node above (Loopback / Schleife)
+                if toNode.col > fromNode.col { port = .right }
+                else if toNode.col < fromNode.col { port = .left }
+                else { port = .top }
+            } else {
+                if toNode.col > fromNode.col { port = .right }
+                else if toNode.col < fromNode.col { port = .left }
+                else { port = .bottom }
+            }
         } else {
             if toNode.row < fromNode.row {
                 port = (fromNode.col <= toNode.col) ? .left : .right
@@ -1261,31 +1376,86 @@ struct PAPDesignerView: View {
                     .foregroundColor(.white)
                     .clipShape(Capsule())
                 }
-            } else {
-                // Standard block: Insert below menu
+
+                // Nach oben abzweigen / Schleife
                 Menu {
-                    Button { vm.insertBelow(fromNode: node, type: .process, label: "Anweisung") } label: {
-                        Label("Prozess (Anweisung)", systemImage: "rectangle")
+                    Button {
+                        vm.connectMode = true
+                        vm.connectFromId = node.id
+                    } label: {
+                        Label("Schleife zu Block oben verbinden…", systemImage: "arrow.uturn.up")
                     }
-                    Button { vm.insertBelow(fromNode: node, type: .io, label: "Eingabe", tag: "E") } label: {
-                        Label("Eingabe (E)", systemImage: "arrow.down.right.and.arrow.up.left")
+
+                    Divider()
+
+                    Button {
+                        vm.insertAbove(fromNode: node, type: .process, label: "Wiederholung", edgeLabel: "wiederholen")
+                    } label: {
+                        Label("Neuer Block direkt darüber", systemImage: "arrow.up")
                     }
-                    Button { vm.insertBelow(fromNode: node, type: .io, label: "Ausgabe", tag: "A") } label: {
-                        Label("Ausgabe (A)", systemImage: "arrow.up.right.and.arrow.down.left")
+
+                    Button {
+                        vm.branchUp(fromDecision: node, type: .process, label: "Schleife", edgeLabel: "nein", port: .left)
+                    } label: {
+                        Label("Schleife links oben (Nein)", systemImage: "arrow.up.left")
                     }
-                    Button { vm.insertBelow(fromNode: node, type: .decision, label: "Bedingung?") } label: {
-                        Label("Verzweigung (Raute)", systemImage: "diamond")
+
+                    Button {
+                        vm.branchUp(fromDecision: node, type: .process, label: "Schleife", edgeLabel: "nein", port: .right)
+                    } label: {
+                        Label("Schleife rechts oben (Nein)", systemImage: "arrow.up.right")
                     }
-                    Button { vm.insertBelow(fromNode: node, type: .subroutine, label: "Unterprogramm()") } label: {
-                        Label("Unterprogramm", systemImage: "rectangle.split.3x1")
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.up")
+                        Text("Oben")
                     }
-                    Button { vm.insertBelow(fromNode: node, type: .end, label: "Ende") } label: {
-                        Label("Ende / Stopp", systemImage: "oval")
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 5)
+                    .background(Color.purple)
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+                }
+            } else {
+                // Standard block: Insert menu (below and above)
+                Menu {
+                    Section("Darunter einfügen (↓)") {
+                        Button { vm.insertBelow(fromNode: node, type: .process, label: "Anweisung") } label: {
+                            Label("Prozess (Anweisung)", systemImage: "rectangle")
+                        }
+                        Button { vm.insertBelow(fromNode: node, type: .io, label: "Eingabe", tag: "E") } label: {
+                            Label("Eingabe (E)", systemImage: "arrow.down.right.and.arrow.up.left")
+                        }
+                        Button { vm.insertBelow(fromNode: node, type: .io, label: "Ausgabe", tag: "A") } label: {
+                            Label("Ausgabe (A)", systemImage: "arrow.up.right.and.arrow.down.left")
+                        }
+                        Button { vm.insertBelow(fromNode: node, type: .decision, label: "Bedingung?") } label: {
+                            Label("Verzweigung (Raute)", systemImage: "diamond")
+                        }
+                        Button { vm.insertBelow(fromNode: node, type: .subroutine, label: "Unterprogramm()") } label: {
+                            Label("Unterprogramm", systemImage: "rectangle.split.3x1")
+                        }
+                        Button { vm.insertBelow(fromNode: node, type: .end, label: "Ende") } label: {
+                            Label("Ende / Stopp", systemImage: "oval")
+                        }
+                    }
+
+                    Section("Darüber einfügen (↑)") {
+                        Button { vm.insertAbove(fromNode: node, type: .process, label: "Anweisung") } label: {
+                            Label("Prozess darüber", systemImage: "rectangle")
+                        }
+                        Button { vm.insertAbove(fromNode: node, type: .io, label: "Eingabe", tag: "E") } label: {
+                            Label("Eingabe darüber", systemImage: "arrow.down.right.and.arrow.up.left")
+                        }
+                        Button { vm.insertAbove(fromNode: node, type: .decision, label: "Bedingung?") } label: {
+                            Label("Verzweigung darüber", systemImage: "diamond")
+                        }
                     }
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "plus.circle.fill")
-                        Text("Darunter einfügen")
+                        Text("Einfügen")
                     }
                     .font(.caption2.bold())
                     .padding(.horizontal, 8)
