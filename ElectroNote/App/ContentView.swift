@@ -8,7 +8,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: $sidebarVisibility) {
-            BrowserSidebarView(viewModel: browserVM, selectedItem: $selectedItem)
+            BrowserSidebarView(viewModel: browserVM, selectedItem: $selectedItem, sidebarVisibility: $sidebarVisibility)
                 .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 400)
         } detail: {
             if let item = selectedItem {
@@ -45,6 +45,13 @@ struct ContentView: View {
         .navigationSplitViewStyle(.balanced)
         // iPadOS stellt automatisch einen Sidebar-Toggle bereit —
         // kein eigener .toolbar-Modifier nötig (der crasht auf NavigationSplitView)
+        .onChange(of: selectedItem) { _, newItem in
+            if let item = newItem, !item.isFolder {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    sidebarVisibility = .detailOnly
+                }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .electroNoteDrawingBegan)) { _ in
             withAnimation { sidebarVisibility = .detailOnly }
         }

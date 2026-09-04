@@ -47,16 +47,22 @@ final class BrowserViewModel: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
 
-    func createNote(named name: String) {
+    @discardableResult
+    func createNote(named name: String) -> DocumentItem? {
         createDocument(named: name, type: .notebook)
     }
 
-    func createDocument(named name: String, type: DocumentType) {
-        guard !name.isEmpty else { return }
+    @discardableResult
+    func createDocument(named name: String, type: DocumentType) -> DocumentItem? {
+        guard !name.isEmpty else { return nil }
         do {
-            _ = try fileService.createDocument(named: name, type: type, at: currentPath)
+            let item = try fileService.createDocument(named: name, type: type, at: currentPath)
             loadItems()
-        } catch { self.error = error.localizedDescription }
+            return item
+        } catch {
+            self.error = error.localizedDescription
+            return nil
+        }
     }
 
     func rename(item: DocumentItem, to newName: String) {
@@ -67,11 +73,16 @@ final class BrowserViewModel: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
 
-    func importPDF(from url: URL) {
+    @discardableResult
+    func importPDF(from url: URL) -> DocumentItem? {
         do {
-            _ = try fileService.importPDF(from: url, to: currentPath)
+            let item = try fileService.importPDF(from: url, to: currentPath)
             loadItems()
-        } catch { self.error = error.localizedDescription }
+            return item
+        } catch {
+            self.error = error.localizedDescription
+            return nil
+        }
     }
 
     func delete(_ items: [DocumentItem]) {

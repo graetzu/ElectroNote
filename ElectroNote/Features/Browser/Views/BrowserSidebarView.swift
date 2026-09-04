@@ -3,6 +3,7 @@ import SwiftUI
 struct BrowserSidebarView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @Binding var selectedItem: DocumentItem?
+    @Binding var sidebarVisibility: NavigationSplitViewVisibility
 
     @State private var showNewFolder = false
     @State private var showNewNote = false
@@ -49,22 +50,39 @@ struct BrowserSidebarView: View {
         }
         .sheet(isPresented: $showNewNote) {
             NewItemSheet(title: "Neues Dokument", placeholder: "Name") {
+                let created: DocumentItem?
                 if let type = pendingDocType {
-                    viewModel.createDocument(named: $0, type: type)
+                    created = viewModel.createDocument(named: $0, type: type)
                 } else {
-                    viewModel.createNote(named: $0)
+                    created = viewModel.createNote(named: $0)
                 }
                 pendingDocType = nil
+                if let item = created {
+                    selectedItem = item
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        sidebarVisibility = .detailOnly
+                    }
+                }
             }
         }
         .sheet(isPresented: $showPDFPicker) {
             DocumentPicker(contentTypes: [.pdf]) { url in
-                viewModel.importPDF(from: url)
+                if let item = viewModel.importPDF(from: url) {
+                    selectedItem = item
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        sidebarVisibility = .detailOnly
+                    }
+                }
             }
         }
         .sheet(isPresented: $showNextcloud) {
             SyncSettingsView(localRoot: viewModel.currentPath) { pdfURL in
-                viewModel.importPDF(from: pdfURL)
+                if let item = viewModel.importPDF(from: pdfURL) {
+                    selectedItem = item
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        sidebarVisibility = .detailOnly
+                    }
+                }
             }
         }
         .sheet(isPresented: $showTrash) {
@@ -75,6 +93,11 @@ struct BrowserSidebarView: View {
             TagBrowserView { relPath in
                 if let item = viewModel.navigateTo(relPath: relPath) {
                     selectedItem = item.isFolder ? nil : item
+                    if !item.isFolder {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            sidebarVisibility = .detailOnly
+                        }
+                    }
                 }
             }
         }
@@ -284,6 +307,9 @@ struct BrowserSidebarView: View {
             selectedItem = nil
         } else {
             selectedItem = item
+            withAnimation(.easeInOut(duration: 0.25)) {
+                sidebarVisibility = .detailOnly
+            }
         }
     }
 
