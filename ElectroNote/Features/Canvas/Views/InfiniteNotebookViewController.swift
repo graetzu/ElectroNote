@@ -1856,34 +1856,35 @@ final class ImageHandleView: UIView {
         isOpaque = false
         isUserInteractionEnabled = true
 
-        self.layer.borderWidth  = 0
-        self.layer.borderColor  = UIColor.systemBlue.withAlphaComponent(0.85).cgColor
-        self.layer.cornerRadius = 6
+        let touchTypes: [NSNumber] = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.pencil.rawValue)
+        ]
 
-        // 1. Pan for moving
+        // 1. Pan for moving (both finger and Apple Pencil)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
-        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        pan.allowedTouchTypes = touchTypes
         addGestureRecognizer(pan)
 
-        // 2. Pinch for scaling / resizing font
+        // 2. Pinch for scaling / resizing font (2 fingers)
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
         addGestureRecognizer(pinch)
 
-        // 3. Single tap for style menu / selection
+        // 3. Single tap for style menu / selection (both finger and Apple Pencil)
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-        tap.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        tap.allowedTouchTypes = touchTypes
         addGestureRecognizer(tap)
 
-        // 4. Double tap for text edit
+        // 4. Double tap for text edit (both finger and Apple Pencil)
         let dt = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
         dt.numberOfTapsRequired = 2
-        dt.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        dt.allowedTouchTypes = touchTypes
         addGestureRecognizer(dt)
         tap.require(toFail: dt)
 
-        // 5. Long press for style menu
+        // 5. Long press for style menu (both finger and Apple Pencil)
         let lp = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
-        lp.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        lp.allowedTouchTypes = touchTypes
         lp.minimumPressDuration = 0.45
         addGestureRecognizer(lp)
 
@@ -1979,11 +1980,8 @@ final class ImageHandleView: UIView {
         onStyleMenu?()
     }
 
-    // Always pass Apple Pencil touches through to PKCanvasView for native drawing
+    // Enable selecting and moving text/image handles with Apple Pencil as well as finger touches
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        if let touches = event?.allTouches, touches.contains(where: { $0.type == .pencil }) {
-            return nil
-        }
         guard bounds.insetBy(dx: -16, dy: -12).contains(point) else { return nil }
         return self
     }
