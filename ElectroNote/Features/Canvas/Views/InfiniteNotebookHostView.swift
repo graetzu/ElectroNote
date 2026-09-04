@@ -346,204 +346,230 @@ struct PenToolbarView: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Tool selector
-            HStack(spacing: 4) {
-                ForEach(CanvasToolType.allCases) { tool in
-                    Button {
-                        if activeTool == tool && tool == .eraser {
-                            eraserType = eraserType == .vector ? .bitmap : .vector
-                        } else {
-                            activeTool = tool
-                        }
-                        notifyToolChange()
-                    } label: {
-                        VStack(spacing: 2) {
-                            Image(systemName: tool.iconName)
-                                .font(.system(size: 16, weight: .semibold))
-                                .frame(width: 38, height: 32)
-                                .background(
-                                    activeTool == tool ?
-                                    Color.accentColor : Color(uiColor: .tertiarySystemFill)
-                                )
-                                .foregroundColor(
-                                    activeTool == tool ?
-                                    Color.white : Color.primary
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                // Tool selector
+                HStack(spacing: 3) {
+                    ForEach(CanvasToolType.allCases) { tool in
+                        Button {
                             if activeTool == tool && tool == .eraser {
-                                Text(eraserType == .vector ? "Strich" : "Pixel")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundColor(.secondary)
+                                eraserType = eraserType == .vector ? .bitmap : .vector
+                            } else {
+                                activeTool = tool
                             }
+                            notifyToolChange()
+                        } label: {
+                            VStack(spacing: 1) {
+                                Image(systemName: tool.iconName)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .frame(width: 34, height: 26)
+                                    .background(
+                                        activeTool == tool ?
+                                        Color.accentColor : Color(uiColor: .tertiarySystemFill)
+                                    )
+                                    .foregroundColor(
+                                        activeTool == tool ?
+                                        Color.white : Color.primary
+                                    )
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                                if activeTool == tool && tool == .eraser {
+                                    Text(eraserType == .vector ? "Strich" : "Pixel")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .frame(width: 34, height: 32)
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(tool.rawValue)
                     }
-                    .accessibilityLabel(tool.rawValue)
                 }
-            }
+                .fixedSize()
 
-            Divider()
-                .frame(height: 24)
+                Divider()
+                    .frame(height: 22)
 
-            // Direct Smart Features (Formen, Handschrift & Mathe)
-            HStack(spacing: 6) {
-                // Formen Toggle
-                Button {
-                    shapeSnapEnabled.toggle()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: shapeSnapEnabled ? "square.and.circle.fill" : "square.and.circle")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("Formen")
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(shapeSnapEnabled ? Color.orange : Color(uiColor: .tertiarySystemFill))
-                    .foregroundColor(shapeSnapEnabled ? Color.white : Color.primary)
-                    .clipShape(Capsule())
-                }
-                .accessibilityLabel("Formen-Korrektur")
-
-                // Handschrift (OCR) Button
-                Button {
-                    onTextRecognition?()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "text.viewfinder")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("Handschrift")
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.blue)
-                    .foregroundColor(Color.white)
-                    .clipShape(Capsule())
-                }
-                .accessibilityLabel("Handschrift erkennen")
-
-                // Mathe Rechner Button
-                Button {
-                    onMathRecognition?()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "function")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("Mathe")
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.purple)
-                    .foregroundColor(Color.white)
-                    .clipShape(Capsule())
-                }
-                .accessibilityLabel("Mathe berechnen")
-
-                if activeTool == .lasso {
+                // Direct Smart Features (Formen, Handschrift & Mathe)
+                HStack(spacing: 6) {
+                    // Formen Toggle
                     Button {
-                        onPaste?()
+                        shapeSnapEnabled.toggle()
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "doc.on.clipboard")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text("Einfügen")
+                        HStack(spacing: 3) {
+                            Image(systemName: shapeSnapEnabled ? "square.and.circle.fill" : "square.and.circle")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Formen")
                                 .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.green)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(shapeSnapEnabled ? Color.orange : Color(uiColor: .tertiarySystemFill))
+                        .foregroundColor(shapeSnapEnabled ? Color.white : Color.primary)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Formen-Korrektur")
+
+                    // Handschrift (OCR) Button
+                    Button {
+                        onTextRecognition?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "text.viewfinder")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Handschrift")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.blue)
                         .foregroundColor(Color.white)
                         .clipShape(Capsule())
                     }
-                    .accessibilityLabel("Einfügen")
-                }
-            }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Handschrift erkennen")
 
-            if activeTool != .eraser && activeTool != .lasso {
-                Divider()
-                    .frame(height: 24)
+                    // Mathe Rechner Button
+                    Button {
+                        onMathRecognition?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "function")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Mathe")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.purple)
+                        .foregroundColor(Color.white)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Mathe berechnen")
 
-                // Quick Color palette
-                HStack(spacing: 6) {
-                    ForEach(quickColors, id: \.self) { color in
-                        let displayColor = (color == .black && darkDrawingMode) ? Color.white : color
+                    if activeTool == .lasso {
                         Button {
-                            selectedColor = color
-                            notifyToolChange()
+                            onPaste?()
                         } label: {
-                            ZStack {
-                                Circle()
-                                    .fill(displayColor)
-                                    .frame(width: 22, height: 22)
-                                    .overlay(
-                                        Circle()
-                                            .stroke(Color.primary.opacity(0.35), lineWidth: 1)
-                                    )
-
-                                if selectedColor == color {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundColor(displayColor == .white || displayColor == .yellow ? .black : .white)
-                                }
+                            HStack(spacing: 3) {
+                                Image(systemName: "doc.on.clipboard")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Einfügen")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .lineLimit(1)
                             }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .frame(height: 28)
+                            .background(Color.green)
+                            .foregroundColor(Color.white)
+                            .clipShape(Capsule())
                         }
-                        .accessibilityLabel("Farbe")
-                    }
-
-                    // Native ColorPicker for unlimited color options
-                    ColorPicker("", selection: Binding(get: { selectedColor }, set: { selectedColor = $0; notifyToolChange() }))
-                        .labelsHidden()
-                        .scaleEffect(0.85)
-                }
-
-                Divider()
-                    .frame(height: 24)
-
-                // Stroke width buttons
-                HStack(spacing: 8) {
-                    ForEach(strokeWidths, id: \.width) { item in
-                        Button {
-                            selectedWidth = item.width
-                            notifyToolChange()
-                        } label: {
-                            Circle()
-                                .fill(selectedWidth == item.width ? Color.accentColor : Color.primary.opacity(0.45))
-                                .frame(width: item.dotSize, height: item.dotSize)
-                                .frame(width: 26, height: 26)
-                                .background(
-                                    selectedWidth == item.width ?
-                                    Color.accentColor.opacity(0.2) : Color.clear
-                                )
-                                .clipShape(Circle())
-                        }
-                        .accessibilityLabel(item.label)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Einfügen")
                     }
                 }
-            }
+                .fixedSize()
 
-            if showRuler {
-                Divider()
-                    .frame(height: 24)
+                if activeTool != .eraser && activeTool != .lasso {
+                    Divider()
+                        .frame(height: 22)
 
-                // Lineal (Ruler) Toggle
-                Button {
-                    rulerActive.toggle()
-                } label: {
-                    Image(systemName: "ruler")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 32, height: 32)
-                        .background(rulerActive ? Color.brown : Color(uiColor: .tertiarySystemFill))
-                        .foregroundColor(rulerActive ? Color.white : Color.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    // Quick Color palette
+                    HStack(spacing: 5) {
+                        ForEach(quickColors, id: \.self) { color in
+                            let displayColor = (color == .black && darkDrawingMode) ? Color.white : color
+                            Button {
+                                selectedColor = color
+                                notifyToolChange()
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(displayColor)
+                                        .frame(width: 20, height: 20)
+                                        .overlay(
+                                            Circle()
+                                                .stroke(Color.primary.opacity(0.35), lineWidth: 1)
+                                        )
+
+                                    if selectedColor == color {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundColor(displayColor == .white || displayColor == .yellow ? .black : .white)
+                                    }
+                                }
+                                .frame(width: 24, height: 24)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Farbe")
+                        }
+
+                        // Native ColorPicker for unlimited color options
+                        ColorPicker("", selection: Binding(get: { selectedColor }, set: { selectedColor = $0; notifyToolChange() }))
+                            .labelsHidden()
+                            .scaleEffect(0.8)
+                            .frame(width: 24, height: 24)
+                    }
+                    .fixedSize()
+
+                    Divider()
+                        .frame(height: 22)
+
+                    // Stroke width buttons
+                    HStack(spacing: 6) {
+                        ForEach(strokeWidths, id: \.width) { item in
+                            Button {
+                                selectedWidth = item.width
+                                notifyToolChange()
+                            } label: {
+                                Circle()
+                                    .fill(selectedWidth == item.width ? Color.accentColor : Color.primary.opacity(0.45))
+                                    .frame(width: item.dotSize, height: item.dotSize)
+                                    .frame(width: 24, height: 24)
+                                    .background(
+                                        selectedWidth == item.width ?
+                                        Color.accentColor.opacity(0.2) : Color.clear
+                                    )
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(item.label)
+                        }
+                    }
+                    .fixedSize()
                 }
-                .accessibilityLabel("Lineal")
+
+                if showRuler {
+                    Divider()
+                        .frame(height: 22)
+
+                    // Lineal (Ruler) Toggle
+                    Button {
+                        rulerActive.toggle()
+                    } label: {
+                        Image(systemName: "ruler")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(width: 30, height: 28)
+                            .background(rulerActive ? Color.brown : Color(uiColor: .tertiarySystemFill))
+                            .foregroundColor(rulerActive ? Color.white : Color.primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Lineal")
+                }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 4)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .frame(height: 40)
     }
 
     private func notifyToolChange() {
