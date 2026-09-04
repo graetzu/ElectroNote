@@ -118,25 +118,44 @@ final class WhiteboardViewController: UIViewController {
         canvasView.undoManager?.redo()
     }
 
-    func exportImage(withBackground: Bool = true) -> UIImage {
-        let bounds = canvasView.drawing.bounds
-        let renderRect = bounds.isNull ? CGRect(origin: .zero, size: view.bounds.size)
-                                       : bounds.insetBy(dx: -30, dy: -30)
-        let image = canvasView.drawing.image(from: renderRect, scale: 2)
+    func exportImage(withBackground: Bool = true) -> UIImage? {
+        let drawing = canvasView.drawing
+        let bounds = drawing.bounds
 
-        let renderer = UIGraphicsImageRenderer(size: image.size)
-        return renderer.image { ctx in
-            if withBackground {
+        let targetRect: CGRect
+        if !bounds.isNull && bounds.width > 5 && bounds.height > 5 {
+            let padding: CGFloat = 24
+            targetRect = CGRect(
+                x: max(0, bounds.minX - padding),
+                y: max(0, bounds.minY - padding),
+                width: bounds.width + padding * 2,
+                height: bounds.height + padding * 2
+            )
+        } else {
+            let sz = canvasView.bounds.size
+            let w = sz.width > 50 ? sz.width : 600
+            let h = sz.height > 50 ? sz.height : 400
+            targetRect = CGRect(origin: .zero, size: CGSize(width: w, height: h))
+        }
+
+        let renderSize = CGSize(width: max(targetRect.width, 100), height: max(targetRect.height, 100))
+        let inkImage = drawing.image(from: targetRect, scale: 2.0)
+
+        let fmt = UIGraphicsImageRendererFormat()
+        fmt.scale = 2.0
+        return UIGraphicsImageRenderer(size: renderSize, format: fmt).image { ctx in
+            if withBackground || darkDrawingMode {
                 let bg = darkDrawingMode ? UIColor(white: 0.12, alpha: 1) : UIColor.white
                 let line = darkDrawingMode ? UIColor(white: 0.30, alpha: 1) : UIColor.systemGray4
-                let pattern = UIColor(patternImage: makePattern(backgroundStyle, bg: bg, line: line))
-                pattern.setFill()
-                ctx.fill(CGRect(origin: .zero, size: image.size))
+                let pattern = makePattern(backgroundStyle, bg: bg, line: line)
+                pattern.draw(in: CGRect(origin: .zero, size: renderSize))
             } else {
                 UIColor.white.setFill()
-                ctx.fill(CGRect(origin: .zero, size: image.size))
+                ctx.fill(CGRect(origin: .zero, size: renderSize))
             }
-            image.draw(at: .zero)
+            if inkImage.size.width > 0 && inkImage.size.height > 0 {
+                inkImage.draw(in: CGRect(origin: .zero, size: renderSize))
+            }
         }
     }
 }
@@ -249,13 +268,18 @@ struct WhiteboardView: View {
                     }
                     .accessibilityLabel("Hintergrund")
 
-                    Button("Als Bild einfügen") {
-                        if let img = vc?.exportImage(withBackground: background != .blank) {
+                    Button {
+                        if let img = vc?.exportImage(withBackground: background != .blank || darkDrawingMode) {
                             onInsert(img)
                             dismiss()
                         }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus.rectangle.on.rectangle")
+                            Text("Als Bild einfügen")
+                        }
+                        .font(.system(size: 14, weight: .bold))
                     }
-                    .bold()
                 }
             }
         }

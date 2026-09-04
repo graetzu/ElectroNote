@@ -534,14 +534,19 @@ extension InfiniteNotebookViewController {
     }
 
     func insertImage(_ image: UIImage, at explicitOrigin: CGPoint? = nil, registerUndoAction: Bool = true) {
+        guard image.size.width > 0 && image.size.height > 0 else { return }
         guard let filename = try? store.saveImage(image) else { return }
 
-        let startX: CGFloat = explicitOrigin?.x ?? 0
-        let startY: CGFloat = explicitOrigin?.y ?? nextInsertY()
-        let maxW = explicitOrigin != nil ? min(canvasView.contentSize.width * 0.7, image.size.width) : canvasView.contentSize.width
+        let sc = max(canvasView.zoomScale, 0.01)
+        let off = canvasView.contentOffset
+
+        let maxW = explicitOrigin != nil ? min(canvasView.contentSize.width * 0.7, image.size.width) : min(canvasView.contentSize.width * 0.8, max(image.size.width, 280))
         let ratio = image.size.height / max(image.size.width, 1)
-        let w = max(min(maxW, canvasView.contentSize.width - startX), 100)
+        let w = min(maxW, canvasView.contentSize.width - 40)
         let h = w * ratio
+
+        let startX: CGFloat = explicitOrigin?.x ?? max(20, (off.x + (canvasView.bounds.width - w * sc) / 2) / sc)
+        let startY: CGFloat = explicitOrigin?.y ?? max(20, (off.y + 40) / sc)
 
         let id = UUID()
         let contentFrame = CGRect(x: startX, y: startY, width: w, height: h)
@@ -563,13 +568,10 @@ extension InfiniteNotebookViewController {
         let entry = InsertedImage(id: id, filename: filename,
                                   startX: startX, startY: startY, width: w, height: h)
         document.insertedImages.append(entry)
-        addImageHandle(for: imgView, at: contentFrame, id: id)
+        addImageHandle(for: imgView, at: contentFrame, id: id, isText: false)
         document.documentHeight = canvasView.contentSize.height
         store.saveDocument(document)
-
-        if explicitOrigin == nil {
-            canvasView.setContentOffset(CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
-        }
+        showToastBanner(text: "Grafik eingefügt", icon: "photo")
 
         if registerUndoAction {
             registerCustomUndo(actionName: "Bild einfügen") { [weak self] in
