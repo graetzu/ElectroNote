@@ -203,7 +203,7 @@ final class LiveCastServer: ObservableObject {
     private func serveMJPEGStream(connection: NWConnection) {
         let header = """
         HTTP/1.1 200 OK\r
-        Content-Type: multipart/x-mixed-replace; boundary=--frame\r
+        Content-Type: multipart/x-mixed-replace; boundary=frame\r
         Cache-Control: no-cache, no-store, must-revalidate\r
         Pragma: no-cache\r
         Expires: 0\r
@@ -265,12 +265,7 @@ final class LiveCastServer: ObservableObject {
     }
 
     private func sendFrame(_ jpegData: Data, to connection: NWConnection) {
-        let frameHeader = """
-        --frame\r
-        Content-Type: image/jpeg\r
-        Content-Length: \(jpegData.count)\r
-        \r
-        """
+        let frameHeader = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: \(jpegData.count)\r\n\r\n"
         guard let headerData = frameHeader.data(using: .utf8) else { return }
         var fullData = headerData
         fullData.append(jpegData)
@@ -289,10 +284,11 @@ final class LiveCastServer: ObservableObject {
     // MARK: - High Performance Screen Capture
 
     private func captureCurrentFrame() -> Data? {
-        guard let window = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .flatMap({ $0.windows })
-            .first(where: { $0.isKeyWindow }) else {
+        let scenes = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+        let windows = scenes.flatMap({ $0.windows })
+
+        guard let window = windows.first(where: { $0.isKeyWindow && $0.bounds.width > 0 })
+                ?? windows.first(where: { $0.bounds.width > 0 }) else {
             return nil
         }
 
@@ -301,7 +297,7 @@ final class LiveCastServer: ObservableObject {
 
         // Scale down high-DPI retina display to standard 1080p width for ultra-smooth 60ms latency streaming over Wi-Fi
         let scale: CGFloat = bounds.width > 1200 ? 0.70 : 0.85
-        let targetSize = CGSize(width: floor(bounds.width * scale), height: floor(bounds.height * scale))
+        let targetSize = CGSize(width: max(100, floor(bounds.width * scale)), height: max(100, floor(bounds.height * scale)))
 
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1.0
@@ -311,7 +307,10 @@ final class LiveCastServer: ObservableObject {
         let image = renderer.image { ctx in
             ctx.cgContext.interpolationQuality = .medium
             ctx.cgContext.scaleBy(x: scale, y: scale)
-            window.drawHierarchy(in: bounds, afterScreenUpdates: false)
+            let drawn = window.drawHierarchy(in: bounds, afterScreenUpdates: false)
+            if !drawn {
+                window.layer.render(in: ctx.cgContext)
+            }
         }
 
         return image.jpegData(compressionQuality: streamQuality)
@@ -497,6 +496,7 @@ final class LiveCastServer: ObservableObject {
                     </div>
                 </div>
                 <div class="actions">
+                    <button id="mode-btn" onclick="toggleMode()">Modus: Auto</button>
                     <button onclick="takeSnapshot()">📷 Schnappschuss</button>
                     <button onclick="toggleFullscreen()">⛶ Vollbild</button>
                 </div>
@@ -504,7 +504,7 @@ final class LiveCastServer: ObservableObject {
 
             <div class="stream-container">
                 <div class="stream-wrapper" id="wrapper">
-                    <img id="stream" src="/stream" alt="Live Übertragung lädt..." onerror="retryStream()">
+                    <img id="stream" src="/stream" alt="Live Übertragung lädt..." onerror="handleStreamError()">
                 </div>
             </div>
 
@@ -513,6 +513,58 @@ final class LiveCastServer: ObservableObject {
             </footer>
 
             <script>
+                let streamImg = document.getElementById("stream");
+                let isSnapshotMode = false;
+                let isPolling = false;
+
+                // If MJPEG stream doesn't produce an image within 1.2s, auto-switch to snapshot polling
+                setTimeout(() => {
+                    if (streamImg.naturalWidth === 0) {
+                        enableSnapshotMode();
+                    }
+                }, 1200);
+
+                function handleStreamError() {
+                    enableSnapshotMode();
+                }
+
+                function toggleMode() {
+                    if (isSnapshotMode) {
+                        isSnapshotMode = false;
+                        isPolling = false;
+                        document.getElementById("mode-btn").innerText = "Modus: Stream (MJPEG)";
+                        streamImg.src = "/stream?t=" + Date.now();
+                    } else {
+                        enableSnapshotMode();
+                    }
+                }
+
+                function enableSnapshotMode() {
+                    if (isSnapshotMode) return;
+                    isSnapshotMode = true;
+                    document.getElementById("mode-btn").innerText = "Modus: Einzelbilder (HD)";
+                    if (!isPolling) {
+                        isPolling = true;
+                        pollNextSnapshot();
+                    }
+                }
+
+                function pollNextSnapshot() {
+                    if (!isSnapshotMode) {
+                        isPolling = false;
+                        return;
+                    }
+                    const nextImg = new Image();
+                    nextImg.onload = function() {
+                        streamImg.src = nextImg.src;
+                        setTimeout(pollNextSnapshot, 50); // ~20 FPS smooth refresh
+                    };
+                    nextImg.onerror = function() {
+                        setTimeout(pollNextSnapshot, 500);
+                    };
+                    nextImg.src = "/snapshot.jpg?t=" + Date.now();
+                }
+
                 function toggleFullscreen() {
                     const el = document.getElementById("wrapper");
                     if (!document.fullscreenElement) {
@@ -531,12 +583,6 @@ final class LiveCastServer: ObservableObject {
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
-                }
-
-                function retryStream() {
-                    setTimeout(() => {
-                        document.getElementById("stream").src = "/stream?t=" + Date.now();
-                    }, 1000);
                 }
             </script>
         </body>
