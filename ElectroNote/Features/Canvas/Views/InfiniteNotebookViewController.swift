@@ -143,7 +143,7 @@ final class InfiniteNotebookViewController: UIViewController {
         save()
     }
 
-    // MARK: - Keyboard Shortcuts
+    // MARK: - Keyboard Shortcuts & Undo / Redo
 
     override var canBecomeFirstResponder: Bool { true }
 
@@ -165,11 +165,36 @@ final class InfiniteNotebookViewController: UIViewController {
     }
 
     @objc private func handleKeyboardUndo() {
-        canvasView.undoManager?.undo()
+        undoAction()
     }
 
     @objc private func handleKeyboardRedo() {
+        redoAction()
+    }
+
+    func undoAction() {
+        canvasView.undoManager?.undo()
+        onDrawingChanged?()
+        store?.saveDrawing(canvasView.drawing)
+        store?.saveDocument(document)
+    }
+
+    func redoAction() {
         canvasView.undoManager?.redo()
+        onDrawingChanged?()
+        store?.saveDrawing(canvasView.drawing)
+        store?.saveDocument(document)
+    }
+
+    func registerCustomUndo(actionName: String? = nil, _ action: @escaping () -> Void) {
+        guard let undoManager = canvasView.undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { [weak self] _ in
+            action()
+            self?.onDrawingChanged?()
+        }
+        if let actionName {
+            undoManager.setActionName(actionName)
+        }
     }
 
     // MARK: - Setup
@@ -508,7 +533,7 @@ extension InfiniteNotebookViewController {
         }
     }
 
-    func insertImage(_ image: UIImage, at explicitOrigin: CGPoint? = nil) {
+    func insertImage(_ image: UIImage, at explicitOrigin: CGPoint? = nil, registerUndoAction: Bool = true) {
         guard let filename = try? store.saveImage(image) else { return }
 
         let startX: CGFloat = explicitOrigin?.x ?? 0
@@ -544,6 +569,18 @@ extension InfiniteNotebookViewController {
 
         if explicitOrigin == nil {
             canvasView.setContentOffset(CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
+        }
+
+        if registerUndoAction {
+            registerCustomUndo(actionName: "Bild einfügen") { [weak self] in
+                guard let self else { return }
+                self.deleteInsertedElement(id: id, registerUndoAction: false)
+                self.store.saveDocument(self.document)
+
+                self.registerCustomUndo(actionName: "Bild einfügen") { [weak self] in
+                    self?.insertImage(image, at: explicitOrigin, registerUndoAction: true)
+                }
+            }
         }
     }
 
@@ -1141,6 +1178,7 @@ extension InfiniteNotebookViewController {
     }
 
     func replaceHandwriting(in contentRect: CGRect, with items: [RecognitionBannerView.Item]) {
+        let previousDrawing = canvasView.drawing
         let clearRect: CGRect
         if contentRect.isNull {
             let sc = max(canvasView.zoomScale, 0.01)
@@ -1174,7 +1212,26 @@ extension InfiniteNotebookViewController {
         let startX = max(clearRect.minX, 10)
         let startY = max(clearRect.minY, 0)
         let origin = CGPoint(x: startX, y: startY)
-        insertTypedText(text: combinedText, fontSize: 22, contentOrigin: origin, addHandle: false)
+        let insertedId = insertTypedText(text: combinedText, fontSize: 22, contentOrigin: origin, addHandle: true, registerUndoAction: false)
+
+        registerCustomUndo(actionName: "Handschrift umwandeln") { [weak self] in
+            guard let self else { return }
+            let redoDrawing = self.canvasView.drawing
+            if let insertedId {
+                self.deleteInsertedElement(id: insertedId, registerUndoAction: false)
+            }
+            self.canvasView.drawing = previousDrawing
+            self.store?.saveDrawing(previousDrawing)
+            self.store?.saveDocument(self.document)
+
+            self.registerCustomUndo(actionName: "Handschrift umwandeln") { [weak self] in
+                guard let self else { return }
+                self.canvasView.drawing = redoDrawing
+                _ = self.insertTypedText(text: combinedText, fontSize: 22, contentOrigin: origin, addHandle: true, registerUndoAction: false)
+                self.store?.saveDrawing(redoDrawing)
+                self.store?.saveDocument(self.document)
+            }
+        }
     }
 }
 
@@ -1200,7 +1257,7 @@ extension InfiniteNotebookViewController {
             overlay?.removeFromSuperview()
             guard let self else { return }
             let contentPt = self.viewPointToContent(viewPoint)
-            self.insertTypedText(text: text, fontSize: fontSize, contentOrigin: contentPt, addHandle: false)
+            self.insertTypedText(text: text, fontSize: fontSize, contentOrigin: contentPt, addHandle: true, registerUndoAction: true)
         }
 
         overlay.alpha = 0
@@ -1213,9 +1270,10 @@ extension InfiniteNotebookViewController {
         return CGPoint(x: (pt.x + off.x) / sc, y: (pt.y + off.y) / sc)
     }
 
-    private func insertTypedText(text: String, fontSize: CGFloat, contentOrigin: CGPoint, addHandle: Bool = false) {
+    @discardableResult
+    func insertTypedText(text: String, fontSize: CGFloat, contentOrigin: CGPoint, addHandle: Bool = true, registerUndoAction: Bool = true) -> UUID? {
         let img = renderTypedText(text, fontSize: fontSize, originX: contentOrigin.x)
-        guard let filename = try? store.saveImage(img) else { return }
+        guard let filename = try? store.saveImage(img) else { return nil }
 
         let id = UUID()
         let contentFrame = CGRect(x: contentOrigin.x, y: contentOrigin.y,
@@ -1238,11 +1296,26 @@ extension InfiniteNotebookViewController {
                                   width: img.size.width, height: img.size.height,
                                   textContent: text, fontSize: fontSize)
         document.insertedImages.append(entry)
-        addImageHandle(for: imgView, at: contentFrame, id: id)
+        if addHandle {
+            addImageHandle(for: imgView, at: contentFrame, id: id)
+        }
         let needed = contentOrigin.y + img.size.height + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height { canvasView.contentSize.height = needed }
         document.documentHeight = canvasView.contentSize.height
         store.saveDocument(document)
+
+        if registerUndoAction {
+            registerCustomUndo(actionName: "Text einfügen") { [weak self] in
+                guard let self else { return }
+                self.deleteInsertedElement(id: id, registerUndoAction: false)
+                self.store.saveDocument(self.document)
+
+                self.registerCustomUndo(actionName: "Text einfügen") { [weak self] in
+                    self?.insertTypedText(text: text, fontSize: fontSize, contentOrigin: contentOrigin, addHandle: addHandle, registerUndoAction: true)
+                }
+            }
+        }
+        return id
     }
 
     private func renderTypedText(_ text: String, fontSize: CGFloat, originX: CGFloat) -> UIImage {
@@ -1720,11 +1793,12 @@ final class ImageHandleView: UIView {
     /// Canvas-coordinate frame of the element.
     var contentFrame: CGRect
 
-    var onMoved: ((CGRect) -> Void)?
+    var onMoved: ((_ newFrame: CGRect, _ oldFrame: CGRect) -> Void)?
     var onDelete: (() -> Void)?
     var onEdit: (() -> Void)?
 
     private weak var targetView: UIView?
+    private var initialDragFrame: CGRect = .zero
 
     init(contentFrame: CGRect, targetView: UIView?) {
         self.contentFrame = contentFrame
@@ -1768,6 +1842,7 @@ final class ImageHandleView: UIView {
         gr.setTranslation(.zero, in: sv)
 
         if gr.state == .began {
+            initialDragFrame = contentFrame
             layer.borderWidth = 1.5
             layer.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.06).cgColor
         }
@@ -1781,7 +1856,9 @@ final class ImageHandleView: UIView {
         if gr.state == .ended || gr.state == .cancelled {
             layer.borderWidth = 0
             layer.backgroundColor = UIColor.clear.cgColor
-            onMoved?(contentFrame)
+            if contentFrame != initialDragFrame {
+                onMoved?(contentFrame, initialDragFrame)
+            }
         }
     }
 
@@ -1816,7 +1893,7 @@ extension InfiniteNotebookViewController {
             self.editInsertedElement(id: id)
         }
 
-        handle.onMoved = { [weak self] newContentFrame in
+        handle.onMoved = { [weak self] newContentFrame, oldContentFrame in
             guard let self else { return }
             guard let idx = self.document.insertedImages.firstIndex(where: { $0.id == id }) else { return }
             self.document.insertedImages[idx].startX  = newContentFrame.minX
@@ -1824,6 +1901,19 @@ extension InfiniteNotebookViewController {
             self.document.insertedImages[idx].width   = newContentFrame.width
             self.document.insertedImages[idx].height  = newContentFrame.height
             self.store.saveDocument(self.document)
+
+            self.registerCustomUndo(actionName: "Element verschieben") { [weak self] in
+                guard let self else { return }
+                guard let h = self.imageHandles[id] else { return }
+                h.contentFrame = oldContentFrame
+                h.frame = oldContentFrame
+                self.imageViews[id]?.frame = oldContentFrame
+                if let i = self.document.insertedImages.firstIndex(where: { $0.id == id }) {
+                    self.document.insertedImages[i].startX = oldContentFrame.minX
+                    self.document.insertedImages[i].startY = oldContentFrame.minY
+                }
+                self.store.saveDocument(self.document)
+            }
         }
 
         handle.onDelete = { [weak self] in
@@ -1832,7 +1922,10 @@ extension InfiniteNotebookViewController {
         }
     }
 
-    func deleteInsertedElement(id: UUID) {
+    func deleteInsertedElement(id: UUID, registerUndoAction: Bool = true) {
+        let existingEntry = document.insertedImages.first(where: { $0.id == id })
+        let existingImage = imageViews[id]?.image
+
         if let imgView = imageViews.removeValue(forKey: id) {
             UIView.animate(withDuration: 0.15, animations: {
                 imgView.alpha = 0
@@ -1844,10 +1937,21 @@ extension InfiniteNotebookViewController {
         imageHandles.removeValue(forKey: id)?.removeFromSuperview()
 
         if let idx = document.insertedImages.firstIndex(where: { $0.id == id }) {
-            let entry = document.insertedImages.remove(at: idx)
-            try? FileManager.default.removeItem(at: store.imageURL(filename: entry.filename))
+            document.insertedImages.remove(at: idx)
         }
         store?.saveDocument(document)
+
+        if registerUndoAction, let entry = existingEntry {
+            registerCustomUndo(actionName: "Löschen") { [weak self] in
+                guard let self else { return }
+                if let text = entry.textContent {
+                    _ = self.insertTypedText(text: text, fontSize: entry.fontSize ?? 22, contentOrigin: CGPoint(x: entry.startX, y: entry.startY), addHandle: true, registerUndoAction: false)
+                } else if let img = existingImage ?? UIImage(contentsOfFile: self.store.imageURL(filename: entry.filename).path) {
+                    self.insertImage(img, at: CGPoint(x: entry.startX, y: entry.startY), registerUndoAction: false)
+                }
+                self.store.saveDocument(self.document)
+            }
+        }
     }
 
     func eraseInsertedElements(near point: CGPoint, radius: CGFloat = 35) {

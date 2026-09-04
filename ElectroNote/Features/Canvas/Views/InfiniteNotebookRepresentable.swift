@@ -56,9 +56,9 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
             vc.startTextPlacement(text: insertion.text, fontSize: insertion.fontSize)
         }
 
-        // Undo / Redo — routed through VC so PKCanvasView's undoManager is always the target
-        if vm.triggerUndo { vm.triggerUndo = false; vc.canvasView.undoManager?.undo() }
-        if vm.triggerRedo { vm.triggerRedo = false; vc.canvasView.undoManager?.redo() }
+        // Undo / Redo — routed through VC so unified undoAction/redoAction handles strokes and elements
+        if vm.triggerUndo { vm.triggerUndo = false; vc.undoAction() }
+        if vm.triggerRedo { vm.triggerRedo = false; vc.redoAction() }
 
         // Native text input
         if vm.triggerNativeTextInput { vm.triggerNativeTextInput = false; vc.beginNativeTextInput() }
