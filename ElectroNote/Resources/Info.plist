@@ -22,6 +22,8 @@
     <string>Zum Einfügen von Fotos in Notizen</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Zum Speichern von Notizen als Bilder</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>ElectroNote streamt Ihre Notizen und Whiteboards live im lokalen WLAN an Browser auf PCs, Smart TVs und Tablets.</string>
     <key>UIFileSharingEnabled</key>
     <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>

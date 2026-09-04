@@ -168,6 +168,9 @@ struct InfiniteNotebookHostView: View {
             }
             .accessibilityLabel("Text per Tastatur eingeben")
 
+            // Live Cast Button (WLAN Übertragung)
+            LiveCastBadgeButton()
+
             // "Mehr" menu — consolidates less-used actions to keep toolbar compact in portrait
             Menu {
                 Section("Ansicht") {

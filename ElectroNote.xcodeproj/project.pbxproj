@@ -67,6 +67,9 @@
 		TEVB0001 /* TagEditorView.swift in Sources */       = {isa = PBXBuildFile; fileRef = TEV00001 /* TagEditorView.swift */; };
 		TBVB0001 /* TagBrowserView.swift in Sources */      = {isa = PBXBuildFile; fileRef = TBV00001 /* TagBrowserView.swift */; };
 		DTPB0001 /* DocumentTypePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DTPV0001 /* DocumentTypePickerView.swift */; };
+		LC01000000000000000000AA /* LiveCastServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0100000000000000000AA /* LiveCastServer.swift */; };
+		LC02000000000000000000BB /* LiveCastSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0200000000000000000BB /* LiveCastSheetView.swift */; };
+		LC03000000000000000000CC /* LiveCastBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0300000000000000000CC /* LiveCastBadgeView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -128,6 +131,9 @@
 		IMS00001 /* ItemMetadataStore.swift */  = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemMetadataStore.swift;  sourceTree = "<group>"; };
 		TRM00001 /* TrashManager.swift */        = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashManager.swift;        sourceTree = "<group>"; };
 		TRV00001 /* TrashView.swift */           = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift;           sourceTree = "<group>"; };
+		LCF0100000000000000000AA /* LiveCastServer.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LiveCastServer.swift; sourceTree = "<group>"; };
+		LCF0200000000000000000BB /* LiveCastSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/LiveCastSheetView.swift; sourceTree = "<group>"; };
+		LCF0300000000000000000CC /* LiveCastBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/LiveCastBadgeView.swift; sourceTree = "<group>"; };
 		DOCREF01 /* DocumentConverter.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentConverter.swift;    sourceTree = "<group>"; };
 		TEV00001 /* TagEditorView.swift */       = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagEditorView.swift;       sourceTree = "<group>"; };
 		TBV00001 /* TagBrowserView.swift */      = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagBrowserView.swift;      sourceTree = "<group>"; };
@@ -301,8 +307,19 @@
 				CD1D55C0BF42459031CA510E /* PDFViewer */,
 				E444F98B1D4EA227548C3F18 /* Sync */,
 				BB99887766554433221100FF /* Whiteboard */,
+				CC99887766554433221100FF /* LiveCast */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		CC99887766554433221100FF /* LiveCast */ = {
+			isa = PBXGroup;
+			children = (
+				LCF0100000000000000000AA /* LiveCastServer.swift */,
+				LCF0200000000000000000BB /* LiveCastSheetView.swift */,
+				LCF0300000000000000000CC /* LiveCastBadgeView.swift */,
+			);
+			path = LiveCast;
 			sourceTree = "<group>";
 		};
 		AA99887766554433221100FF /* Diagram */ = {
@@ -612,6 +629,9 @@
 				TBVB0001 /* TagBrowserView.swift in Sources */,
 				DTPB0001 /* DocumentTypePickerView.swift in Sources */,
 				DOC00001 /* DocumentConverter.swift in Sources */,
+				LC01000000000000000000AA /* LiveCastServer.swift in Sources */,
+				LC02000000000000000000BB /* LiveCastSheetView.swift in Sources */,
+				LC03000000000000000000CC /* LiveCastBadgeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

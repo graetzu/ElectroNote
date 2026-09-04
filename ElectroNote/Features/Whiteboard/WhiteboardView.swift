@@ -341,6 +341,9 @@ struct WhiteboardView: View {
                 }
 
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    // Live Cast (WLAN Übertragung)
+                    LiveCastBadgeButton()
+
                     // Notizzettel hinzufügen
                     Button {
                         vc?.addStickyNote()

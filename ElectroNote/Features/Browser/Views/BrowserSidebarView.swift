@@ -233,6 +233,8 @@ struct BrowserSidebarView: View {
         }
 
         ToolbarItemGroup(placement: .navigationBarTrailing) {
+            LiveCastBadgeButton()
+
             Menu {
                 Button { showDocTypePicker = true } label: {
                     Label("Neues Dokument…", systemImage: "note.text.badge.plus")
