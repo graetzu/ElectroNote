@@ -115,25 +115,31 @@ struct InsertedImage: Identifiable, Codable {
     var height: CGFloat
     var textContent: String?
     var fontSize: CGFloat?
+    var fontDesign: String?
+    var fontColorHex: String?
 
     init(id: UUID = UUID(), filename: String, startX: CGFloat = 0,
          startY: CGFloat, width: CGFloat, height: CGFloat,
-         textContent: String? = nil, fontSize: CGFloat? = nil) {
+         textContent: String? = nil, fontSize: CGFloat? = nil,
+         fontDesign: String? = nil, fontColorHex: String? = nil) {
         self.id = id; self.filename = filename; self.startX = startX
         self.startY = startY; self.width = width; self.height = height
         self.textContent = textContent; self.fontSize = fontSize
+        self.fontDesign = fontDesign; self.fontColorHex = fontColorHex
     }
 
     // Backward-compatible decoder: startX defaults to 0 for old documents
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        id          = try c.decode(UUID.self, forKey: .id)
-        filename    = try c.decode(String.self, forKey: .filename)
-        startX      = try c.decodeIfPresent(CGFloat.self, forKey: .startX) ?? 0
-        startY      = try c.decode(CGFloat.self, forKey: .startY)
-        width       = try c.decode(CGFloat.self, forKey: .width)
-        height      = try c.decode(CGFloat.self, forKey: .height)
-        textContent = try c.decodeIfPresent(String.self, forKey: .textContent)
-        fontSize    = try c.decodeIfPresent(CGFloat.self, forKey: .fontSize)
+        id           = try c.decode(UUID.self, forKey: .id)
+        filename     = try c.decode(String.self, forKey: .filename)
+        startX       = try c.decodeIfPresent(CGFloat.self, forKey: .startX) ?? 0
+        startY       = try c.decode(CGFloat.self, forKey: .startY)
+        width        = try c.decode(CGFloat.self, forKey: .width)
+        height       = try c.decode(CGFloat.self, forKey: .height)
+        textContent  = try c.decodeIfPresent(String.self, forKey: .textContent)
+        fontSize     = try c.decodeIfPresent(CGFloat.self, forKey: .fontSize)
+        fontDesign   = try c.decodeIfPresent(String.self, forKey: .fontDesign)
+        fontColorHex = try c.decodeIfPresent(String.self, forKey: .fontColorHex)
     }
 }

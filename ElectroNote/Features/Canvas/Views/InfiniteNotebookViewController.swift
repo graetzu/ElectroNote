@@ -1270,9 +1270,38 @@ extension InfiniteNotebookViewController {
         return CGPoint(x: (pt.x + off.x) / sc, y: (pt.y + off.y) / sc)
     }
 
+    func fontFor(design: String?, size: CGFloat) -> UIFont {
+        let style = design ?? "default"
+        switch style {
+        case "rounded":
+            if let desc = UIFont.systemFont(ofSize: size, weight: .regular).fontDescriptor.withDesign(.rounded) {
+                return UIFont(descriptor: desc, size: size)
+            }
+        case "serif":
+            if let desc = UIFont.systemFont(ofSize: size, weight: .regular).fontDescriptor.withDesign(.serif) {
+                return UIFont(descriptor: desc, size: size)
+            }
+        case "monospaced":
+            if let desc = UIFont.systemFont(ofSize: size, weight: .regular).fontDescriptor.withDesign(.monospaced) {
+                return UIFont(descriptor: desc, size: size)
+            }
+        case "handwriting":
+            if let font = UIFont(name: "Noteworthy-Bold", size: size) ?? UIFont(name: "ChalkboardSE-Regular", size: size) ?? UIFont(name: "SnellRoundhand", size: size) {
+                return font
+            }
+        case "marker":
+            if let font = UIFont(name: "MarkerFelt-Wide", size: size) {
+                return font
+            }
+        default:
+            break
+        }
+        return UIFont.systemFont(ofSize: size, weight: .regular)
+    }
+
     @discardableResult
-    func insertTypedText(text: String, fontSize: CGFloat, contentOrigin: CGPoint, addHandle: Bool = true, registerUndoAction: Bool = true) -> UUID? {
-        let img = renderTypedText(text, fontSize: fontSize, originX: contentOrigin.x)
+    func insertTypedText(text: String, fontSize: CGFloat, fontDesign: String? = nil, colorHex: String? = nil, contentOrigin: CGPoint, addHandle: Bool = true, registerUndoAction: Bool = true) -> UUID? {
+        let img = renderTypedText(text, fontSize: fontSize, fontDesign: fontDesign, colorHex: colorHex, originX: contentOrigin.x)
         guard let filename = try? store.saveImage(img) else { return nil }
 
         let id = UUID()
@@ -1294,10 +1323,11 @@ extension InfiniteNotebookViewController {
         let entry = InsertedImage(id: id, filename: filename,
                                   startX: contentOrigin.x, startY: contentOrigin.y,
                                   width: img.size.width, height: img.size.height,
-                                  textContent: text, fontSize: fontSize)
+                                  textContent: text, fontSize: fontSize,
+                                  fontDesign: fontDesign, fontColorHex: colorHex)
         document.insertedImages.append(entry)
         if addHandle {
-            addImageHandle(for: imgView, at: contentFrame, id: id)
+            addImageHandle(for: imgView, at: contentFrame, id: id, isText: true)
         }
         let needed = contentOrigin.y + img.size.height + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height { canvasView.contentSize.height = needed }
@@ -1311,26 +1341,30 @@ extension InfiniteNotebookViewController {
                 self.store.saveDocument(self.document)
 
                 self.registerCustomUndo(actionName: "Text einfügen") { [weak self] in
-                    self?.insertTypedText(text: text, fontSize: fontSize, contentOrigin: contentOrigin, addHandle: addHandle, registerUndoAction: true)
+                    self?.insertTypedText(text: text, fontSize: fontSize, fontDesign: fontDesign, colorHex: colorHex, contentOrigin: contentOrigin, addHandle: addHandle, registerUndoAction: true)
                 }
             }
         }
         return id
     }
 
-    private func renderTypedText(_ text: String, fontSize: CGFloat, originX: CGFloat) -> UIImage {
-        let font  = UIFont.systemFont(ofSize: fontSize, weight: .regular)
-        let textColor = document.darkDrawingMode ? UIColor.white : UIColor.black
+    func renderTypedText(_ text: String, fontSize: CGFloat, fontDesign: String? = nil, colorHex: String? = nil, originX: CGFloat = 0) -> UIImage {
+        let font = fontFor(design: fontDesign, size: fontSize)
+        let textColor: UIColor
+        if let hex = colorHex, let c = UIColor(hex: hex) {
+            textColor = c
+        } else {
+            textColor = document.darkDrawingMode ? UIColor.white : UIColor.black
+        }
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
-        let str   = NSAttributedString(string: text, attributes: attrs)
+        let str = NSAttributedString(string: text, attributes: attrs)
 
-        // Available width from insertion point to right edge
         let available = max(canvasView.contentSize.width - originX - 10, 100)
         let w = min(available, canvasView.contentSize.width * 0.9)
         let textH = str.boundingRect(
             with: CGSize(width: w, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).height
-        let totalH = max(textH + 4, fontSize + 4)
+        let totalH = max(textH + 6, fontSize + 6)
 
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 2
@@ -1786,23 +1820,34 @@ private final class NativeTextViewDelegate: NSObject, UITextViewDelegate {
 // MARK: - ImageHandleView
 
 /// An interactive UIView overlaid on an inserted image, clip-art, or typed text block.
-/// Provides smooth drag-to-move, double-tap-to-edit, and long-press actions via finger touches.
+/// Provides smooth drag-to-move, 2-finger pinch-to-scale, corner transform dots, and quick styling menus.
 /// Passes Apple Pencil touches directly to PKCanvasView for uninterrupted, high-performance drawing.
 final class ImageHandleView: UIView {
 
     /// Canvas-coordinate frame of the element.
     var contentFrame: CGRect
+    var isTextElement: Bool = false
 
     var onMoved: ((_ newFrame: CGRect, _ oldFrame: CGRect) -> Void)?
+    var onScaled: ((_ scaleMultiplier: CGFloat) -> Void)?
     var onDelete: (() -> Void)?
     var onEdit: (() -> Void)?
+    var onStyleMenu: (() -> Void)?
 
     private weak var targetView: UIView?
     private var initialDragFrame: CGRect = .zero
+    var isSelected: Bool = false
 
-    init(contentFrame: CGRect, targetView: UIView?) {
+    // Corner handle dots
+    private let topLeftDot = UIView()
+    private let topRightDot = UIView()
+    private let bottomLeftDot = UIView()
+    private let bottomRightDot = UIView()
+
+    init(contentFrame: CGRect, targetView: UIView?, isText: Bool = false) {
         self.contentFrame = contentFrame
         self.targetView   = targetView
+        self.isTextElement = isText
         super.init(frame: contentFrame)
 
         backgroundColor = .clear
@@ -1810,30 +1855,96 @@ final class ImageHandleView: UIView {
         isUserInteractionEnabled = true
 
         self.layer.borderWidth  = 0
-        self.layer.borderColor  = UIColor.systemBlue.withAlphaComponent(0.75).cgColor
+        self.layer.borderColor  = UIColor.systemBlue.withAlphaComponent(0.85).cgColor
         self.layer.cornerRadius = 6
 
+        // 1. Pan for moving
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
         pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         addGestureRecognizer(pan)
 
+        // 2. Pinch for scaling / resizing font
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
+        addGestureRecognizer(pinch)
+
+        // 3. Single tap for style menu / selection
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        tap.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        addGestureRecognizer(tap)
+
+        // 4. Double tap for text edit
         let dt = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
         dt.numberOfTapsRequired = 2
         dt.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         addGestureRecognizer(dt)
+        tap.require(toFail: dt)
 
+        // 5. Long press for style menu
         let lp = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
         lp.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         lp.minimumPressDuration = 0.45
         addGestureRecognizer(lp)
+
+        setupCornerDots()
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
+    private func setupCornerDots() {
+        let dots = [topLeftDot, topRightDot, bottomLeftDot, bottomRightDot]
+        for dot in dots {
+            dot.backgroundColor = .white
+            dot.layer.borderColor = UIColor.systemBlue.cgColor
+            dot.layer.borderWidth = 2.0
+            dot.layer.cornerRadius = 5
+            dot.frame = CGRect(x: 0, y: 0, width: 10, height: 10)
+            dot.isHidden = true
+            dot.isUserInteractionEnabled = false
+            addSubview(dot)
+        }
+        updateDotPositions()
+    }
+
+    func updateDotPositions() {
+        let b = bounds
+        topLeftDot.center = CGPoint(x: 0, y: 0)
+        topRightDot.center = CGPoint(x: b.width, y: 0)
+        bottomLeftDot.center = CGPoint(x: 0, y: b.height)
+        bottomRightDot.center = CGPoint(x: b.width, y: b.height)
+    }
+
+    func setSelected(_ selected: Bool) {
+        isSelected = selected
+        layer.borderWidth = selected ? 1.5 : 0
+        layer.backgroundColor = selected ? UIColor.systemBlue.withAlphaComponent(0.04).cgColor : UIColor.clear.cgColor
+        let dots = [topLeftDot, topRightDot, bottomLeftDot, bottomRightDot]
+        dots.forEach { $0.isHidden = !selected }
+        updateDotPositions()
+    }
+
     // MARK: - Gesture handlers
+
+    @objc private func handleTap() {
+        setSelected(true)
+        onStyleMenu?()
+    }
 
     @objc private func handleDoubleTap() {
         onEdit?()
+    }
+
+    @objc private func handlePinch(_ gr: UIPinchGestureRecognizer) {
+        if gr.state == .began {
+            setSelected(true)
+        }
+        if gr.state == .changed {
+            let scale = gr.scale
+            gr.scale = 1.0
+            onScaled?(scale)
+        }
+        if gr.state == .ended || gr.state == .cancelled {
+            updateDotPositions()
+        }
     }
 
     @objc private func handlePan(_ gr: UIPanGestureRecognizer) {
@@ -1842,9 +1953,8 @@ final class ImageHandleView: UIView {
         gr.setTranslation(.zero, in: sv)
 
         if gr.state == .began {
+            setSelected(true)
             initialDragFrame = contentFrame
-            layer.borderWidth = 1.5
-            layer.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.06).cgColor
         }
 
         contentFrame.origin.x += delta.x
@@ -1852,10 +1962,9 @@ final class ImageHandleView: UIView {
 
         frame = contentFrame
         targetView?.frame = contentFrame
+        updateDotPositions()
 
         if gr.state == .ended || gr.state == .cancelled {
-            layer.borderWidth = 0
-            layer.backgroundColor = UIColor.clear.cgColor
             if contentFrame != initialDragFrame {
                 onMoved?(contentFrame, initialDragFrame)
             }
@@ -1864,7 +1973,8 @@ final class ImageHandleView: UIView {
 
     @objc private func handleLongPress(_ gr: UILongPressGestureRecognizer) {
         guard gr.state == .began else { return }
-        onEdit?()
+        setSelected(true)
+        onStyleMenu?()
     }
 
     // Always pass Apple Pencil touches through to PKCanvasView for native drawing
@@ -1877,20 +1987,35 @@ final class ImageHandleView: UIView {
     }
 }
 
-// MARK: - Image Handle Management
+// MARK: - Image Handle Management & Styling
 
 extension InfiniteNotebookViewController {
 
     /// Creates an interactive UIView handle over an element in the canvas.
-    func addImageHandle(for targetView: UIView?, at contentFrame: CGRect, id: UUID) {
-        let handle = ImageHandleView(contentFrame: contentFrame, targetView: targetView)
+    func addImageHandle(for targetView: UIView?, at contentFrame: CGRect, id: UUID, isText: Bool = false) {
+        let handle = ImageHandleView(contentFrame: contentFrame, targetView: targetView, isText: isText)
         handle.frame = contentFrame
         canvasView.addSubview(handle)
         imageHandles[id] = handle
 
+        handle.onStyleMenu = { [weak self] in
+            guard let self else { return }
+            self.editInsertedElement(id: id)
+        }
+
         handle.onEdit = { [weak self] in
             guard let self else { return }
             self.editInsertedElement(id: id)
+        }
+
+        handle.onScaled = { [weak self] scaleMultiplier in
+            guard let self else { return }
+            guard let entry = self.document.insertedImages.first(where: { $0.id == id }) else { return }
+            if entry.textContent != nil {
+                let currentSize = entry.fontSize ?? 22
+                let newSize = max(10, min(currentSize * scaleMultiplier, 120))
+                self.updateInsertedText(id: id, fontSize: newSize)
+            }
         }
 
         handle.onMoved = { [weak self] newContentFrame, oldContentFrame in
@@ -1908,6 +2033,7 @@ extension InfiniteNotebookViewController {
                 h.contentFrame = oldContentFrame
                 h.frame = oldContentFrame
                 self.imageViews[id]?.frame = oldContentFrame
+                h.updateDotPositions()
                 if let i = self.document.insertedImages.firstIndex(where: { $0.id == id }) {
                     self.document.insertedImages[i].startX = oldContentFrame.minX
                     self.document.insertedImages[i].startY = oldContentFrame.minY
@@ -1945,7 +2071,7 @@ extension InfiniteNotebookViewController {
             registerCustomUndo(actionName: "Löschen") { [weak self] in
                 guard let self else { return }
                 if let text = entry.textContent {
-                    _ = self.insertTypedText(text: text, fontSize: entry.fontSize ?? 22, contentOrigin: CGPoint(x: entry.startX, y: entry.startY), addHandle: true, registerUndoAction: false)
+                    _ = self.insertTypedText(text: text, fontSize: entry.fontSize ?? 22, fontDesign: entry.fontDesign, colorHex: entry.fontColorHex, contentOrigin: CGPoint(x: entry.startX, y: entry.startY), addHandle: true, registerUndoAction: false)
                 } else if let img = existingImage ?? UIImage(contentsOfFile: self.store.imageURL(filename: entry.filename).path) {
                     self.insertImage(img, at: CGPoint(x: entry.startX, y: entry.startY), registerUndoAction: false)
                 }
@@ -1974,38 +2100,66 @@ extension InfiniteNotebookViewController {
         guard let entry = document.insertedImages.first(where: { $0.id == id }) else { return }
 
         let alert = UIAlertController(
-            title: entry.textContent != nil ? "Text bearbeiten" : "Objekt",
+            title: entry.textContent != nil ? "Textstil & Aktionen" : "Objekt-Aktionen",
             message: nil,
             preferredStyle: .actionSheet
         )
 
         if let text = entry.textContent {
-            alert.addAction(UIAlertAction(title: "Text bearbeiten", style: .default) { [weak self] _ in
-                self?.promptEditText(id: id, currentText: text, fontSize: entry.fontSize ?? 22)
+            let currentSize = entry.fontSize ?? 22
+
+            // 1. Schriftart wählen
+            alert.addAction(UIAlertAction(title: "🔤 Schriftart ändern…", style: .default) { [weak self] _ in
+                self?.presentFontPicker(id: id, currentDesign: entry.fontDesign)
             })
-            alert.addAction(UIAlertAction(title: "Kopieren", style: .default) { [weak self] _ in
+
+            // 2. Schriftgröße schnell anpassen
+            alert.addAction(UIAlertAction(title: "➕ Schrift vergrößern (A+)", style: .default) { [weak self] _ in
+                self?.updateInsertedText(id: id, fontSize: currentSize + 4)
+            })
+            alert.addAction(UIAlertAction(title: "➖ Schrift verkleinern (A-)", style: .default) { [weak self] _ in
+                self?.updateInsertedText(id: id, fontSize: max(10, currentSize - 4))
+            })
+            alert.addAction(UIAlertAction(title: "🔢 Schriftgröße festlegen… (\(Int(currentSize)) pt)", style: .default) { [weak self] _ in
+                self?.presentFontSizePicker(id: id, currentSize: currentSize)
+            })
+
+            // 3. Textfarbe wählen
+            alert.addAction(UIAlertAction(title: "🎨 Farbe ändern…", style: .default) { [weak self] _ in
+                self?.presentColorPicker(id: id)
+            })
+
+            // 4. Textinhalt bearbeiten
+            alert.addAction(UIAlertAction(title: "✍️ Text bearbeiten…", style: .default) { [weak self] _ in
+                self?.promptEditText(id: id, currentText: text, fontSize: currentSize)
+            })
+
+            // 5. Kopieren
+            alert.addAction(UIAlertAction(title: "📋 Text kopieren", style: .default) { [weak self] _ in
                 UIPasteboard.general.string = text
                 self?.showToastBanner(text: "Text kopiert", icon: "doc.on.doc")
             })
         } else if let img = UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) {
-            alert.addAction(UIAlertAction(title: "Bild kopieren", style: .default) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: "📋 Bild kopieren", style: .default) { [weak self] _ in
                 UIPasteboard.general.image = img
                 self?.showToastBanner(text: "Bild kopiert", icon: "doc.on.doc")
             })
         }
 
-        alert.addAction(UIAlertAction(title: "Duplizieren", style: .default) { [weak self] _ in
+        // Duplizieren
+        alert.addAction(UIAlertAction(title: "📄 Duplizieren", style: .default) { [weak self] _ in
             guard let self else { return }
             let newOrigin = CGPoint(x: entry.startX + 24, y: entry.startY + 24)
             if let text = entry.textContent {
-                self.insertTypedText(text: text, fontSize: entry.fontSize ?? 22, contentOrigin: newOrigin)
+                self.insertTypedText(text: text, fontSize: entry.fontSize ?? 22, fontDesign: entry.fontDesign, colorHex: entry.fontColorHex, contentOrigin: newOrigin)
             } else if let img = UIImage(contentsOfFile: self.store.imageURL(filename: entry.filename).path) {
                 self.insertImage(img, at: newOrigin)
             }
             self.showToastBanner(text: "Dupliziert", icon: "plus.square.on.square")
         })
 
-        alert.addAction(UIAlertAction(title: "Löschen", style: .destructive) { [weak self] _ in
+        // Löschen
+        alert.addAction(UIAlertAction(title: "🗑 Löschen", style: .destructive) { [weak self] _ in
             self?.deleteInsertedElement(id: id)
         })
         alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
@@ -2015,6 +2169,74 @@ extension InfiniteNotebookViewController {
             pop.sourceRect = handle.bounds
         }
         present(alert, animated: true)
+    }
+
+    private func presentFontPicker(id: UUID, currentDesign: String?) {
+        let sheet = UIAlertController(title: "Schriftart wählen", message: nil, preferredStyle: .actionSheet)
+        let fonts: [(name: String, key: String)] = [
+            ("✍️ Handschrift (Noteworthy)", "handwriting"),
+            ("📖 Klassisch (Serif)", "serif"),
+            ("🟡 Rund (Rounded)", "rounded"),
+            ("💻 Code / Schreibmaschine", "monospaced"),
+            ("🖍 Marker (Comic)", "marker"),
+            ("🅰️ Standard (San Francisco)", "default")
+        ]
+        for f in fonts {
+            let isCurrent = (currentDesign ?? "default") == f.key
+            let title = isCurrent ? "✓ " + f.name : f.name
+            sheet.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                self?.updateInsertedText(id: id, fontDesign: f.key)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
+        if let pop = sheet.popoverPresentationController, let handle = imageHandles[id] {
+            pop.sourceView = handle
+            pop.sourceRect = handle.bounds
+        }
+        present(sheet, animated: true)
+    }
+
+    private func presentFontSizePicker(id: UUID, currentSize: CGFloat) {
+        let sheet = UIAlertController(title: "Schriftgröße wählen", message: nil, preferredStyle: .actionSheet)
+        let sizes: [CGFloat] = [12, 14, 18, 22, 28, 36, 48, 64, 80]
+        for s in sizes {
+            let isCurrent = Int(currentSize) == Int(s)
+            let title = isCurrent ? "✓ \(Int(s)) pt" : "\(Int(s)) pt"
+            sheet.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                self?.updateInsertedText(id: id, fontSize: s)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
+        if let pop = sheet.popoverPresentationController, let handle = imageHandles[id] {
+            pop.sourceView = handle
+            pop.sourceRect = handle.bounds
+        }
+        present(sheet, animated: true)
+    }
+
+    private func presentColorPicker(id: UUID) {
+        let sheet = UIAlertController(title: "Schriftfarbe wählen", message: nil, preferredStyle: .actionSheet)
+        let colors: [(name: String, hex: String?)] = [
+            ("⬛️/⬜️ Standard (Schwarz/Weiß)", nil),
+            ("🔵 Blau", "#007AFF"),
+            ("🔴 Rot", "#FF3B30"),
+            ("🟢 Grün", "#34C759"),
+            ("🟠 Orange", "#FF9500"),
+            ("🟣 Lila / Violett", "#AF52DE"),
+            ("🟡 Gelb", "#FFCC00"),
+            ("🔘 Grau", "#8E8E93")
+        ]
+        for c in colors {
+            sheet.addAction(UIAlertAction(title: c.name, style: .default) { [weak self] _ in
+                self?.updateInsertedText(id: id, colorHex: c.hex)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
+        if let pop = sheet.popoverPresentationController, let handle = imageHandles[id] {
+            pop.sourceView = handle
+            pop.sourceRect = handle.bounds
+        }
+        present(sheet, animated: true)
     }
 
     private func promptEditText(id: UUID, currentText: String, fontSize: CGFloat) {
@@ -2036,31 +2258,73 @@ extension InfiniteNotebookViewController {
         present(alert, animated: true)
     }
 
-    func updateInsertedText(id: UUID, newText: String, fontSize: CGFloat) {
-        guard let idx = document.insertedImages.firstIndex(where: { $0.id == id }),
-              let layer = imageLayers[id] else { return }
+    func updateInsertedText(id: UUID, newText: String? = nil, fontSize: CGFloat? = nil, fontDesign: String? = nil, colorHex: String? = nil, registerUndoAction: Bool = true) {
+        guard let idx = document.insertedImages.firstIndex(where: { $0.id == id }) else { return }
+        var entry = document.insertedImages[idx]
+        guard let text = newText ?? entry.textContent else { return }
 
-        let entry = document.insertedImages[idx]
-        let newImg = renderTypedText(newText, fontSize: fontSize, originX: entry.startX)
+        let oldText = entry.textContent
+        let oldSize = entry.fontSize ?? 22
+        let oldDesign = entry.fontDesign
+        let oldColor = entry.fontColorHex
+
+        let currentSize = max(10, min(fontSize ?? oldSize, 120))
+        let currentDesign = fontDesign ?? oldDesign
+        let currentColor = colorHex ?? oldColor
+
+        let newImg = renderTypedText(text, fontSize: currentSize, fontDesign: currentDesign, colorHex: currentColor, originX: entry.startX)
         guard let newFilename = try? store.saveImage(newImg) else { return }
 
         try? FileManager.default.removeItem(at: store.imageURL(filename: entry.filename))
 
         let newFrame = CGRect(x: entry.startX, y: entry.startY, width: newImg.size.width, height: newImg.size.height)
-        layer.contents = newImg.cgImage
-        layer.frame = newFrame
-
+        if let imgView = imageViews[id] {
+            imgView.image = newImg
+            imgView.frame = newFrame
+        }
+        if let layer = imageLayers[id] {
+            layer.contents = newImg.cgImage
+            layer.frame = newFrame
+        }
         if let handle = imageHandles[id] {
             handle.frame = newFrame
             handle.contentFrame = newFrame
+            handle.updateDotPositions()
         }
 
-        document.insertedImages[idx].filename = newFilename
-        document.insertedImages[idx].width = newImg.size.width
-        document.insertedImages[idx].height = newImg.size.height
-        document.insertedImages[idx].textContent = newText
-        document.insertedImages[idx].fontSize = fontSize
+        entry.filename = newFilename
+        entry.textContent = text
+        entry.fontSize = currentSize
+        entry.fontDesign = currentDesign
+        entry.fontColorHex = currentColor
+        entry.width = newImg.size.width
+        entry.height = newImg.size.height
+        document.insertedImages[idx] = entry
 
         store.saveDocument(document)
+
+        if registerUndoAction {
+            registerCustomUndo(actionName: "Textstil anpassen") { [weak self] in
+                self?.updateInsertedText(id: id, newText: oldText, fontSize: oldSize, fontDesign: oldDesign, colorHex: oldColor, registerUndoAction: false)
+            }
+        }
+    }
+}
+
+// MARK: - UIColor Hex Helper
+
+extension UIColor {
+    convenience init?(hex: String) {
+        var cString: String = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if cString.hasPrefix("#") { cString.remove(at: cString.startIndex) }
+        guard cString.count == 6 else { return nil }
+        var rgbValue: UInt64 = 0
+        Scanner(string: cString).scanHexInt64(&rgbValue)
+        self.init(
+            red: CGFloat((rgbValue & 0xFF0000) >> 16) / 255.0,
+            green: CGFloat((rgbValue & 0x00FF00) >> 8) / 255.0,
+            blue: CGFloat(rgbValue & 0x0000FF) / 255.0,
+            alpha: 1.0
+        )
     }
 }
