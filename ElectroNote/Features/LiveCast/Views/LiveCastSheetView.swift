@@ -171,6 +171,16 @@ struct LiveCastSheetView: View {
             .padding(12)
             .background(Color(.tertiarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
+                    .font(.caption)
+                Text("Wichtig: Immer **http://** (ohne „s“) eingeben. Moderne Browser setzen sonst automatisch ein fehlerhaftes https:// davor.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.top, 2)
         }
         .padding(18)
         .background(Color(.secondarySystemGroupedBackground))
