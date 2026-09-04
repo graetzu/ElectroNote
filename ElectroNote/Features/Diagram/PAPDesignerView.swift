@@ -157,45 +157,100 @@ struct OrthogonalRoutingEngine {
             let label = CGPoint(x: p1.x + 16, y: (start.y + end.y) / 2)
             return ([start, end], .down, label)
         }
-
-        // Case 2: Forward Branch to the Right (from right port or decision going right)
-        if fromPort == .right || (c2 > c1 && r2 >= r1 && from.type == .decision && fromPort != .bottom) {
-            let start = CGPoint(x: p1.x + w1, y: p1.y)
-            if r1 == r2 {
-                // Straight horizontal
-                let end = CGPoint(x: p2.x - w2, y: p2.y)
-                let label = CGPoint(x: (start.x + end.x) / 2, y: p1.y - 12)
-                return ([start, end], .right, label)
-            } else {
-                // Right, then Down
-                let corner1 = CGPoint(x: p2.x, y: p1.y)
-                let end = CGPoint(x: p2.x, y: p2.y - h2)
-                let label = CGPoint(x: start.x + 20, y: p1.y - 12)
-                return ([start, corner1, end], .down, label)
-            }
-        }
-
-        // Case 3: Forward Branch to the Left (from left port or decision going left)
-        if fromPort == .left || (c2 < c1 && r2 >= r1 && from.type == .decision && fromPort != .bottom) {
+        // 1. Exiting LEFT (fromPort == .left or (c2 < c1 && from.type == .decision && fromPort != .bottom && fromPort != .right))
+        if fromPort == .left || (c2 < c1 && from.type == .decision && fromPort != .bottom && fromPort != .right) {
             let start = CGPoint(x: p1.x - w1, y: p1.y)
+
             if r1 == r2 {
-                // Straight horizontal
+                // Straight horizontal line to left
                 let end = CGPoint(x: p2.x + w2, y: p2.y)
                 let label = CGPoint(x: (start.x + end.x) / 2, y: p1.y - 12)
                 return ([start, end], .left, label)
-            } else {
-                // Left, then Down
+            } else if r2 > r1 {
+                // Left, then DOWN
                 let corner1 = CGPoint(x: p2.x, y: p1.y)
                 let end = CGPoint(x: p2.x, y: p2.y - h2)
-                let label = CGPoint(x: start.x - 20, y: p1.y - 12)
+                let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
                 return ([start, corner1, end], .down, label)
+            } else {
+                // Left, then UP (Schleife nach links und oben)
+                let leftColX = min(p1.x - PAPGrid.colWidth, p2.x)
+                let corner1 = CGPoint(x: leftColX, y: p1.y)
+                let corner2 = CGPoint(x: leftColX, y: p2.y)
+                if c2 > c1 - 1 {
+                    // Target is in a column to the right of the bypass channel (e.g. main flow)
+                    let end = CGPoint(x: p2.x - w2, y: p2.y)
+                    let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
+                    return ([start, corner1, corner2, end], .right, label)
+                } else {
+                    // Target is directly in this left column
+                    let end = CGPoint(x: p2.x, y: p2.y + h2)
+                    let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
+                    return ([start, corner1, end], .up, label)
+                }
             }
         }
 
-        // Case 4: Merge back into main flow from a branch going down (c1 != c2, r2 > r1, from bottom)
+        // 2. Exiting RIGHT (fromPort == .right or (c2 > c1 && from.type == .decision && fromPort != .bottom && fromPort != .left))
+        if fromPort == .right || (c2 > c1 && from.type == .decision && fromPort != .bottom && fromPort != .left) {
+            let start = CGPoint(x: p1.x + w1, y: p1.y)
+
+            if r1 == r2 {
+                // Straight horizontal line to right
+                let end = CGPoint(x: p2.x - w2, y: p2.y)
+                let label = CGPoint(x: (start.x + end.x) / 2, y: p1.y - 12)
+                return ([start, end], .right, label)
+            } else if r2 > r1 {
+                // Right, then DOWN
+                let corner1 = CGPoint(x: p2.x, y: p1.y)
+                let end = CGPoint(x: p2.x, y: p2.y - h2)
+                let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
+                return ([start, corner1, end], .down, label)
+            } else {
+                // Right, then UP (Schleife nach rechts und oben)
+                let rightColX = max(p1.x + PAPGrid.colWidth, p2.x)
+                let corner1 = CGPoint(x: rightColX, y: p1.y)
+                let corner2 = CGPoint(x: rightColX, y: p2.y)
+                if c2 < c1 + 1 {
+                    // Target is in a column to the left of the bypass channel (e.g. main flow)
+                    let end = CGPoint(x: p2.x + w2, y: p2.y)
+                    let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
+                    return ([start, corner1, corner2, end], .left, label)
+                } else {
+                    // Target is directly in this right column
+                    let end = CGPoint(x: p2.x, y: p2.y + h2)
+                    let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
+                    return ([start, corner1, end], .up, label)
+                }
+            }
+        }
+
+        // 3. Exiting TOP (fromPort == .top)
+        if fromPort == .top {
+            let start = CGPoint(x: p1.x, y: p1.y - h1)
+            if c1 == c2 && r2 < r1 && r1 - 1 == r2 {
+                let end = CGPoint(x: p2.x, y: p2.y + h2)
+                let label = CGPoint(x: p1.x + 16, y: (start.y + end.y) / 2)
+                return ([start, end], .up, label)
+            } else if c1 != c2 && r2 <= r1 {
+                let corner1 = CGPoint(x: p1.x, y: p2.y)
+                let end = CGPoint(x: c2 > c1 ? p2.x - w2 : p2.x + w2, y: p2.y)
+                let dir: ArrowDirection = c2 > c1 ? .right : .left
+                let label = CGPoint(x: p1.x + (c2 > c1 ? 16 : -16), y: (start.y + p2.y) / 2)
+                return ([start, corner1, end], dir, label)
+            }
+        }
+
+        // 4. Exiting BOTTOM (Straight Down or Merge)
+        if c1 == c2 && r2 > r1 {
+            let start = CGPoint(x: p1.x, y: p1.y + h1)
+            let end   = CGPoint(x: p2.x, y: p2.y - h2)
+            let label = CGPoint(x: p1.x + 16, y: (start.y + end.y) / 2)
+            return ([start, end], .down, label)
+        }
+
         if c1 != c2 && r2 > r1 {
             let start = CGPoint(x: p1.x, y: p1.y + h1)
-            // Go down to intermediate channel or to target Y, then horizontally into target side
             let corner1 = CGPoint(x: p1.x, y: p2.y)
             let end = CGPoint(x: c1 > c2 ? p2.x + w2 : p2.x - w2, y: p2.y)
             let dir: ArrowDirection = c1 > c2 ? .left : .right
@@ -203,80 +258,17 @@ struct OrthogonalRoutingEngine {
             return ([start, corner1, end], dir, label)
         }
 
-        // Case 5: Direct Straight Up (Same Column, row directly above, fromPort == .top)
-        if c1 == c2 && r2 < r1 && fromPort == .top && r1 - 1 == r2 {
-            let start = CGPoint(x: p1.x, y: p1.y - h1)
-            let end   = CGPoint(x: p2.x, y: p2.y + h2)
-            let label = CGPoint(x: p1.x + 16, y: (start.y + end.y) / 2)
-            return ([start, end], .up, label)
-        }
-
-        // Case 6: Loop Back / Rücksprung nach oben (r2 <= r1 - Schleifen)
+        // 5. Fallback for any upward loopback
         if r2 <= r1 {
-            if fromPort == .top && c1 != c2 {
-                // Exits top, goes to target row Y, then horizontally into target side
-                let start = CGPoint(x: p1.x, y: p1.y - h1)
-                let corner1 = CGPoint(x: p1.x, y: p2.y)
-                let end = CGPoint(x: c2 > c1 ? p2.x - w2 : p2.x + w2, y: p2.y)
-                let dir: ArrowDirection = c2 > c1 ? .right : .left
-                let label = CGPoint(x: p1.x + (c2 > c1 ? 16 : -16), y: (start.y + p2.y) / 2)
-                return ([start, corner1, end], dir, label)
-            }
-
-            if c1 <= c2 {
-                // Bypass on the left side
-                let bypassX = min(p1.x, p2.x) - (c1 == c2 ? (w1 + 38) : 0)
-                let start: CGPoint
-                var points: [CGPoint] = []
-                if fromPort == .left {
-                    start = CGPoint(x: p1.x - w1, y: p1.y)
-                    points.append(start)
-                    points.append(CGPoint(x: bypassX, y: p1.y))
-                } else if fromPort == .top {
-                    start = CGPoint(x: p1.x, y: p1.y - h1)
-                    points.append(start)
-                    let topY = p1.y - h1 - 16
-                    points.append(CGPoint(x: p1.x, y: topY))
-                    points.append(CGPoint(x: bypassX, y: topY))
-                } else {
-                    start = CGPoint(x: p1.x, y: p1.y + h1)
-                    points.append(start)
-                    let bottomY = p1.y + h1 + 18
-                    points.append(CGPoint(x: p1.x, y: bottomY))
-                    points.append(CGPoint(x: bypassX, y: bottomY))
-                }
-                points.append(CGPoint(x: bypassX, y: p2.y))
-                let end = CGPoint(x: p2.x - w2, y: p2.y)
-                points.append(end)
-                let label = CGPoint(x: bypassX + 16, y: (p1.y + p2.y) / 2)
-                return (points, .right, label)
-            } else {
-                // Bypass on the right side
-                let bypassX = max(p1.x, p2.x) + (c1 == c2 ? (w1 + 38) : 0)
-                var points: [CGPoint] = []
-                if fromPort == .right {
-                    let start = CGPoint(x: p1.x + w1, y: p1.y)
-                    points.append(start)
-                    points.append(CGPoint(x: bypassX, y: p1.y))
-                } else if fromPort == .top {
-                    let start = CGPoint(x: p1.x, y: p1.y - h1)
-                    points.append(start)
-                    let topY = p1.y - h1 - 16
-                    points.append(CGPoint(x: p1.x, y: topY))
-                    points.append(CGPoint(x: bypassX, y: topY))
-                } else {
-                    let start = CGPoint(x: p1.x, y: p1.y + h1)
-                    points.append(start)
-                    let bottomY = p1.y + h1 + 18
-                    points.append(CGPoint(x: p1.x, y: bottomY))
-                    points.append(CGPoint(x: bypassX, y: bottomY))
-                }
-                points.append(CGPoint(x: bypassX, y: p2.y))
-                let end = CGPoint(x: p2.x + w2, y: p2.y)
-                points.append(end)
-                let label = CGPoint(x: bypassX - 16, y: (p1.y + p2.y) / 2)
-                return (points, .left, label)
-            }
+            let bypassX = min(p1.x, p2.x) - (c1 == c2 ? (w1 + 38) : 0)
+            let start = CGPoint(x: p1.x, y: p1.y + h1)
+            let bottomY = p1.y + h1 + 18
+            let corner1 = CGPoint(x: p1.x, y: bottomY)
+            let corner2 = CGPoint(x: bypassX, y: bottomY)
+            let corner3 = CGPoint(x: bypassX, y: p2.y)
+            let end = CGPoint(x: p2.x - w2, y: p2.y)
+            let label = CGPoint(x: bypassX + 16, y: (p1.y + p2.y) / 2)
+            return ([start, corner1, corner2, corner3, end], .right, label)
         }
 
         // Fallback: simple orthogonal L-connection
@@ -482,11 +474,11 @@ final class PAPDesignerViewModel: ObservableObject {
         selectedId = newNode.id
     }
 
-    /// Branches to the right into the adjacent column at (col + 1, row + 1)
-    func branchRight(fromDecision: PAPNode, type: PAPShapeType = .process, label: String? = nil, edgeLabel: String = "nein") {
+    /// Branches to the right into the adjacent column. If goUp == true, routes upwards into (col + 1, row - 1).
+    func branchRight(fromDecision: PAPNode, type: PAPShapeType = .process, label: String? = nil, edgeLabel: String = "nein", goUp: Bool = false) {
         pushUndo()
-        let targetCol = fromDecision.col + 1
-        let targetRow = fromDecision.row + 1
+        let targetCol = min(5, fromDecision.col + 1)
+        let targetRow = goUp ? max(0, fromDecision.row - 1) : (fromDecision.row + 1)
 
         // Shift down if occupied
         for i in 0..<nodes.count {
@@ -499,7 +491,7 @@ final class PAPDesignerViewModel: ObservableObject {
         switch type {
         case .start:        defaultLabel = "Start"
         case .end:          defaultLabel = "Ende"
-        case .process:      defaultLabel = "Anweisung"
+        case .process:      defaultLabel = goUp ? "Schleife" : "Anweisung"
         case .io:           defaultLabel = "Ausgabe"
         case .decision:     defaultLabel = "Bedingung 2?"
         case .subroutine:   defaultLabel = "Unterprogramm()"
@@ -519,11 +511,11 @@ final class PAPDesignerViewModel: ObservableObject {
         selectedId = newNode.id
     }
 
-    /// Branches to the left into the adjacent column at (col - 1, row + 1)
-    func branchLeft(fromDecision: PAPNode, type: PAPShapeType = .process, label: String? = nil, edgeLabel: String = "nein") {
+    /// Branches to the left into the adjacent column. If goUp == true, routes upwards into (col - 1, row - 1).
+    func branchLeft(fromDecision: PAPNode, type: PAPShapeType = .process, label: String? = nil, edgeLabel: String = "nein", goUp: Bool = false) {
         pushUndo()
         let targetCol = max(0, fromDecision.col - 1)
-        let targetRow = fromDecision.row + 1
+        let targetRow = goUp ? max(0, fromDecision.row - 1) : (fromDecision.row + 1)
 
         for i in 0..<nodes.count {
             if nodes[i].col == targetCol && nodes[i].row >= targetRow {
@@ -535,7 +527,7 @@ final class PAPDesignerViewModel: ObservableObject {
         switch type {
         case .start:        defaultLabel = "Start"
         case .end:          defaultLabel = "Ende"
-        case .process:      defaultLabel = "Anweisung"
+        case .process:      defaultLabel = goUp ? "Schleife" : "Anweisung"
         case .io:           defaultLabel = "Ausgabe"
         case .decision:     defaultLabel = "Bedingung 2?"
         case .subroutine:   defaultLabel = "Unterprogramm()"
@@ -1331,7 +1323,7 @@ struct PAPDesignerView: View {
 
         return HStack(spacing: 6) {
             if node.type == .decision {
-                // Decision branching quick buttons
+                // 1. Straight Down (Ja)
                 Button {
                     vm.insertBelow(fromNode: node, type: .process, label: "Ja-Zweig")
                 } label: {
@@ -1347,12 +1339,32 @@ struct PAPDesignerView: View {
                     .clipShape(Capsule())
                 }
 
-                Button {
-                    vm.branchRight(fromDecision: node, type: .process, label: "Nein-Zweig", edgeLabel: "nein")
+                // 2. Rechts (Menü für nach unten & nach oben)
+                Menu {
+                    Button {
+                        vm.branchRight(fromDecision: node, type: .process, label: "Nein-Zweig", edgeLabel: "nein", goUp: false)
+                    } label: {
+                        Label("Rechts nach unten (↓)", systemImage: "arrow.down.right")
+                    }
+
+                    Button {
+                        vm.branchRight(fromDecision: node, type: .process, label: "Schleife", edgeLabel: "nein", goUp: true)
+                    } label: {
+                        Label("Rechts nach oben (↑ Schleife)", systemImage: "arrow.up.right")
+                    }
+
+                    Divider()
+
+                    Button {
+                        vm.connectMode = true
+                        vm.connectFromId = node.id
+                    } label: {
+                        Label("Rechts nach oben zu Block verbinden…", systemImage: "arrow.triangle.turn.up.right.circle")
+                    }
                 } label: {
                     HStack(spacing: 2) {
                         Image(systemName: "arrow.right")
-                        Text("Nein (Rechts)")
+                        Text("Rechts")
                     }
                     .font(.caption2.bold())
                     .padding(.horizontal, 8)
@@ -1362,61 +1374,73 @@ struct PAPDesignerView: View {
                     .clipShape(Capsule())
                 }
 
-                Button {
-                    vm.branchLeft(fromDecision: node, type: .process, label: "Nein-Zweig", edgeLabel: "nein")
+                // 3. Links (Menü für nach unten & nach oben)
+                Menu {
+                    Button {
+                        vm.branchLeft(fromDecision: node, type: .process, label: "Nein-Zweig", edgeLabel: "nein", goUp: false)
+                    } label: {
+                        Label("Links nach unten (↓)", systemImage: "arrow.down.left")
+                    }
+
+                    Button {
+                        vm.branchLeft(fromDecision: node, type: .process, label: "Schleife", edgeLabel: "nein", goUp: true)
+                    } label: {
+                        Label("Links nach oben (↑ Schleife)", systemImage: "arrow.up.left")
+                    }
+
+                    Divider()
+
+                    Button {
+                        vm.connectMode = true
+                        vm.connectFromId = node.id
+                    } label: {
+                        Label("Links nach oben zu Block verbinden…", systemImage: "arrow.triangle.turn.up.left.circle")
+                    }
                 } label: {
                     HStack(spacing: 2) {
                         Image(systemName: "arrow.left")
                         Text("Links")
                     }
                     .font(.caption2.bold())
-                    .padding(.horizontal, 6)
+                    .padding(.horizontal, 8)
                     .padding(.vertical, 5)
-                    .background(Color.orange.opacity(0.9))
+                    .background(Color.orange.opacity(0.95))
                     .foregroundColor(.white)
                     .clipShape(Capsule())
                 }
 
-                // Nach oben abzweigen / Schleife
-                Menu {
-                    Button {
-                        vm.connectMode = true
-                        vm.connectFromId = node.id
-                    } label: {
-                        Label("Schleife zu Block oben verbinden…", systemImage: "arrow.uturn.up")
-                    }
-
-                    Divider()
-
-                    Button {
-                        vm.insertAbove(fromNode: node, type: .process, label: "Wiederholung", edgeLabel: "wiederholen")
-                    } label: {
-                        Label("Neuer Block direkt darüber", systemImage: "arrow.up")
-                    }
-
-                    Button {
-                        vm.branchUp(fromDecision: node, type: .process, label: "Schleife", edgeLabel: "nein", port: .left)
-                    } label: {
-                        Label("Schleife links oben (Nein)", systemImage: "arrow.up.left")
-                    }
-
-                    Button {
-                        vm.branchUp(fromDecision: node, type: .process, label: "Schleife", edgeLabel: "nein", port: .right)
-                    } label: {
-                        Label("Schleife rechts oben (Nein)", systemImage: "arrow.up.right")
-                    }
+                // 4. Schnelltasten für Schleife nach oben
+                Button {
+                    vm.branchRight(fromDecision: node, type: .process, label: "Schleife", edgeLabel: "nein", goUp: true)
                 } label: {
                     HStack(spacing: 2) {
-                        Image(systemName: "arrow.up")
-                        Text("Oben")
+                        Image(systemName: "arrow.up.right")
+                        Text("↗")
                     }
                     .font(.caption2.bold())
-                    .padding(.horizontal, 7)
+                    .padding(.horizontal, 6)
                     .padding(.vertical, 5)
                     .background(Color.purple)
                     .foregroundColor(.white)
                     .clipShape(Capsule())
                 }
+                .accessibilityLabel("Rechts nach oben abzweigen")
+
+                Button {
+                    vm.branchLeft(fromDecision: node, type: .process, label: "Schleife", edgeLabel: "nein", goUp: true)
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.up.left")
+                        Text("↖")
+                    }
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 5)
+                    .background(Color.purple)
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+                }
+                .accessibilityLabel("Links nach oben abzweigen")
             } else {
                 // Standard block: Insert menu (below and above)
                 Menu {
