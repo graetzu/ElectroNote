@@ -117,11 +117,22 @@ struct PAPNode: Identifiable, Equatable {
     var cy: CGFloat { PAPGrid.center(col: col, row: row).y }
 }
 
-enum PAPBranchPort: String, Codable {
+enum PAPBranchPort: String, CaseIterable, Codable, Identifiable {
     case bottom
     case right
     case left
     case top
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .bottom: return "Unten (↓)"
+        case .right:  return "Rechts (→)"
+        case .left:   return "Links (←)"
+        case .top:    return "Oben (↑)"
+        }
+    }
 }
 
 struct PAPEdge: Identifiable, Equatable {
@@ -150,133 +161,189 @@ struct OrthogonalRoutingEngine {
         let c1 = from.col, r1 = from.row
         let c2 = to.col,   r2 = to.row
 
-        // Case 1: Straight Down (Same Column, row below)
-        if c1 == c2 && r2 > r1 && fromPort == .bottom {
-            let start = CGPoint(x: p1.x, y: p1.y + h1)
-            let end   = CGPoint(x: p2.x, y: p2.y - h2)
-            let label = CGPoint(x: p1.x + 16, y: (start.y + end.y) / 2)
-            return ([start, end], .down, label)
-        }
-        // 1. Exiting LEFT (fromPort == .left or (c2 < c1 && from.type == .decision && fromPort != .bottom && fromPort != .right))
-        if fromPort == .left || (c2 < c1 && from.type == .decision && fromPort != .bottom && fromPort != .right) {
-            let start = CGPoint(x: p1.x - w1, y: p1.y)
+        // ==========================================
+        // 1. SAME COLUMN (c1 == c2)
+        // ==========================================
+        if c1 == c2 {
+            // A) Direct neighbor below (r2 == r1 + 1) exiting bottom
+            if r2 == r1 + 1 && fromPort == .bottom {
+                let start = CGPoint(x: p1.x, y: p1.y + h1)
+                let end   = CGPoint(x: p2.x, y: p2.y - h2)
+                let label = CGPoint(x: p1.x + 16, y: (start.y + end.y) / 2)
+                return ([start, end], .down, label)
+            }
 
-            if r1 == r2 {
-                // Straight horizontal line to left
-                let end = CGPoint(x: p2.x + w2, y: p2.y)
-                let label = CGPoint(x: (start.x + end.x) / 2, y: p1.y - 12)
-                return ([start, end], .left, label)
-            } else if r2 > r1 {
-                // Left, then DOWN
-                let corner1 = CGPoint(x: p2.x, y: p1.y)
-                let end = CGPoint(x: p2.x, y: p2.y - h2)
-                let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
-                return ([start, corner1, end], .down, label)
-            } else {
-                // Left, then UP (Schleife nach links und oben)
-                let leftColX = min(p1.x - PAPGrid.colWidth, p2.x)
-                let corner1 = CGPoint(x: leftColX, y: p1.y)
-                let corner2 = CGPoint(x: leftColX, y: p2.y)
-                if c2 > c1 - 1 {
-                    // Target is in a column to the right of the bypass channel (e.g. main flow)
+            // B) Skipping steps downwards in the same column (r2 > r1) or side exit
+            if r2 > r1 {
+                if fromPort == .left {
+                    let bypassX = p1.x - w1 - 28
+                    let start = CGPoint(x: p1.x - w1, y: p1.y)
+                    let corner1 = CGPoint(x: bypassX, y: p1.y)
+                    let corner2 = CGPoint(x: bypassX, y: p2.y)
                     let end = CGPoint(x: p2.x - w2, y: p2.y)
-                    let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
+                    let label = CGPoint(x: bypassX - 16, y: (p1.y + p2.y) / 2)
                     return ([start, corner1, corner2, end], .right, label)
+                } else if fromPort == .right {
+                    let bypassX = p1.x + w1 + 28
+                    let start = CGPoint(x: p1.x + w1, y: p1.y)
+                    let corner1 = CGPoint(x: bypassX, y: p1.y)
+                    let corner2 = CGPoint(x: bypassX, y: p2.y)
+                    let end = CGPoint(x: p2.x + w2, y: p2.y)
+                    let label = CGPoint(x: bypassX + 16, y: (p1.y + p2.y) / 2)
+                    return ([start, corner1, corner2, end], .left, label)
                 } else {
-                    // Target is directly in this left column
-                    let end = CGPoint(x: p2.x, y: p2.y + h2)
-                    let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
-                    return ([start, corner1, end], .up, label)
+                    // fromPort == .bottom, but r2 > r1 + 1 (Bypass around intermediate blocks)
+                    let bypassX = p1.x + w1 + 28
+                    let start = CGPoint(x: p1.x, y: p1.y + h1)
+                    let stepY = p1.y + h1 + 14
+                    let corner0 = CGPoint(x: p1.x, y: stepY)
+                    let corner1 = CGPoint(x: bypassX, y: stepY)
+                    let corner2 = CGPoint(x: bypassX, y: p2.y)
+                    let end = CGPoint(x: p2.x + w2, y: p2.y)
+                    let label = CGPoint(x: bypassX + 16, y: (stepY + p2.y) / 2)
+                    return ([start, corner0, corner1, corner2, end], .left, label)
+                }
+            }
+
+            // C) Loopback upwards in same column (r2 <= r1)
+            if r2 <= r1 {
+                if fromPort == .right {
+                    let bypassX = p1.x + w1 + 28
+                    let start = CGPoint(x: p1.x + w1, y: p1.y)
+                    let corner1 = CGPoint(x: bypassX, y: p1.y)
+                    let corner2 = CGPoint(x: bypassX, y: p2.y)
+                    let end = CGPoint(x: p2.x + w2, y: p2.y)
+                    let label = CGPoint(x: bypassX + 16, y: (p1.y + p2.y) / 2)
+                    return ([start, corner1, corner2, end], .left, label)
+                } else if fromPort == .top {
+                    let bypassX = p1.x - w1 - 28
+                    let start = CGPoint(x: p1.x, y: p1.y - h1)
+                    let stepY = max(0, p1.y - h1 - 14)
+                    let corner0 = CGPoint(x: p1.x, y: stepY)
+                    let corner1 = CGPoint(x: bypassX, y: stepY)
+                    let corner2 = CGPoint(x: bypassX, y: p2.y)
+                    let end = CGPoint(x: p2.x - w2, y: p2.y)
+                    let label = CGPoint(x: bypassX - 16, y: (p1.y + p2.y) / 2)
+                    return ([start, corner0, corner1, corner2, end], .right, label)
+                } else {
+                    // Default loopback (left bypass)
+                    let bypassX = p1.x - w1 - 28
+                    let start = (fromPort == .bottom) ? CGPoint(x: p1.x, y: p1.y + h1) : CGPoint(x: p1.x - w1, y: p1.y)
+                    if fromPort == .bottom {
+                        let stepY = p1.y + h1 + 14
+                        let corner0 = CGPoint(x: p1.x, y: stepY)
+                        let corner1 = CGPoint(x: bypassX, y: stepY)
+                        let corner2 = CGPoint(x: bypassX, y: p2.y)
+                        let end = CGPoint(x: p2.x - w2, y: p2.y)
+                        let label = CGPoint(x: bypassX - 16, y: (p1.y + p2.y) / 2)
+                        return ([start, corner0, corner1, corner2, end], .right, label)
+                    } else {
+                        let corner1 = CGPoint(x: bypassX, y: p1.y)
+                        let corner2 = CGPoint(x: bypassX, y: p2.y)
+                        let end = CGPoint(x: p2.x - w2, y: p2.y)
+                        let label = CGPoint(x: bypassX - 16, y: (p1.y + p2.y) / 2)
+                        return ([start, corner1, corner2, end], .right, label)
+                    }
                 }
             }
         }
 
-        // 2. Exiting RIGHT (fromPort == .right or (c2 > c1 && from.type == .decision && fromPort != .bottom && fromPort != .left))
-        if fromPort == .right || (c2 > c1 && from.type == .decision && fromPort != .bottom && fromPort != .left) {
-            let start = CGPoint(x: p1.x + w1, y: p1.y)
+        // ==========================================
+        // 2. DIFFERENT COLUMNS (c1 != c2)
+        // ==========================================
 
-            if r1 == r2 {
-                // Straight horizontal line to right
+        // A) Same Row (r1 == r2)
+        if r1 == r2 {
+            if c2 > c1 {
+                let start = CGPoint(x: p1.x + w1, y: p1.y)
                 let end = CGPoint(x: p2.x - w2, y: p2.y)
                 let label = CGPoint(x: (start.x + end.x) / 2, y: p1.y - 12)
                 return ([start, end], .right, label)
-            } else if r2 > r1 {
-                // Right, then DOWN
-                let corner1 = CGPoint(x: p2.x, y: p1.y)
-                let end = CGPoint(x: p2.x, y: p2.y - h2)
-                let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
-                return ([start, corner1, end], .down, label)
             } else {
-                // Right, then UP (Schleife nach rechts und oben)
-                let rightColX = max(p1.x + PAPGrid.colWidth, p2.x)
-                let corner1 = CGPoint(x: rightColX, y: p1.y)
-                let corner2 = CGPoint(x: rightColX, y: p2.y)
-                if c2 < c1 + 1 {
-                    // Target is in a column to the left of the bypass channel (e.g. main flow)
-                    let end = CGPoint(x: p2.x + w2, y: p2.y)
-                    let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
-                    return ([start, corner1, corner2, end], .left, label)
-                } else {
-                    // Target is directly in this right column
-                    let end = CGPoint(x: p2.x, y: p2.y + h2)
-                    let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
-                    return ([start, corner1, end], .up, label)
-                }
+                let start = CGPoint(x: p1.x - w1, y: p1.y)
+                let end = CGPoint(x: p2.x + w2, y: p2.y)
+                let label = CGPoint(x: (start.x + end.x) / 2, y: p1.y - 12)
+                return ([start, end], .left, label)
             }
         }
 
-        // 3. Exiting TOP (fromPort == .top)
-        if fromPort == .top {
-            let start = CGPoint(x: p1.x, y: p1.y - h1)
-            if c1 == c2 && r2 < r1 && r1 - 1 == r2 {
-                let end = CGPoint(x: p2.x, y: p2.y + h2)
-                let label = CGPoint(x: p1.x + 16, y: (start.y + end.y) / 2)
-                return ([start, end], .up, label)
-            } else if c1 != c2 && r2 <= r1 {
+        // B) Target is Downwards in another column (r2 > r1)
+        if r2 > r1 {
+            if fromPort == .right || (c2 > c1 && fromPort != .left && fromPort != .bottom) {
+                if c2 > c1 {
+                    let start = CGPoint(x: p1.x + w1, y: p1.y)
+                    let corner1 = CGPoint(x: p2.x, y: p1.y)
+                    let end = CGPoint(x: p2.x, y: p2.y - h2)
+                    let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
+                    return ([start, corner1, end], .down, label)
+                } else {
+                    let bypassX = p1.x + w1 + 20
+                    let start = CGPoint(x: p1.x + w1, y: p1.y)
+                    let corner1 = CGPoint(x: bypassX, y: p1.y)
+                    let corner2 = CGPoint(x: bypassX, y: p2.y)
+                    let end = CGPoint(x: p2.x + w2, y: p2.y)
+                    let label = CGPoint(x: bypassX + 14, y: (p1.y + p2.y) / 2)
+                    return ([start, corner1, corner2, end], .left, label)
+                }
+            } else if fromPort == .left || (c2 < c1 && fromPort != .right && fromPort != .bottom) {
+                if c2 < c1 {
+                    let start = CGPoint(x: p1.x - w1, y: p1.y)
+                    let corner1 = CGPoint(x: p2.x, y: p1.y)
+                    let end = CGPoint(x: p2.x, y: p2.y - h2)
+                    let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
+                    return ([start, corner1, end], .down, label)
+                } else {
+                    let bypassX = p1.x - w1 - 20
+                    let start = CGPoint(x: p1.x - w1, y: p1.y)
+                    let corner1 = CGPoint(x: bypassX, y: p1.y)
+                    let corner2 = CGPoint(x: bypassX, y: p2.y)
+                    let end = CGPoint(x: p2.x - w2, y: p2.y)
+                    let label = CGPoint(x: bypassX - 14, y: (p1.y + p2.y) / 2)
+                    return ([start, corner1, corner2, end], .right, label)
+                }
+            } else {
+                // fromPort == .bottom
+                let start = CGPoint(x: p1.x, y: p1.y + h1)
                 let corner1 = CGPoint(x: p1.x, y: p2.y)
-                let end = CGPoint(x: c2 > c1 ? p2.x - w2 : p2.x + w2, y: p2.y)
-                let dir: ArrowDirection = c2 > c1 ? .right : .left
+                let end = CGPoint(x: c1 > c2 ? (p2.x + w2) : (p2.x - w2), y: p2.y)
+                let dir: ArrowDirection = (c1 > c2) ? .left : .right
+                let label = CGPoint(x: (start.x + end.x) / 2, y: p2.y - 12)
+                return ([start, corner1, end], dir, label)
+            }
+        }
+
+        // C) Target is Upwards in another column (r2 < r1)
+        if r2 < r1 {
+            if fromPort == .right || c2 > c1 {
+                let rightColX = max(p1.x + PAPGrid.colWidth, p2.x + w2 + 20)
+                let start = CGPoint(x: p1.x + w1, y: p1.y)
+                let corner1 = CGPoint(x: rightColX, y: p1.y)
+                let corner2 = CGPoint(x: rightColX, y: p2.y)
+                let end = CGPoint(x: p2.x + w2, y: p2.y)
+                let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
+                return ([start, corner1, corner2, end], .left, label)
+            } else if fromPort == .left || c2 < c1 {
+                let leftColX = min(p1.x - PAPGrid.colWidth, p2.x - w2 - 20)
+                let start = CGPoint(x: p1.x - w1, y: p1.y)
+                let corner1 = CGPoint(x: leftColX, y: p1.y)
+                let corner2 = CGPoint(x: leftColX, y: p2.y)
+                let end = CGPoint(x: p2.x - w2, y: p2.y)
+                let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
+                return ([start, corner1, corner2, end], .right, label)
+            } else {
+                let start = CGPoint(x: p1.x, y: p1.y - h1)
+                let corner1 = CGPoint(x: p1.x, y: p2.y)
+                let end = CGPoint(x: c2 > c1 ? (p2.x - w2) : (p2.x + w2), y: p2.y)
+                let dir: ArrowDirection = (c2 > c1) ? .right : .left
                 let label = CGPoint(x: p1.x + (c2 > c1 ? 16 : -16), y: (start.y + p2.y) / 2)
                 return ([start, corner1, end], dir, label)
             }
         }
 
-        // 4. Exiting BOTTOM (Straight Down or Merge)
-        if c1 == c2 && r2 > r1 {
-            let start = CGPoint(x: p1.x, y: p1.y + h1)
-            let end   = CGPoint(x: p2.x, y: p2.y - h2)
-            let label = CGPoint(x: p1.x + 16, y: (start.y + end.y) / 2)
-            return ([start, end], .down, label)
-        }
-
-        if c1 != c2 && r2 > r1 {
-            let start = CGPoint(x: p1.x, y: p1.y + h1)
-            let corner1 = CGPoint(x: p1.x, y: p2.y)
-            let end = CGPoint(x: c1 > c2 ? p2.x + w2 : p2.x - w2, y: p2.y)
-            let dir: ArrowDirection = c1 > c2 ? .left : .right
-            let label = CGPoint(x: (start.x + end.x) / 2, y: p2.y - 12)
-            return ([start, corner1, end], dir, label)
-        }
-
-        // 5. Fallback for any upward loopback
-        if r2 <= r1 {
-            let bypassX = min(p1.x, p2.x) - (c1 == c2 ? (w1 + 38) : 0)
-            let start = CGPoint(x: p1.x, y: p1.y + h1)
-            let bottomY = p1.y + h1 + 18
-            let corner1 = CGPoint(x: p1.x, y: bottomY)
-            let corner2 = CGPoint(x: bypassX, y: bottomY)
-            let corner3 = CGPoint(x: bypassX, y: p2.y)
-            let end = CGPoint(x: p2.x - w2, y: p2.y)
-            let label = CGPoint(x: bypassX + 16, y: (p1.y + p2.y) / 2)
-            return ([start, corner1, corner2, corner3, end], .right, label)
-        }
-
-        // Fallback: simple orthogonal L-connection
+        // Fallback
         let start = CGPoint(x: p1.x, y: p1.y + h1)
-        let corner1 = CGPoint(x: p1.x, y: p2.y - h2 - 15)
-        let corner2 = CGPoint(x: p2.x, y: p2.y - h2 - 15)
         let end   = CGPoint(x: p2.x, y: p2.y - h2)
-        return ([start, corner1, corner2, end], .down, CGPoint(x: p1.x + 14, y: p1.y + h1 + 10))
+        return ([start, end], .down, CGPoint(x: p1.x + 14, y: (p1.y + p2.y) / 2))
     }
 }
 
@@ -674,30 +741,42 @@ final class PAPDesignerViewModel: ObservableObject {
         }
     }
 
-    func connect(fromId: UUID, toId: UUID, label: String = "") {
+    func connect(fromId: UUID, toId: UUID, label: String = "", port: PAPBranchPort? = nil) {
         guard fromId != toId else { return }
         guard !edges.contains(where: { $0.fromId == fromId && $0.toId == toId }) else { return }
         guard let fromNode = nodes.first(where: { $0.id == fromId }),
               let toNode   = nodes.first(where: { $0.id == toId }) else { return }
 
         pushUndo()
-        let port: PAPBranchPort
-        if fromNode.type == .decision {
+        let resolvedPort: PAPBranchPort
+        if let explicitPort = port {
+            resolvedPort = explicitPort
+        } else if fromNode.type == .decision {
             if toNode.row < fromNode.row {
                 // Connecting to a node above (Loopback / Schleife)
-                if toNode.col > fromNode.col { port = .right }
-                else if toNode.col < fromNode.col { port = .left }
-                else { port = .top }
+                if toNode.col > fromNode.col { resolvedPort = .right }
+                else if toNode.col < fromNode.col { resolvedPort = .left }
+                else { resolvedPort = .right }
+            } else if toNode.row == fromNode.row {
+                resolvedPort = (toNode.col >= fromNode.col) ? .right : .left
             } else {
-                if toNode.col > fromNode.col { port = .right }
-                else if toNode.col < fromNode.col { port = .left }
-                else { port = .bottom }
+                if toNode.col > fromNode.col { resolvedPort = .right }
+                else if toNode.col < fromNode.col { resolvedPort = .left }
+                else {
+                    let hasBottomEdge = edges.contains { $0.fromId == fromId && $0.fromPort == .bottom }
+                    resolvedPort = hasBottomEdge ? .right : .bottom
+                }
             }
         } else {
-            if toNode.row < fromNode.row {
-                port = (fromNode.col <= toNode.col) ? .left : .right
+            if toNode.row <= fromNode.row {
+                resolvedPort = (fromNode.col <= toNode.col) ? .left : .right
             } else {
-                port = .bottom
+                if toNode.col > fromNode.col { resolvedPort = .right }
+                else if toNode.col < fromNode.col { resolvedPort = .left }
+                else {
+                    let hasBottomEdge = edges.contains { $0.fromId == fromId && $0.fromPort == .bottom }
+                    resolvedPort = hasBottomEdge ? .right : .bottom
+                }
             }
         }
 
@@ -705,12 +784,20 @@ final class PAPDesignerViewModel: ObservableObject {
         if !label.isEmpty {
             edgeLabel = label
         } else if fromNode.type == .decision {
-            edgeLabel = (port == .bottom) ? "ja" : "nein"
+            edgeLabel = (resolvedPort == .bottom) ? "ja" : "nein"
         } else {
             edgeLabel = ""
         }
 
-        edges.append(PAPEdge(fromId: fromId, toId: toId, label: edgeLabel, fromPort: port))
+        edges.append(PAPEdge(fromId: fromId, toId: toId, label: edgeLabel, fromPort: resolvedPort))
+    }
+
+    func updateEdge(id: UUID, label: String, port: PAPBranchPort) {
+        if let idx = edges.firstIndex(where: { $0.id == id }) {
+            pushUndo()
+            edges[idx].label = label
+            edges[idx].fromPort = port
+        }
     }
 
     func deleteSelected() {
@@ -851,6 +938,7 @@ struct PAPNodeCardView: View {
     let node: PAPNode
     let isSelected: Bool
     let isConnectSource: Bool
+    var isConnectTarget: Bool = false
 
     var body: some View {
         ZStack {
@@ -861,8 +949,8 @@ struct PAPNodeCardView: View {
             // Crisp border
             nodeShape
                 .stroke(
-                    isConnectSource ? Color.orange : (isSelected ? Color.blue : node.type.strokeColor),
-                    lineWidth: (isSelected || isConnectSource) ? 3 : 1.8
+                    isConnectSource ? Color.purple : (isConnectTarget ? Color.blue : (isSelected ? Color.blue : node.type.strokeColor)),
+                    style: StrokeStyle(lineWidth: (isSelected || isConnectSource || isConnectTarget) ? 3 : 1.8, dash: isConnectTarget ? [5, 3] : [])
                 )
 
             // IO Tag badge (E for Input, A for Output)
@@ -895,7 +983,31 @@ struct PAPNodeCardView: View {
                 .minimumScaleFactor(0.8)
         }
         .frame(width: node.type.defaultWidth, height: node.type.defaultHeight)
-        .shadow(color: isSelected ? Color.blue.opacity(0.35) : Color.black.opacity(0.08), radius: isSelected ? 6 : 2, x: 0, y: 2)
+        .overlay(alignment: .topTrailing) {
+            if isConnectSource {
+                Text("Start")
+                    .font(.system(size: 10, weight: .heavy))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.purple)
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+                    .offset(x: 8, y: -10)
+            } else if isConnectTarget {
+                HStack(spacing: 2) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Ziel")
+                }
+                .font(.system(size: 9, weight: .bold))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .clipShape(Capsule())
+                .offset(x: 8, y: -10)
+            }
+        }
+        .shadow(color: isConnectSource ? Color.purple.opacity(0.4) : (isSelected ? Color.blue.opacity(0.35) : Color.black.opacity(0.08)), radius: (isSelected || isConnectSource) ? 6 : 2, x: 0, y: 2)
     }
 
     var nodeShape: AnyShape {
@@ -1022,10 +1134,11 @@ struct PAPDesignerView: View {
     @State private var dragCurrentCol: Int = 1
     @State private var dragCurrentRow: Int = 0
 
-    // Text Editing
+    // Text & Edge Editing
     @State private var editingNode: PAPNode? = nil
     @State private var editingEdge: PAPEdge? = nil
     @State private var editText: String = ""
+    @State private var selectedEdgePort: PAPBranchPort = .bottom
     @State private var showTextEditor: Bool = false
     @State private var selectedTag: String = "E"
 
@@ -1079,6 +1192,39 @@ struct PAPDesignerView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.top, 10)
+
+                Divider().padding(.horizontal, 4)
+
+                // Verbindungen & Sprünge ohne Baustein
+                Text("Verbindungen")
+                    .font(.caption2.bold())
+                    .foregroundColor(.secondary)
+
+                Button {
+                    vm.connectMode.toggle()
+                    if !vm.connectMode {
+                        vm.connectFromId = nil
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: vm.connectMode ? "link.circle.fill" : "link")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(vm.connectMode ? .white : .purple)
+                        Text(vm.connectMode ? "Verbinden aktiv" : "Linie verbinden")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(vm.connectMode ? .white : .primary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+                    .background(vm.connectMode ? Color.purple : Color.purple.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.purple.opacity(0.4), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 8)
 
                 Divider().padding(.horizontal, 4)
 
@@ -1172,25 +1318,42 @@ struct PAPDesignerView: View {
             // Connect Mode Banner
             if vm.connectMode {
                 HStack(spacing: 8) {
-                    Image(systemName: "arrow.triangle.branch")
-                    Text(vm.connectFromId == nil ? "1. Ausgangsblock antippen" : "2. Zielblock für Rücksprung/Verbindung antippen")
-                        .font(.subheadline.bold())
+                    Image(systemName: "link")
+                        .font(.system(size: 14, weight: .bold))
+
+                    if let fromId = vm.connectFromId, let fromNode = vm.nodes.first(where: { $0.id == fromId }) {
+                        Text("Start: „\(fromNode.label)“ ➔ Zielblock antippen")
+                            .font(.subheadline.bold())
+
+                        Button("Start ändern") {
+                            vm.connectFromId = nil
+                        }
+                        .font(.caption.bold())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.25))
+                        .clipShape(Capsule())
+                    } else {
+                        Text("1. Start-Block antippen (Verbindung / Sprung ohne Baustein)")
+                            .font(.subheadline.bold())
+                    }
+
                     Button("Abbrechen") {
                         vm.connectMode = false
                         vm.connectFromId = nil
                     }
                     .font(.caption.bold())
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.white.opacity(0.3))
+                    .padding(.vertical, 4)
+                    .background(Color.white.opacity(0.25))
                     .clipShape(Capsule())
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(Color.blue)
+                .background(Color.purple)
                 .foregroundColor(.white)
                 .clipShape(Capsule())
-                .shadow(radius: 5)
+                .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
                 .padding(.top, 12)
             }
 
@@ -1280,6 +1443,7 @@ struct PAPDesignerView: View {
     func nodeItemView(_ node: PAPNode) -> some View {
         let isSelected = vm.selectedId == node.id
         let isConnect = vm.connectFromId == node.id
+        let isTarget = vm.connectMode && vm.connectFromId != nil && vm.connectFromId != node.id
         let isBeingDragged = draggingNodeId == node.id
 
         let currentPos: CGPoint = {
@@ -1289,7 +1453,7 @@ struct PAPDesignerView: View {
             return CGPoint(x: node.cx, y: node.cy)
         }()
 
-        return PAPNodeCardView(node: node, isSelected: isSelected, isConnectSource: isConnect)
+        return PAPNodeCardView(node: node, isSelected: isSelected, isConnectSource: isConnect, isConnectTarget: isTarget)
             .position(currentPos)
             .onTapGesture {
                 vm.tapNode(id: node.id)
@@ -1359,7 +1523,7 @@ struct PAPDesignerView: View {
                         vm.connectMode = true
                         vm.connectFromId = node.id
                     } label: {
-                        Label("Rechts nach oben zu Block verbinden…", systemImage: "arrow.triangle.turn.up.right.circle")
+                        Label("Rechts zu bestehendem Block verbinden…", systemImage: "arrow.triangle.turn.up.right.circle")
                     }
                 } label: {
                     HStack(spacing: 2) {
@@ -1394,7 +1558,7 @@ struct PAPDesignerView: View {
                         vm.connectMode = true
                         vm.connectFromId = node.id
                     } label: {
-                        Label("Links nach oben zu Block verbinden…", systemImage: "arrow.triangle.turn.up.left.circle")
+                        Label("Links zu bestehendem Block verbinden…", systemImage: "arrow.triangle.turn.up.left.circle")
                     }
                 } label: {
                     HStack(spacing: 2) {
@@ -1490,14 +1654,38 @@ struct PAPDesignerView: View {
                 }
             }
 
-            // Rücksprung / Verbinden
-            Button {
-                vm.connectMode = true
-                vm.connectFromId = node.id
+            // Verbinden / Überspringen Menü (Ohne neuen Baustein)
+            Menu {
+                Section("Verbindungs-Modus") {
+                    Button {
+                        vm.connectMode = true
+                        vm.connectFromId = node.id
+                    } label: {
+                        Label("Frei mit Zielblock verbinden…", systemImage: "link")
+                    }
+                }
+
+                let otherNodes = vm.nodes.filter { $0.id != node.id }
+                if !otherNodes.isEmpty {
+                    Section("Direktsprung zu Block (ohne Baustein)") {
+                        ForEach(otherNodes) { target in
+                            Button {
+                                vm.connect(fromId: node.id, toId: target.id)
+                            } label: {
+                                let dirHint: String = {
+                                    if target.row > node.row { return "↓ Schritt überspringen nach Zeile \(target.row + 1)" }
+                                    else if target.row < node.row { return "↑ Rücksprung nach Zeile \(target.row + 1)" }
+                                    else { return "→ Quersprung Spalte \(target.col)" }
+                                }()
+                                Label("\(target.label.isEmpty ? target.type.title : target.label) (\(dirHint))", systemImage: target.type.icon)
+                            }
+                        }
+                    }
+                }
             } label: {
                 HStack(spacing: 2) {
-                    Image(systemName: "arrow.triangle.turn.up.right.circle")
-                    Text("Rücksprung")
+                    Image(systemName: "link")
+                    Text("Verbinden")
                 }
                 .font(.caption2.bold())
                 .padding(.horizontal, 8)
@@ -1570,9 +1758,9 @@ struct PAPDesignerView: View {
                         }
                 }
 
-                // Small delete button when tapped
+                // Small tap area to edit/delete connection
                 Color.clear
-                    .frame(width: 40, height: 30)
+                    .frame(width: 44, height: 32)
                     .contentShape(Rectangle())
                     .position(route.labelPos)
                     .onTapGesture {
@@ -1648,6 +1836,7 @@ struct PAPDesignerView: View {
         editingEdge = edge
         editingNode = nil
         editText = edge.label
+        selectedEdgePort = edge.fromPort
         showTextEditor = true
     }
 
@@ -1669,13 +1858,23 @@ struct PAPDesignerView: View {
                         }
                     }
                 } else if let _ = editingEdge {
+                    Section("Ausgangs-Richtung (Port)") {
+                        Picker("Ausgang", selection: $selectedEdgePort) {
+                            ForEach(PAPBranchPort.allCases) { port in
+                                Text(port.title).tag(port)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
                     Section("Verbindungs-Beschriftung") {
-                        TextField("z.B. ja, nein, wahr, falsch", text: $editText)
-                        HStack {
+                        TextField("z.B. ja, nein, wahr, falsch, überspringen", text: $editText)
+                        HStack(spacing: 4) {
                             Button("ja") { editText = "ja" }
                             Button("nein") { editText = "nein" }
                             Button("wahr") { editText = "wahr" }
                             Button("falsch") { editText = "falsch" }
+                            Button("überspringen") { editText = "überspringen" }
                             Button("Leeren") { editText = "" }
                         }
                         .buttonStyle(.bordered)
@@ -1692,7 +1891,7 @@ struct PAPDesignerView: View {
                     }
                 }
             }
-            .navigationTitle(editingNode != nil ? "Block bearbeiten" : "Verzweigung bearbeiten")
+            .navigationTitle(editingNode != nil ? "Block bearbeiten" : "Verbindung bearbeiten")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1705,13 +1904,13 @@ struct PAPDesignerView: View {
                             vm.nodes[idx].label = editText
                             if n.type == .io { vm.nodes[idx].tag = selectedTag }
                         } else if let e = editingEdge {
-                            vm.setEdgeLabel(id: e.id, label: editText)
+                            vm.updateEdge(id: e.id, label: editText, port: selectedEdgePort)
                         }
                         showTextEditor = false
                     }
                 }
             }
         }
-        .presentationDetents([.fraction(0.45), .medium])
+        .presentationDetents([.fraction(0.48), .medium])
     }
 }
