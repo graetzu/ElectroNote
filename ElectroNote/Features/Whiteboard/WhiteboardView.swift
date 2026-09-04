@@ -4,11 +4,17 @@ import UIKit
 
 // MARK: - Whiteboard ViewController
 
-final class WhiteboardViewController: UIViewController {
+final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
 
     let canvasView = PKCanvasView()
     private var backgroundStyle: BackgroundStyle = .blank
     private var darkDrawingMode: Bool = false
+
+    var shapeSnapEnabled: Bool = false
+    private var shapeSnapTask: Task<Void, Never>?
+    private var isSnappingShape: Bool = false
+
+    private var stickyNoteViews: [UUID: StickyNoteView] = [:]
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -40,10 +46,64 @@ final class WhiteboardViewController: UIViewController {
         canvasView.maximumZoomScale = 4.0
         canvasView.contentSize = CGSize(width: 3000, height: 3000)
         canvasView.isScrollEnabled = true
+        canvasView.delegate = self
         view.addSubview(canvasView)
 
         // Default tool: Pen
         canvasView.tool = PKInkingTool(.pen, color: .black, width: 3)
+    }
+
+    // MARK: - Shape Snapping
+
+    func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+        guard shapeSnapEnabled, !isSnappingShape else { return }
+        scheduleShapeSnap()
+    }
+
+    private func scheduleShapeSnap() {
+        shapeSnapTask?.cancel()
+        shapeSnapTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled, let self else { return }
+            self.performShapeSnap()
+        }
+    }
+
+    @MainActor
+    private func performShapeSnap() {
+        let strokes = canvasView.drawing.strokes
+        guard let last = strokes.last else { return }
+        guard let (snapped, _) = ShapeSnapper.snap(last) else { return }
+
+        isSnappingShape = true
+        var updated = strokes
+        updated[updated.count - 1] = snapped
+        canvasView.drawing = PKDrawing(strokes: updated)
+        isSnappingShape = false
+    }
+
+    // MARK: - Sticky Notes
+
+    func addStickyNote() {
+        let offset = canvasView.contentOffset
+        let scale = max(canvasView.zoomScale, 0.01)
+        let cx = (offset.x + canvasView.bounds.width / 2) / scale - StickyNoteView.noteSize.width / 2
+        let cy = (offset.y + canvasView.bounds.height / 2) / scale - StickyNoteView.noteSize.height / 2
+        let note = StickyNote(id: UUID(), text: "", x: max(20, cx), y: max(20, cy), colorIndex: stickyNoteViews.count % 4)
+        mountStickyNoteView(note)
+    }
+
+    private func mountStickyNoteView(_ note: StickyNote) {
+        let v = StickyNoteView(note: note)
+        v.frame = CGRect(x: note.x, y: note.y,
+                         width: StickyNoteView.noteSize.width,
+                         height: StickyNoteView.noteSize.height)
+        canvasView.addSubview(v)
+        stickyNoteViews[note.id] = v
+        v.onDelete = { [weak self, weak v] in
+            v?.removeFromSuperview()
+            self?.stickyNoteViews.removeValue(forKey: note.id)
+        }
     }
 
     func refreshBackground(style: BackgroundStyle, dark: Bool) {
@@ -106,6 +166,10 @@ final class WhiteboardViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
         alert.addAction(UIAlertAction(title: "Löschen", style: .destructive) { [weak self] _ in
             self?.canvasView.drawing = PKDrawing()
+            for (_, v) in self?.stickyNoteViews ?? [:] {
+                v.removeFromSuperview()
+            }
+            self?.stickyNoteViews.removeAll()
         })
         present(alert, animated: true)
     }
@@ -122,14 +186,19 @@ final class WhiteboardViewController: UIViewController {
         let drawing = canvasView.drawing
         let bounds = drawing.bounds
 
+        var contentRect = bounds
+        for (_, v) in stickyNoteViews {
+            contentRect = contentRect.isNull ? v.frame : contentRect.union(v.frame)
+        }
+
         let targetRect: CGRect
-        if !bounds.isNull && bounds.width > 5 && bounds.height > 5 {
+        if !contentRect.isNull && contentRect.width > 5 && contentRect.height > 5 {
             let padding: CGFloat = 24
             targetRect = CGRect(
-                x: max(0, bounds.minX - padding),
-                y: max(0, bounds.minY - padding),
-                width: bounds.width + padding * 2,
-                height: bounds.height + padding * 2
+                x: max(0, contentRect.minX - padding),
+                y: max(0, contentRect.minY - padding),
+                width: contentRect.width + padding * 2,
+                height: contentRect.height + padding * 2
             )
         } else {
             let sz = canvasView.bounds.size
@@ -153,6 +222,21 @@ final class WhiteboardViewController: UIViewController {
                 UIColor.white.setFill()
                 ctx.fill(CGRect(origin: .zero, size: renderSize))
             }
+
+            // Render sticky notes onto image
+            for (_, v) in stickyNoteViews {
+                let noteFrame = CGRect(
+                    x: v.frame.minX - targetRect.minX,
+                    y: v.frame.minY - targetRect.minY,
+                    width: v.frame.width,
+                    height: v.frame.height
+                )
+                ctx.cgContext.saveGState()
+                ctx.cgContext.translateBy(x: noteFrame.minX, y: noteFrame.minY)
+                v.layer.render(in: ctx.cgContext)
+                ctx.cgContext.restoreGState()
+            }
+
             if inkImage.size.width > 0 && inkImage.size.height > 0 {
                 inkImage.draw(in: CGRect(origin: .zero, size: renderSize))
             }
@@ -167,9 +251,11 @@ struct WhiteboardRepresentable: UIViewControllerRepresentable {
     let background: BackgroundStyle
     let darkDrawingMode: Bool
     let rulerActive: Bool
+    let shapeSnapEnabled: Bool
 
     func makeUIViewController(context: Context) -> WhiteboardViewController {
         let vc = WhiteboardViewController()
+        vc.shapeSnapEnabled = shapeSnapEnabled
         DispatchQueue.main.async { vcRef = vc }
         return vc
     }
@@ -178,6 +264,9 @@ struct WhiteboardRepresentable: UIViewControllerRepresentable {
         vc.refreshBackground(style: background, dark: darkDrawingMode)
         if vc.canvasView.isRulerActive != rulerActive {
             vc.canvasView.isRulerActive = rulerActive
+        }
+        if vc.shapeSnapEnabled != shapeSnapEnabled {
+            vc.shapeSnapEnabled = shapeSnapEnabled
         }
     }
 }
@@ -193,6 +282,7 @@ struct WhiteboardView: View {
     @State private var selectedWidth: CGFloat = 3.0
     @State private var eraserType: PKEraserTool.EraserType = .vector
     @State private var rulerActive: Bool = false
+    @State private var shapeSnapEnabled: Bool = false
     @State private var background: BackgroundStyle = .blank
     @State private var darkDrawingMode: Bool = false
 
@@ -208,6 +298,7 @@ struct WhiteboardView: View {
                     selectedWidth: $selectedWidth,
                     eraserType: $eraserType,
                     rulerActive: $rulerActive,
+                    shapeSnapEnabled: $shapeSnapEnabled,
                     darkDrawingMode: darkDrawingMode,
                     showRuler: true
                 ) { newTool in
@@ -222,7 +313,8 @@ struct WhiteboardView: View {
                     vcRef: $vc,
                     background: background,
                     darkDrawingMode: darkDrawingMode,
-                    rulerActive: rulerActive
+                    rulerActive: rulerActive,
+                    shapeSnapEnabled: shapeSnapEnabled
                 )
             }
             .navigationTitle("Whiteboard")
@@ -249,6 +341,19 @@ struct WhiteboardView: View {
                 }
 
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    // Notizzettel hinzufügen
+                    Button {
+                        vc?.addStickyNote()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "note.text.badge.plus")
+                            Text("Notiz")
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                    }
+                    .tint(.orange)
+                    .accessibilityLabel("Notizzettel hinzufügen")
+
                     // Background style menu
                     Menu {
                         Section("Vorlage") {
