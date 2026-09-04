@@ -46,6 +46,11 @@ final class InfiniteNotebookViewController: UIViewController {
     private var lastLassoPoints: [CGPoint] = []
     private let evaluator = MathEvaluator()
 
+    // MARK: - Transform & Selection Tools (Markieren, Verschieben, Drehen, Vergrößern)
+    var currentCanvasToolType: CanvasToolType = .pen
+    private var activeTransformBox: UniversalTransformBox?
+    private var lassoOverlay: LassoCanvasOverlay?
+
     // MARK: - Native text input
     private var nativeTextView: UITextView?
     private var nativeTextContentOrigin: CGPoint = .zero
@@ -354,6 +359,7 @@ final class InfiniteNotebookViewController: UIViewController {
     private func updateBackgroundFrame() {
         paperBackgroundView.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         backgroundLayer.frame = CGRect(origin: .zero, size: canvasView.contentSize)
+        lassoOverlay?.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         updatePageBreakDividers()
         centerCanvasContent()
     }
@@ -759,6 +765,9 @@ extension InfiniteNotebookViewController {
         let contentFrame = CGRect(x: entry.startX, y: entry.startY,
                                   width: entry.width, height: entry.height)
         let imgView = makeImageView(image: img, frame: contentFrame)
+        if let rot = entry.rotation, rot != 0 {
+            imgView.transform = CGAffineTransform(rotationAngle: rot)
+        }
         if paperBackgroundView.superview != nil {
             canvasView.insertSubview(imgView, aboveSubview: paperBackgroundView)
         } else {
@@ -766,7 +775,7 @@ extension InfiniteNotebookViewController {
         }
         imageViews[entry.id] = imgView
         imageLayers[entry.id] = imgView.layer
-        addImageHandle(for: imgView, at: contentFrame, id: entry.id)
+        addImageHandle(for: imgView, at: contentFrame, id: entry.id, isText: entry.textContent != nil)
     }
 
     // MARK: - Layer helpers
@@ -842,6 +851,284 @@ extension InfiniteNotebookViewController {
 
     func recogniseMathSelection() {
         showSelectionOverlay(mode: .math)
+    }
+
+    // MARK: - Universal Transform Box & Lasso Selection Tools (Markieren, Verschieben, Drehen, Vergrößern)
+
+    func setCanvasToolType(_ tool: CanvasToolType) {
+        currentCanvasToolType = tool
+        if tool == .lasso {
+            enableLassoMode()
+        } else {
+            disableLassoMode()
+        }
+    }
+
+    private func enableLassoMode() {
+        if lassoOverlay == nil {
+            let overlay = LassoCanvasOverlay(frame: CGRect(origin: .zero, size: canvasView.contentSize))
+            overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            canvasView.addSubview(overlay)
+            lassoOverlay = overlay
+
+            overlay.onLassoSelected = { [weak self] points, boundingBox in
+                self?.handleLassoSelection(points: points, boundingBox: boundingBox)
+            }
+            overlay.onTapOutside = { [weak self] in
+                self?.activeTransformBox?.dismiss()
+            }
+        }
+        canvasView.drawingGestureRecognizer.isEnabled = false
+    }
+
+    private func disableLassoMode() {
+        activeTransformBox?.dismiss()
+        lassoOverlay?.removeFromSuperview()
+        lassoOverlay = nil
+        canvasView.drawingGestureRecognizer.isEnabled = true
+    }
+
+    private func handleLassoSelection(points: [CGPoint], boundingBox: CGRect) {
+        activeTransformBox?.dismiss()
+
+        // 1. Check for handwriting strokes inside the lasso
+        let lassoPolygon = UIBezierPath()
+        if let first = points.first {
+            lassoPolygon.move(to: first)
+            for pt in points.dropFirst() { lassoPolygon.addLine(to: pt) }
+            lassoPolygon.close()
+        }
+
+        var selectedIndices: [Int] = []
+        var selectedStrokes: [PKStroke] = []
+
+        for (idx, stroke) in canvasView.drawing.strokes.enumerated() {
+            let b = stroke.renderBounds
+            let mid = CGPoint(x: b.midX, y: b.midY)
+            if lassoPolygon.contains(mid) || boundingBox.contains(b) {
+                selectedIndices.append(idx)
+                selectedStrokes.append(stroke)
+            }
+        }
+
+        if !selectedStrokes.isEmpty {
+            let unionBounds = selectedStrokes.reduce(CGRect.null) { $0.union($1.renderBounds) }
+            presentTransformBox(for: selectedStrokes, indices: selectedIndices, bounds: unionBounds)
+            return
+        }
+
+        // 2. Check for inserted images / text elements
+        for entry in document.insertedImages {
+            let entryRect = CGRect(x: entry.startX, y: entry.startY, width: entry.width, height: entry.height)
+            if boundingBox.intersects(entryRect) || boundingBox.contains(entryRect) {
+                presentTransformBox(forElementId: entry.id)
+                return
+            }
+        }
+    }
+
+    private func presentTransformBox(for strokes: [PKStroke], indices: [Int], bounds: CGRect) {
+        activeTransformBox?.dismiss()
+        guard bounds.width > 5 && bounds.height > 5 else { return }
+
+        let paddedBounds = bounds.insetBy(dx: -12, dy: -12)
+        let center = CGPoint(x: paddedBounds.midX, y: paddedBounds.midY)
+        let box = UniversalTransformBox(center: center, size: paddedBounds.size)
+
+        box.baseStrokes = strokes
+        box.strokeOriginalIndices = indices
+        box.baseTransforms = strokes.map { $0.transform }
+
+        canvasView.addSubview(box)
+        activeTransformBox = box
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+        box.onLiveUpdateStrokes = { [weak self, weak box] currentCenter, currentScale, currentRotation in
+            guard let self = self, let box = box else { return }
+            let baseCenter = box.baseCenter
+            let dx = currentCenter.x - baseCenter.x
+            let dy = currentCenter.y - baseCenter.y
+
+            let t = CGAffineTransform(translationX: baseCenter.x + dx, y: baseCenter.y + dy)
+                .rotated(by: currentRotation)
+                .scaledBy(x: currentScale, y: currentScale)
+                .translatedBy(x: -baseCenter.x, y: -baseCenter.y)
+
+            var allStrokes = self.canvasView.drawing.strokes
+            for (i, originalIdx) in box.strokeOriginalIndices.enumerated() {
+                guard originalIdx < allStrokes.count else { continue }
+                var s = box.baseStrokes[i]
+                s.transform = box.baseTransforms[i].concatenating(t)
+                allStrokes[originalIdx] = s
+            }
+            self.canvasView.drawing.strokes = allStrokes
+        }
+
+        box.onCommitStrokes = { [weak self] _, _, _ in
+            guard let self = self else { return }
+            let prevStrokes = self.canvasView.drawing.strokes
+            self.store?.saveDrawing(self.canvasView.drawing)
+            self.registerCustomUndo(actionName: "Handschrift transformieren") { [weak self] in
+                guard let self = self else { return }
+                self.canvasView.drawing.strokes = prevStrokes
+                self.activeTransformBox?.dismiss()
+                self.store?.saveDrawing(self.canvasView.drawing)
+            }
+        }
+
+        box.onDuplicate = { [weak self, weak box] in
+            guard let self = self, let box = box else { return }
+            let offset = CGAffineTransform(translationX: 30, y: 30)
+            var duplicatedStrokes: [PKStroke] = []
+            var newIndices: [Int] = []
+            let startIdx = self.canvasView.drawing.strokes.count
+            for (i, s) in box.baseStrokes.enumerated() {
+                var clone = s
+                clone.transform = clone.transform.concatenating(offset)
+                duplicatedStrokes.append(clone)
+                newIndices.append(startIdx + i)
+            }
+            self.canvasView.drawing.strokes.append(contentsOf: duplicatedStrokes)
+            self.store?.saveDrawing(self.canvasView.drawing)
+            self.showToastBanner(text: "Auswahl dupliziert", icon: "doc.on.doc")
+            let newBounds = duplicatedStrokes.reduce(CGRect.null) { $0.union($1.renderBounds) }
+            self.presentTransformBox(for: duplicatedStrokes, indices: newIndices, bounds: newBounds)
+        }
+
+        box.onChangeColor = { [weak self, weak box] newColor in
+            guard let self = self, let box = box else { return }
+            var allStrokes = self.canvasView.drawing.strokes
+            for (i, originalIdx) in box.strokeOriginalIndices.enumerated() {
+                guard originalIdx < allStrokes.count else { continue }
+                var s = allStrokes[originalIdx]
+                s.ink = PKInk(s.ink.inkType, color: newColor)
+                allStrokes[originalIdx] = s
+                box.baseStrokes[i].ink = PKInk(box.baseStrokes[i].ink.inkType, color: newColor)
+            }
+            self.canvasView.drawing.strokes = allStrokes
+            self.store?.saveDrawing(self.canvasView.drawing)
+        }
+
+        box.onDelete = { [weak self, weak box] in
+            guard let self = self, let box = box else { return }
+            let prevStrokes = self.canvasView.drawing.strokes
+            let removeIndices = Set(box.strokeOriginalIndices)
+            self.canvasView.drawing.strokes = self.canvasView.drawing.strokes.enumerated().compactMap { idx, stroke in
+                removeIndices.contains(idx) ? nil : stroke
+            }
+            self.store?.saveDrawing(self.canvasView.drawing)
+            box.dismiss()
+            self.showToastBanner(text: "Auswahl gelöscht", icon: "trash")
+            self.registerCustomUndo(actionName: "Auswahl löschen") { [weak self] in
+                guard let self = self else { return }
+                self.canvasView.drawing.strokes = prevStrokes
+                self.store?.saveDrawing(self.canvasView.drawing)
+            }
+        }
+
+        box.onDismiss = { [weak self] in
+            if self?.activeTransformBox === box {
+                self?.activeTransformBox = nil
+            }
+        }
+    }
+
+    func presentTransformBox(forElementId id: UUID) {
+        activeTransformBox?.dismiss()
+        guard let entry = document.insertedImages.first(where: { $0.id == id }) else { return }
+        guard let targetView = imageViews[id] else { return }
+
+        let isText = entry.textContent != nil
+        let baseSize = CGSize(width: entry.width, height: entry.height)
+        let center = CGPoint(x: entry.startX + entry.width / 2, y: entry.startY + entry.height / 2)
+        let rotation = entry.rotation ?? 0
+
+        let box = UniversalTransformBox(center: center, size: baseSize, initialRotation: rotation)
+        box.elementId = id
+        box.targetElementView = targetView
+        box.isTextElement = isText
+        box.baseFontSize = entry.fontSize
+
+        canvasView.addSubview(box)
+        activeTransformBox = box
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+        box.onLiveUpdateElement = { [weak box, weak self] currentCenter, currentScale, currentRotation in
+            guard let box = box, let tv = box.targetElementView else { return }
+            let newW = max(30, box.baseSize.width * currentScale)
+            let newH = max(30, box.baseSize.height * currentScale)
+            tv.bounds = CGRect(x: 0, y: 0, width: newW, height: newH)
+            tv.center = currentCenter
+            tv.transform = CGAffineTransform(rotationAngle: currentRotation)
+
+            if let handle = self?.imageHandles[id] {
+                handle.bounds = CGRect(x: 0, y: 0, width: newW, height: newH)
+                handle.center = currentCenter
+                handle.transform = CGAffineTransform(rotationAngle: currentRotation)
+            }
+        }
+
+        box.onCommitElement = { [weak self, weak box] currentCenter, currentScale, currentRotation in
+            guard let self = self, let box = box, let elementId = box.elementId else { return }
+            guard let idx = self.document.insertedImages.firstIndex(where: { $0.id == elementId }) else { return }
+            let newW = max(30, box.baseSize.width * currentScale)
+            let newH = max(30, box.baseSize.height * currentScale)
+            self.document.insertedImages[idx].startX = currentCenter.x - newW / 2
+            self.document.insertedImages[idx].startY = currentCenter.y - newH / 2
+            self.document.insertedImages[idx].width  = newW
+            self.document.insertedImages[idx].height = newH
+            self.document.insertedImages[idx].rotation = currentRotation
+
+            if box.isTextElement {
+                let baseFont = box.baseFontSize ?? 22
+                self.document.insertedImages[idx].fontSize = max(10, min(baseFont * currentScale, 120))
+            }
+            self.store?.saveDocument(self.document)
+        }
+
+        box.onDuplicate = { [weak self] in
+            guard let self = self else { return }
+            guard let idx = self.document.insertedImages.firstIndex(where: { $0.id == id }) else { return }
+            let orig = self.document.insertedImages[idx]
+            let newId = UUID()
+            let clone = InsertedImage(
+                id: newId,
+                filename: orig.filename,
+                startX: orig.startX + 30,
+                startY: orig.startY + 30,
+                width: orig.width,
+                height: orig.height,
+                textContent: orig.textContent,
+                fontSize: orig.fontSize,
+                fontDesign: orig.fontDesign,
+                fontColorHex: orig.fontColorHex,
+                rotation: orig.rotation
+            )
+            self.document.insertedImages.append(clone)
+            self.store?.saveDocument(self.document)
+            if let image = self.imageViews[id]?.image {
+                let imgView = self.makeImageView(image: image, frame: CGRect(x: clone.startX, y: clone.startY, width: clone.width, height: clone.height))
+                imgView.transform = CGAffineTransform(rotationAngle: clone.rotation ?? 0)
+                self.canvasView.addSubview(imgView)
+                self.imageViews[newId] = imgView
+                self.imageLayers[newId] = imgView.layer
+                self.addImageHandle(for: imgView, at: CGRect(x: clone.startX, y: clone.startY, width: clone.width, height: clone.height), id: newId, isText: isText)
+            }
+            self.showToastBanner(text: "Element dupliziert", icon: "doc.on.doc")
+            self.presentTransformBox(forElementId: newId)
+        }
+
+        box.onDelete = { [weak self] in
+            guard let self = self else { return }
+            self.deleteInsertedElement(id: id)
+            self.activeTransformBox?.dismiss()
+        }
+
+        box.onDismiss = { [weak self] in
+            if self?.activeTransformBox === box {
+                self?.activeTransformBox = nil
+            }
+        }
     }
 
     // MARK: - Selection overlay
@@ -2000,7 +2287,7 @@ extension InfiniteNotebookViewController {
 
         handle.onStyleMenu = { [weak self] in
             guard let self else { return }
-            self.editInsertedElement(id: id)
+            self.presentTransformBox(forElementId: id)
         }
 
         handle.onEdit = { [weak self] in
@@ -2010,11 +2297,19 @@ extension InfiniteNotebookViewController {
 
         handle.onScaled = { [weak self] scaleMultiplier in
             guard let self else { return }
-            guard let entry = self.document.insertedImages.first(where: { $0.id == id }) else { return }
+            guard let idx = self.document.insertedImages.firstIndex(where: { $0.id == id }) else { return }
+            let entry = self.document.insertedImages[idx]
             if entry.textContent != nil {
                 let currentSize = entry.fontSize ?? 22
                 let newSize = max(10, min(currentSize * scaleMultiplier, 120))
                 self.updateInsertedText(id: id, fontSize: newSize)
+            } else if let imgView = self.imageViews[id] {
+                let newW = max(30, entry.width * scaleMultiplier)
+                let newH = max(30, entry.height * scaleMultiplier)
+                imgView.bounds.size = CGSize(width: newW, height: newH)
+                self.document.insertedImages[idx].width = newW
+                self.document.insertedImages[idx].height = newH
+                self.store.saveDocument(self.document)
             }
         }
 

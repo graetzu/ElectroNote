@@ -117,18 +117,21 @@ struct InsertedImage: Identifiable, Codable {
     var fontSize: CGFloat?
     var fontDesign: String?
     var fontColorHex: String?
+    var rotation: CGFloat?
 
     init(id: UUID = UUID(), filename: String, startX: CGFloat = 0,
          startY: CGFloat, width: CGFloat, height: CGFloat,
          textContent: String? = nil, fontSize: CGFloat? = nil,
-         fontDesign: String? = nil, fontColorHex: String? = nil) {
+         fontDesign: String? = nil, fontColorHex: String? = nil,
+         rotation: CGFloat? = 0) {
         self.id = id; self.filename = filename; self.startX = startX
         self.startY = startY; self.width = width; self.height = height
         self.textContent = textContent; self.fontSize = fontSize
         self.fontDesign = fontDesign; self.fontColorHex = fontColorHex
+        self.rotation = rotation
     }
 
-    // Backward-compatible decoder: startX defaults to 0 for old documents
+    // Backward-compatible decoder: startX defaults to 0 for old documents, rotation defaults to 0
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id           = try c.decode(UUID.self, forKey: .id)
@@ -141,5 +144,7 @@ struct InsertedImage: Identifiable, Codable {
         fontSize     = try c.decodeIfPresent(CGFloat.self, forKey: .fontSize)
         fontDesign   = try c.decodeIfPresent(String.self, forKey: .fontDesign)
         fontColorHex = try c.decodeIfPresent(String.self, forKey: .fontColorHex)
+        rotation     = try c.decodeIfPresent(CGFloat.self, forKey: .rotation) ?? 0
     }
 }
+

@@ -43,6 +43,9 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
         if vm.triggerAddBookmark            { vm.triggerAddBookmark   = false;          vc.addBookmark() }
         if vm.triggerShowBookmarks          { vm.triggerShowBookmarks = false;          vc.showBookmarkList() }
 
+        if vc.currentCanvasToolType != vm.activeTool {
+            vc.setCanvasToolType(vm.activeTool)
+        }
         if let preset = vm.pendingInkPreset {
             vm.pendingInkPreset = nil
             vc.canvasView.tool = preset.pkTool
