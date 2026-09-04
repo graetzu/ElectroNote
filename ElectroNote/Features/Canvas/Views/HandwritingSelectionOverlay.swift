@@ -789,7 +789,7 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
 
     // MARK: - Trigger Callbacks
 
-    private func triggerLiveUpdate() {
+    func triggerLiveUpdate() {
         if !baseStrokes.isEmpty {
             onLiveUpdateStrokes?(currentCenter, currentScale, currentRotation)
         } else if targetElementView != nil {
@@ -797,7 +797,7 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    private func triggerCommit() {
+    func triggerCommit() {
         if !baseStrokes.isEmpty {
             onCommitStrokes?(currentCenter, currentScale, currentRotation)
         } else if targetElementView != nil {

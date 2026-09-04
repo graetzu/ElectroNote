@@ -50,6 +50,10 @@ final class InfiniteNotebookViewController: UIViewController {
     var currentCanvasToolType: CanvasToolType = .pen
     private var activeTransformBox: UniversalTransformBox?
     private var lassoOverlay: LassoCanvasOverlay?
+    private var canvasLongPress: UILongPressGestureRecognizer?
+    private var longPressInitialTouch: CGPoint?
+    private var longPressStartCenter: CGPoint?
+    private var isLongPressDragging: Bool = false
 
     // MARK: - Native text input
     private var nativeTextView: UITextView?
@@ -226,6 +230,9 @@ final class InfiniteNotebookViewController: UIViewController {
         paperBackgroundView.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         paperBackgroundView.isUserInteractionEnabled = false
         canvasView.insertSubview(paperBackgroundView, at: 0)
+
+        setupCanvasLongPress()
+        setupCanvasTapToDeselect()
     }
 
     private func setupToolPicker() {
@@ -1128,6 +1135,155 @@ extension InfiniteNotebookViewController {
             if self?.activeTransformBox === box {
                 self?.activeTransformBox = nil
             }
+        }
+    }
+
+    // MARK: - Long Press to Move, Rotate, Scale (Gedrückt halten & Verschieben)
+
+    func setupCanvasLongPress() {
+        let lp = UILongPressGestureRecognizer(target: self, action: #selector(handleCanvasLongPress(_:)))
+        lp.minimumPressDuration = 0.32
+        lp.allowableMovement = 20.0
+        lp.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.pencil.rawValue)
+        ]
+        lp.delegate = self
+        canvasView.addGestureRecognizer(lp)
+        canvasLongPress = lp
+    }
+
+    func setupCanvasTapToDeselect() {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleCanvasTapToDeselect(_:)))
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
+        canvasView.addGestureRecognizer(tap)
+    }
+
+    @objc private func handleCanvasTapToDeselect(_ gr: UITapGestureRecognizer) {
+        guard let box = activeTransformBox else { return }
+        let loc = gr.location(in: canvasView)
+        if !box.frame.insetBy(dx: -25, dy: -25).contains(loc) {
+            box.dismiss()
+        }
+    }
+
+    @objc private func handleCanvasLongPress(_ gr: UILongPressGestureRecognizer) {
+        let loc = gr.location(in: canvasView)
+
+        switch gr.state {
+        case .began:
+            if let box = activeTransformBox, box.frame.insetBy(dx: -15, dy: -15).contains(loc) {
+                return
+            }
+
+            // 1. Check if an inserted element (image, text block, etc.) is under the touch
+            if let elementId = findElement(near: loc) {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                presentTransformBox(forElementId: elementId)
+                longPressInitialTouch = loc
+                longPressStartCenter = activeTransformBox?.center
+                isLongPressDragging = true
+                return
+            }
+
+            // 2. Check if handwriting / drawing strokes are under the touch
+            if let cluster = findStrokeCluster(near: loc) {
+                removeAccidentalDotStroke(near: loc)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                let unionBounds = cluster.strokes.reduce(CGRect.null) { $0.union($1.renderBounds) }
+                presentTransformBox(for: cluster.strokes, indices: cluster.indices, bounds: unionBounds)
+                longPressInitialTouch = loc
+                longPressStartCenter = activeTransformBox?.center
+                isLongPressDragging = true
+                return
+            }
+
+        case .changed:
+            guard isLongPressDragging,
+                  let box = activeTransformBox,
+                  let initialTouch = longPressInitialTouch,
+                  let startCenter = longPressStartCenter else { return }
+
+            let deltaX = loc.x - initialTouch.x
+            let deltaY = loc.y - initialTouch.y
+            box.center = CGPoint(x: startCenter.x + deltaX, y: startCenter.y + deltaY)
+            box.currentCenter = box.center
+            box.triggerLiveUpdate()
+
+        case .ended, .cancelled:
+            if isLongPressDragging, let box = activeTransformBox {
+                box.triggerCommit()
+                isLongPressDragging = false
+                longPressInitialTouch = nil
+                longPressStartCenter = nil
+            }
+
+        default:
+            isLongPressDragging = false
+            longPressInitialTouch = nil
+            longPressStartCenter = nil
+        }
+    }
+
+    private func findElement(near point: CGPoint) -> UUID? {
+        for entry in document.insertedImages.reversed() {
+            let rect = CGRect(x: entry.startX, y: entry.startY, width: entry.width, height: entry.height)
+            if rect.insetBy(dx: -15, dy: -15).contains(point) {
+                return entry.id
+            }
+        }
+        return nil
+    }
+
+    private func findStrokeCluster(near point: CGPoint, maxDistance: CGFloat = 35.0) -> (indices: [Int], strokes: [PKStroke])? {
+        let allStrokes = canvasView.drawing.strokes
+        guard !allStrokes.isEmpty else { return nil }
+
+        var closestIdx: Int? = nil
+        var closestDist: CGFloat = maxDistance
+
+        for (idx, stroke) in allStrokes.enumerated() {
+            let b = stroke.renderBounds
+            if b.insetBy(dx: -closestDist, dy: -closestDist).contains(point) {
+                let dx = max(b.minX - point.x, 0, point.x - b.maxX)
+                let dy = max(b.minY - point.y, 0, point.y - b.maxY)
+                let dist = hypot(dx, dy)
+                if dist < closestDist {
+                    closestDist = dist
+                    closestIdx = idx
+                }
+            }
+        }
+
+        guard let startIdx = closestIdx else { return nil }
+
+        var selectedSet = Set<Int>([startIdx])
+        var queue = [startIdx]
+        let clusterRadius: CGFloat = 28.0
+
+        while !queue.isEmpty {
+            let curIdx = queue.removeFirst()
+            let curBounds = allStrokes[curIdx].renderBounds.insetBy(dx: -clusterRadius, dy: -clusterRadius)
+
+            for (idx, stroke) in allStrokes.enumerated() {
+                if !selectedSet.contains(idx) && curBounds.intersects(stroke.renderBounds) {
+                    selectedSet.insert(idx)
+                    queue.append(idx)
+                }
+            }
+        }
+
+        let sortedIndices = selectedSet.sorted()
+        let strokes = sortedIndices.map { allStrokes[$0] }
+        return (sortedIndices, strokes)
+    }
+
+    private func removeAccidentalDotStroke(near point: CGPoint) {
+        guard let lastStroke = canvasView.drawing.strokes.last else { return }
+        let b = lastStroke.renderBounds
+        if b.width < 10 && b.height < 10 && b.insetBy(dx: -16, dy: -16).contains(point) {
+            canvasView.drawing.strokes.removeLast()
         }
     }
 
@@ -2603,6 +2759,14 @@ extension InfiniteNotebookViewController {
                 self?.updateInsertedText(id: id, newText: oldText, fontSize: oldSize, fontDesign: oldDesign, colorHex: oldColor, registerUndoAction: false)
             }
         }
+    }
+}
+
+// MARK: - UIGestureRecognizerDelegate
+
+extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        return true
     }
 }
 
