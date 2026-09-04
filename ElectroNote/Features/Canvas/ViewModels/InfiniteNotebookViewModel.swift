@@ -22,7 +22,14 @@ enum CanvasToolType: String, CaseIterable, Identifiable {
 }
 
 func makePKTool(tool: CanvasToolType, color: Color, width: CGFloat, eraserType: PKEraserTool.EraserType, darkDrawingMode: Bool = false) -> PKTool {
-    let uiColor: UIColor = (color == .black && darkDrawingMode) ? .white : UIColor(color)
+    let uiColor: UIColor
+    if color == .black {
+        uiColor = .black
+    } else if color == .white {
+        uiColor = .white
+    } else {
+        uiColor = UIColor(color)
+    }
     switch tool {
     case .pen:
         return PKInkingTool(.pen, color: uiColor, width: width)

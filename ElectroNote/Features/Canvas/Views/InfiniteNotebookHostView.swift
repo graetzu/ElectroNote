@@ -291,6 +291,7 @@ struct PenToolbarView: View {
 
     private let quickColors: [Color] = [
         .black,
+        .white,
         .blue,
         .red,
         .green,
@@ -486,14 +487,13 @@ struct PenToolbarView: View {
                     // Quick Color palette
                     HStack(spacing: 5) {
                         ForEach(quickColors, id: \.self) { color in
-                            let displayColor = (color == .black && darkDrawingMode) ? Color.white : color
                             Button {
                                 selectedColor = color
                                 notifyToolChange()
                             } label: {
                                 ZStack {
                                     Circle()
-                                        .fill(displayColor)
+                                        .fill(color)
                                         .frame(width: 20, height: 20)
                                         .overlay(
                                             Circle()
@@ -503,7 +503,7 @@ struct PenToolbarView: View {
                                     if selectedColor == color {
                                         Image(systemName: "checkmark")
                                             .font(.system(size: 9, weight: .bold))
-                                            .foregroundColor(displayColor == .white || displayColor == .yellow ? .black : .white)
+                                            .foregroundColor(color == .white || color == .yellow ? .black : .white)
                                     }
                                 }
                                 .frame(width: 24, height: 24)

@@ -169,9 +169,9 @@ struct WhiteboardView: View {
     let onInsert: (UIImage) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    @State private var activeTool: CanvasToolType = .marker
+    @State private var activeTool: CanvasToolType = .pen
     @State private var selectedColor: Color = .black
-    @State private var selectedWidth: CGFloat = 6.0
+    @State private var selectedWidth: CGFloat = 3.0
     @State private var eraserType: PKEraserTool.EraserType = .vector
     @State private var rulerActive: Bool = false
     @State private var background: BackgroundStyle = .blank
@@ -181,15 +181,7 @@ struct WhiteboardView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .top) {
-                WhiteboardRepresentable(
-                    vcRef: $vc,
-                    background: background,
-                    darkDrawingMode: darkDrawingMode,
-                    rulerActive: rulerActive
-                )
-                .ignoresSafeArea()
-
+            VStack(spacing: 0) {
                 // Dedicated Pen & Tool top bar
                 PenToolbarView(
                     activeTool: $activeTool,
@@ -202,7 +194,17 @@ struct WhiteboardView: View {
                 ) { newTool in
                     vc?.canvasView.tool = newTool
                 }
-                .padding(.top, 8)
+                .frame(maxWidth: .infinity)
+                .background(Color(uiColor: .secondarySystemGroupedBackground))
+
+                Divider()
+
+                WhiteboardRepresentable(
+                    vcRef: $vc,
+                    background: background,
+                    darkDrawingMode: darkDrawingMode,
+                    rulerActive: rulerActive
+                )
             }
             .navigationTitle("Whiteboard")
             .navigationBarTitleDisplayMode(.inline)
