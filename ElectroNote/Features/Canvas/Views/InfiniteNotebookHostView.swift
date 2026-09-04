@@ -18,13 +18,16 @@ struct InfiniteNotebookHostView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            InfiniteNotebookRepresentable(store: store, vm: vm)
-                .ignoresSafeArea()
-
-            // Second Top Bar: Pen, Marker, Pencil, Eraser, Lasso, Colors & Widths
+        VStack(spacing: 0) {
+            // Dedicated Pen, Tool, Shape, OCR & Math Top Bar
             PenToolbarView(vm: vm)
-                .padding(.top, 8)
+                .frame(maxWidth: .infinity)
+                .background(Color(uiColor: .secondarySystemGroupedBackground))
+
+            Divider()
+
+            InfiniteNotebookRepresentable(store: store, vm: vm)
+                .ignoresSafeArea(edges: .bottom)
         }
         .navigationTitle(item.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -117,7 +120,7 @@ struct InfiniteNotebookHostView: View {
                 .accessibilityLabel("Wiederholen")
         }
 
-        // Right: always-visible core controls & direct feature buttons
+        // Right: always-visible core controls
         ToolbarItemGroup(placement: .navigationBarTrailing) {
 
             // Save status indicator with clear description
@@ -126,46 +129,6 @@ struct InfiniteNotebookHostView: View {
                 .foregroundStyle(vm.saveState == .unsaved ? .orange : .secondary)
                 .labelStyle(.iconOnly)
                 .help("Automatischer Speicherstatus")
-
-            // Direktauswahl 1: Formen (Automatische Formerkennung / Shape Snap)
-            Toggle(isOn: $vm.shapeSnapEnabled) {
-                HStack(spacing: 4) {
-                    Image(systemName: vm.shapeSnapEnabled ? "square.and.circle.fill" : "square.and.circle")
-                    Text("Formen")
-                        .font(.system(size: 13, weight: .medium))
-                }
-            }
-            .toggleStyle(.button)
-            .tint(.orange)
-            .accessibilityLabel("Formen-Korrektur")
-
-            // Direktauswahl 2: Handschrift (Handschrift in Text umwandeln)
-            Button {
-                vm.triggerHandwritingRecognition = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "text.viewfinder")
-                    Text("Handschrift")
-                        .font(.system(size: 13, weight: .medium))
-                }
-            }
-            .buttonStyle(.bordered)
-            .tint(.blue)
-            .accessibilityLabel("Handschrift erkennen")
-
-            // Direktauswahl 3: Mathe (Mathe-Erkennung & Formeln lösen)
-            Button {
-                vm.triggerMathRecognition = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "function")
-                    Text("Mathe")
-                        .font(.system(size: 13, weight: .medium))
-                }
-            }
-            .buttonStyle(.bordered)
-            .tint(.purple)
-            .accessibilityLabel("Mathe-Formel berechnen")
 
             // Background template + line spacing
             Menu {
@@ -321,6 +284,7 @@ struct PenToolbarView: View {
     @Binding var selectedWidth: CGFloat
     @Binding var eraserType: PKEraserTool.EraserType
     @Binding var rulerActive: Bool
+    @Binding var shapeSnapEnabled: Bool
     var darkDrawingMode: Bool = false
     var showRuler: Bool = true
     var onToolChanged: ((PKTool) -> Void)? = nil
@@ -347,6 +311,7 @@ struct PenToolbarView: View {
          selectedWidth: Binding<CGFloat>,
          eraserType: Binding<PKEraserTool.EraserType>,
          rulerActive: Binding<Bool> = .constant(false),
+         shapeSnapEnabled: Binding<Bool> = .constant(false),
          darkDrawingMode: Bool = false,
          showRuler: Bool = true,
          onToolChanged: ((PKTool) -> Void)? = nil) {
@@ -355,6 +320,7 @@ struct PenToolbarView: View {
         self._selectedWidth = selectedWidth
         self._eraserType = eraserType
         self._rulerActive = rulerActive
+        self._shapeSnapEnabled = shapeSnapEnabled
         self.darkDrawingMode = darkDrawingMode
         self.showRuler = showRuler
         self.onToolChanged = onToolChanged
@@ -370,6 +336,7 @@ struct PenToolbarView: View {
         self._selectedWidth = Binding(get: { vm.selectedWidth }, set: { vm.selectedWidth = $0 })
         self._eraserType = Binding(get: { vm.eraserType }, set: { vm.eraserType = $0 })
         self._rulerActive = Binding(get: { vm.rulerActive }, set: { vm.rulerActive = $0 })
+        self._shapeSnapEnabled = Binding(get: { vm.shapeSnapEnabled }, set: { vm.shapeSnapEnabled = $0 })
         self.darkDrawingMode = vm.darkDrawingMode
         self.showRuler = true
         self.onToolChanged = nil
@@ -394,14 +361,14 @@ struct PenToolbarView: View {
                         VStack(spacing: 2) {
                             Image(systemName: tool.iconName)
                                 .font(.system(size: 16, weight: .semibold))
-                                .frame(width: 36, height: 32)
+                                .frame(width: 38, height: 32)
                                 .background(
                                     activeTool == tool ?
-                                    Color.accentColor.opacity(0.18) : Color.clear
+                                    Color.accentColor : Color(uiColor: .tertiarySystemFill)
                                 )
                                 .foregroundColor(
                                     activeTool == tool ?
-                                    Color.accentColor : Color.primary.opacity(0.75)
+                                    Color.white : Color.primary
                                 )
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
 
@@ -416,11 +383,66 @@ struct PenToolbarView: View {
                 }
             }
 
-            if activeTool == .lasso {
-                Divider()
-                    .frame(height: 22)
+            Divider()
+                .frame(height: 24)
 
-                HStack(spacing: 6) {
+            // Direct Smart Features (Formen, Handschrift & Mathe)
+            HStack(spacing: 6) {
+                // Formen Toggle
+                Button {
+                    shapeSnapEnabled.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: shapeSnapEnabled ? "square.and.circle.fill" : "square.and.circle")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Formen")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(shapeSnapEnabled ? Color.orange : Color(uiColor: .tertiarySystemFill))
+                    .foregroundColor(shapeSnapEnabled ? Color.white : Color.primary)
+                    .clipShape(Capsule())
+                }
+                .accessibilityLabel("Formen-Korrektur")
+
+                // Handschrift (OCR) Button
+                Button {
+                    onTextRecognition?()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "text.viewfinder")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Handschrift")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.blue)
+                    .foregroundColor(Color.white)
+                    .clipShape(Capsule())
+                }
+                .accessibilityLabel("Handschrift erkennen")
+
+                // Mathe Rechner Button
+                Button {
+                    onMathRecognition?()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "function")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Mathe")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.purple)
+                    .foregroundColor(Color.white)
+                    .clipShape(Capsule())
+                }
+                .accessibilityLabel("Mathe berechnen")
+
+                if activeTool == .lasso {
                     Button {
                         onPaste?()
                     } label: {
@@ -428,52 +450,21 @@ struct PenToolbarView: View {
                             Image(systemName: "doc.on.clipboard")
                                 .font(.system(size: 13, weight: .semibold))
                             Text("Einfügen")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.system(size: 12, weight: .bold))
                         }
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.green.opacity(0.15))
-                        .foregroundColor(.green)
+                        .padding(.vertical, 6)
+                        .background(Color.green)
+                        .foregroundColor(Color.white)
                         .clipShape(Capsule())
                     }
-
-                    Button {
-                        onTextRecognition?()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "text.viewfinder")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text("Text")
-                                .font(.system(size: 12, weight: .semibold))
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.blue.opacity(0.15))
-                        .foregroundColor(.blue)
-                        .clipShape(Capsule())
-                    }
-
-                    Button {
-                        onMathRecognition?()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "function")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text("Mathe")
-                                .font(.system(size: 12, weight: .semibold))
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.purple.opacity(0.15))
-                        .foregroundColor(.purple)
-                        .clipShape(Capsule())
-                    }
+                    .accessibilityLabel("Einfügen")
                 }
             }
 
             if activeTool != .eraser && activeTool != .lasso {
                 Divider()
-                    .frame(height: 22)
+                    .frame(height: 24)
 
                 // Quick Color palette
                 HStack(spacing: 6) {
@@ -489,7 +480,7 @@ struct PenToolbarView: View {
                                     .frame(width: 22, height: 22)
                                     .overlay(
                                         Circle()
-                                            .stroke(Color.primary.opacity(0.25), lineWidth: 1)
+                                            .stroke(Color.primary.opacity(0.35), lineWidth: 1)
                                     )
 
                                 if selectedColor == color {
@@ -509,7 +500,7 @@ struct PenToolbarView: View {
                 }
 
                 Divider()
-                    .frame(height: 22)
+                    .frame(height: 24)
 
                 // Stroke width buttons
                 HStack(spacing: 8) {
@@ -519,12 +510,12 @@ struct PenToolbarView: View {
                             notifyToolChange()
                         } label: {
                             Circle()
-                                .fill(selectedWidth == item.width ? Color.accentColor : Color.primary.opacity(0.4))
+                                .fill(selectedWidth == item.width ? Color.accentColor : Color.primary.opacity(0.45))
                                 .frame(width: item.dotSize, height: item.dotSize)
                                 .frame(width: 26, height: 26)
                                 .background(
                                     selectedWidth == item.width ?
-                                    Color.accentColor.opacity(0.15) : Color.clear
+                                    Color.accentColor.opacity(0.2) : Color.clear
                                 )
                                 .clipShape(Circle())
                         }
@@ -535,7 +526,7 @@ struct PenToolbarView: View {
 
             if showRuler {
                 Divider()
-                    .frame(height: 22)
+                    .frame(height: 24)
 
                 // Lineal (Ruler) Toggle
                 Button {
@@ -544,24 +535,15 @@ struct PenToolbarView: View {
                     Image(systemName: "ruler")
                         .font(.system(size: 16, weight: .semibold))
                         .frame(width: 32, height: 32)
-                        .background(rulerActive ? Color.brown.opacity(0.2) : Color.clear)
-                        .foregroundColor(rulerActive ? Color.brown : Color.primary.opacity(0.7))
+                        .background(rulerActive ? Color.brown : Color(uiColor: .tertiarySystemFill))
+                        .foregroundColor(rulerActive ? Color.white : Color.primary)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .accessibilityLabel("Lineal")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .background(
-            .ultraThinMaterial,
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
-        )
-        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 3)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     private func notifyToolChange() {
