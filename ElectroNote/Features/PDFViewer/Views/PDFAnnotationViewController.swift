@@ -2,6 +2,41 @@ import UIKit
 import PDFKit
 import PencilKit
 
+// MARK: - PDFOverlayCanvasView
+// Custom PKCanvasView that transparently yields finger touches to the underlying PDFView
+// so that native 1-finger scrolling and 2-finger pinch-to-zoom work smoothly, while
+// Apple Pencil draws with zero latency.
+final class PDFOverlayCanvasView: PKCanvasView {
+    var pencilOnly: Bool = true
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard bounds.contains(point) else { return nil }
+
+        if let touches = event?.allTouches, !touches.isEmpty {
+            let hasPencil = touches.contains { $0.type == .pencil }
+            if hasPencil {
+                return super.hitTest(point, with: event)
+            }
+            // All touches are finger touches:
+            if pencilOnly {
+                // Pass ALL finger touches (1-finger pan, 2-finger pinch-to-zoom) through to PDFView
+                return nil
+            } else {
+                // In finger-drawing mode: 2 or more fingers pass through to PDFView for zoom & scroll
+                if touches.count >= 2 {
+                    return nil
+                }
+                return super.hitTest(point, with: event)
+            }
+        }
+
+        if pencilOnly {
+            return nil
+        }
+        return super.hitTest(point, with: event)
+    }
+}
+
 // Manages PDFView + PKCanvasView overlay using PDFPageOverlayViewProvider.
 // Native pinch-to-zoom and panning are fully enabled; annotations are
 // synchronized per page and stored as sidecar .pkdrawing files.
@@ -21,6 +56,9 @@ final class PDFAnnotationViewController: UIViewController {
         didSet {
             for canvas in canvasMap.values {
                 canvas.drawingPolicy = pencilOnly ? .pencilOnly : .anyInput
+                if let overlay = canvas as? PDFOverlayCanvasView {
+                    overlay.pencilOnly = pencilOnly
+                }
             }
         }
     }
@@ -50,6 +88,10 @@ final class PDFAnnotationViewController: UIViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(handlePageChange),
             name: .PDFViewPageChanged, object: pdfView)
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleScaleChange),
+            name: .PDFViewScaleChanged, object: pdfView)
     }
 
     func navigateTo(pageIndex: Int) {
@@ -107,7 +149,7 @@ final class PDFAnnotationViewController: UIViewController {
         pdfView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     }
 
-    // MARK: - Page changes
+    // MARK: - Page & Scale changes
 
     @objc private func handlePageChange() {
         guard let page = pdfView.currentPage,
@@ -123,6 +165,13 @@ final class PDFAnnotationViewController: UIViewController {
         }
         onPageChanged?(idx)
     }
+
+    @objc private func handleScaleChange() {
+        let scale = pdfView.scaleFactor
+        for canvas in canvasMap.values {
+            canvas.contentScaleFactor = UIScreen.main.scale * max(scale, 1.0)
+        }
+    }
 }
 
 // MARK: - PDFPageOverlayViewProvider
@@ -132,11 +181,16 @@ extension PDFAnnotationViewController: PDFPageOverlayViewProvider {
         if let existing = canvasMap[page] {
             return existing
         }
-        let canvas = PKCanvasView()
+        let canvas = PDFOverlayCanvasView()
+        canvas.pencilOnly      = pencilOnly
+        canvas.isScrollEnabled = false
+        canvas.pinchGestureRecognizer?.isEnabled = false
+        canvas.panGestureRecognizer.isEnabled    = false
         canvas.backgroundColor = .clear
         canvas.isOpaque        = false
         canvas.drawingPolicy   = pencilOnly ? .pencilOnly : .anyInput
         canvas.delegate        = self
+        canvas.contentScaleFactor = UIScreen.main.scale * max(view.scaleFactor, 1.0)
 
         if let doc = view.document {
             let idx = doc.index(for: page)
@@ -151,6 +205,7 @@ extension PDFAnnotationViewController: PDFPageOverlayViewProvider {
     func pdfView(_ view: PDFView, willDisplayOverlayView overlayView: UIView, for page: PDFPage) {
         guard let canvas = overlayView as? PKCanvasView else { return }
         activeCanvasView = canvas
+        canvas.contentScaleFactor = UIScreen.main.scale * max(pdfView.scaleFactor, 1.0)
         toolPicker.setVisible(true, forFirstResponder: canvas)
         toolPicker.addObserver(canvas)
         canvas.becomeFirstResponder()

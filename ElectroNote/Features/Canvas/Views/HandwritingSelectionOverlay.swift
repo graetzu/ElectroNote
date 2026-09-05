@@ -580,8 +580,9 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
             NSNumber(value: UITouch.TouchType.pencil.rawValue)
         ]
 
-        // 1. Move Pan (center)
+        // 1. Move Pan (center) - single touch only so 2 fingers pinch & rotate
         let movePan = UIPanGestureRecognizer(target: self, action: #selector(handleMovePan(_:)))
+        movePan.maximumNumberOfTouches = 1
         movePan.allowedTouchTypes = touchTypes
         movePan.delegate = self
         addGestureRecognizer(movePan)
