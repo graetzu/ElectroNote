@@ -1321,11 +1321,10 @@ extension InfiniteNotebookViewController {
 
     func setupCanvasLongPress() {
         let lp = UILongPressGestureRecognizer(target: self, action: #selector(handleCanvasLongPress(_:)))
-        lp.minimumPressDuration = 0.28
-        lp.allowableMovement = 30.0
+        lp.minimumPressDuration = 0.55
+        lp.allowableMovement = 15.0
         lp.allowedTouchTypes = [
-            NSNumber(value: UITouch.TouchType.direct.rawValue),
-            NSNumber(value: UITouch.TouchType.pencil.rawValue)
+            NSNumber(value: UITouch.TouchType.direct.rawValue)
         ]
         lp.cancelsTouchesInView = true
         lp.delegate = self
@@ -2993,14 +2992,7 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
             return true
         }
 
-        // Allow canvasLongPress to recognize alongside PKCanvasView's drawing gesture
-        // so that holding the Apple Pencil for 0.28s is not cancelled by ink drawing
-        if (gestureRecognizer === canvasLongPress && otherGestureRecognizer === canvasView.drawingGestureRecognizer) ||
-           (otherGestureRecognizer === canvasLongPress && gestureRecognizer === canvasView.drawingGestureRecognizer) {
-            return true
-        }
-
-        // Do not recognize long-press simultaneously with pinch, pan or any other gesture
+        // Do not recognize long-press simultaneously with pinch, pan, drawing or any other gesture
         if gestureRecognizer === canvasLongPress || otherGestureRecognizer === canvasLongPress {
             return false
         }
@@ -3036,20 +3028,33 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
     }
 }
 
-// MARK: - UIPencilInteractionDelegate (Apple Pencil Double-Tap to Toggle Writing / Scrolling)
+// MARK: - UIPencilInteractionDelegate (Apple Pencil Double-Tap Support)
 
 extension InfiniteNotebookViewController: UIPencilInteractionDelegate {
     func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
-        if currentCanvasToolType == .pan {
-            let target = previousDrawingTool == .pan ? .pen : previousDrawingTool
+        // Respect system setting: Switch between Current Tool and Eraser (or previous tool).
+        // Never switch to .pan (scrolling), which must only be toggled explicitly via the top bar button.
+        switch UIPencilInteraction.preferredTapAction {
+        case .switchEraser:
+            if currentCanvasToolType == .eraser {
+                let target = (previousDrawingTool == .eraser || previousDrawingTool == .pan) ? .pen : previousDrawingTool
+                setCanvasToolType(target)
+                onToolChanged?(target)
+            } else {
+                previousDrawingTool = currentCanvasToolType
+                setCanvasToolType(.eraser)
+                onToolChanged?(.eraser)
+            }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        case .switchPrevious:
+            let target = (previousDrawingTool == .pan) ? .pen : previousDrawingTool
+            previousDrawingTool = currentCanvasToolType
             setCanvasToolType(target)
             onToolChanged?(target)
-        } else {
-            previousDrawingTool = currentCanvasToolType
-            setCanvasToolType(.pan)
-            onToolChanged?(.pan)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        default:
+            break
         }
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 }
 

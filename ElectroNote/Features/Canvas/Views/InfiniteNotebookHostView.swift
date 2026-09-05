@@ -376,12 +376,10 @@ struct PenToolbarView: View {
             HStack(spacing: 12) {
                 // Tool selector
                 HStack(spacing: 3) {
-                    ForEach(CanvasToolType.allCases) { tool in
+                    ForEach(CanvasToolType.allCases.filter { $0 != .pan }) { tool in
                         Button {
                             if activeTool == tool && tool == .eraser {
                                 eraserType = eraserType == .vector ? .bitmap : .vector
-                            } else if activeTool == tool && tool == .pan {
-                                activeTool = .pen
                             } else {
                                 activeTool = tool
                             }
