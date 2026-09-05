@@ -7,19 +7,14 @@ on:
 
 jobs:
   build-and-upload:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Select Xcode 16
+      - name: Select Xcode
         run: |
-          ls -d /Applications/Xcode*
-          XCODE_16=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | tail -n 1)
-          if [ -n "$XCODE_16" ]; then
-            echo "Selecting $XCODE_16"
-            sudo xcode-select -s "$XCODE_16"
-          fi
+          ls -d /Applications/Xcode* 2>/dev/null || true
           xcodebuild -version
 
       - name: Import distribution certificate
@@ -166,5 +161,4 @@ jobs:
             --type ios \
             --file "$IPA_FILE" \
             --apiKey "$ASC_KEY_ID" \
-            --apiIssuer "$ASC_ISSUER_ID" \
-            --private-key ~/.private_keys/AuthKey_${ASC_KEY_ID}.p8
+            --apiIssuer "$ASC_ISSUER_ID"
