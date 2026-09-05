@@ -4,6 +4,7 @@ import PDFKit
 final class PDFViewModel: ObservableObject {
     @Published var currentPageIndex: Int = 0
     @Published var hasUnsavedAnnotations: Bool = false
+    @Published var pencilOnly: Bool = true
 
     let item: DocumentItem
     @Published var document: PDFDocument?

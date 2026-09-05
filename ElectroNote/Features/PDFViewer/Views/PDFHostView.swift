@@ -60,7 +60,13 @@ struct PDFHostView: View {
             .disabled(!viewModel.canGoForward)
         }
 
-        ToolbarItem(placement: .navigationBarTrailing) {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            Toggle(isOn: $viewModel.pencilOnly) {
+                Image(systemName: viewModel.pencilOnly ? "pencil.and.scribble" : "hand.draw")
+            }
+            .accessibilityLabel(viewModel.pencilOnly ? "Nur Pencil (Zoom mit Fingern)" : "Finger & Pencil")
+            .help(viewModel.pencilOnly ? "Nur Pencil (Zoom mit Fingern)" : "Finger & Pencil")
+
             Button { showClipArtPicker = true } label: {
                 Image(systemName: "square.on.square.badge.person.crop")
             }

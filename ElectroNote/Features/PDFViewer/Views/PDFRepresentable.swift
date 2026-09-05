@@ -23,11 +23,15 @@ struct PDFRepresentable: UIViewControllerRepresentable {
             }
         }
 
+        vc.pencilOnly = viewModel.pencilOnly
         context.coordinator.lastKnownPageIndex = viewModel.currentPageIndex
         return vc
     }
 
     func updateUIViewController(_ vc: PDFAnnotationViewController, context: Context) {
+        if vc.pencilOnly != viewModel.pencilOnly {
+            vc.pencilOnly = viewModel.pencilOnly
+        }
         // Programmatic navigation (toolbar prev/next)
         let desired = viewModel.currentPageIndex
         guard context.coordinator.lastKnownPageIndex != desired else { return }

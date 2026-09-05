@@ -48,8 +48,9 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
-          python3 -m pip install --upgrade pyjwt cryptography requests
-          python3 scripts/prepare_appstore_connect.py
+          python3 -m venv /tmp/asc_venv
+          /tmp/asc_venv/bin/pip install --upgrade pyjwt cryptography requests
+          /tmp/asc_venv/bin/python3 scripts/prepare_appstore_connect.py
 
       - name: Build archive
         env:

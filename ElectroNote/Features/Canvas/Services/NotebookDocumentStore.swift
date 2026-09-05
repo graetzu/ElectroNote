@@ -119,7 +119,14 @@ final class NotebookDocumentStore {
             let scale = docWidth / max(b.width, 1)
             let h = b.height * scale
             heights.append(h)
-            y += h
+
+            let targetSize = CGSize(width: max(docWidth, 100) * 2, height: max(h, 100) * 2)
+            let thumb = page.thumbnail(of: targetSize, for: .cropBox)
+            if let imgFilename = try? saveImage(thumb) {
+                let imgEntry = InsertedImage(id: UUID(), filename: imgFilename, startX: 20, startY: y, width: docWidth, height: h)
+                doc.insertedImages.append(imgEntry)
+            }
+            y += h + 24
         }
 
         let needed = y + NotebookDocument.initialHeight * 0.3
