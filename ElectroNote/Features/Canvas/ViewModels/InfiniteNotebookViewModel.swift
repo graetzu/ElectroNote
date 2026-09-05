@@ -52,8 +52,14 @@ func makePKTool(tool: CanvasToolType, color: Color, width: CGFloat, eraserType: 
 final class InfiniteNotebookViewModel: ObservableObject {
 
     // MARK: - Pen Toolbar State
+    @Published var lastDrawingTool: CanvasToolType = .pen
     @Published var activeTool: CanvasToolType = .pen {
-        didSet { applyCurrentTool() }
+        didSet {
+            if activeTool != .pan && activeTool != .lasso {
+                lastDrawingTool = activeTool
+            }
+            applyCurrentTool()
+        }
     }
     @Published var selectedColor: Color = .black {
         didSet { applyCurrentTool() }
@@ -77,7 +83,22 @@ final class InfiniteNotebookViewModel: ObservableObject {
     @Published var shapeSnapEnabled:  Bool            = false
     @Published var rulerActive:       Bool            = false
 
+    func togglePanMode() {
+        if activeTool == .pan {
+            activeTool = lastDrawingTool
+        } else {
+            if activeTool != .lasso {
+                lastDrawingTool = activeTool
+            }
+            activeTool = .pan
+        }
+    }
+
     func applyCurrentTool() {
+        if activeTool == .pan || activeTool == .lasso {
+            pendingPKTool = nil
+            return
+        }
         pendingPKTool = makePKTool(tool: activeTool, color: selectedColor, width: selectedWidth, eraserType: eraserType, darkDrawingMode: darkDrawingMode)
     }
 

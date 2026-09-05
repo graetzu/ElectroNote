@@ -69,6 +69,48 @@ final class InfiniteNotebookViewController: UIViewController {
 
     // MARK: - Callbacks
     var onDrawingChanged: (() -> Void)?
+    var onToolChanged: ((CanvasToolType) -> Void)?
+    var previousDrawingTool: CanvasToolType = .pen
+
+    // Dedicated pan gesture for smooth, high-precision Apple Pencil canvas scrolling
+    private lazy var pencilScrollPanGesture: UIPanGestureRecognizer = {
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePencilScrollPan(_:)))
+        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+        pan.maximumNumberOfTouches = 1
+        pan.cancelsTouchesInView = true
+        pan.delegate = self
+        return pan
+    }()
+
+    @objc private func handlePencilScrollPan(_ gr: UIPanGestureRecognizer) {
+        let translation = gr.translation(in: canvasView)
+        gr.setTranslation(.zero, in: canvasView)
+
+        var offset = canvasView.contentOffset
+        offset.x -= translation.x
+        offset.y -= translation.y
+        let maxX = max(0, canvasView.contentSize.width - canvasView.bounds.width)
+        let maxY = max(0, canvasView.contentSize.height - canvasView.bounds.height)
+        offset.x = min(max(0, offset.x), maxX)
+        offset.y = min(max(0, offset.y), maxY)
+        canvasView.setContentOffset(offset, animated: false)
+
+        if gr.state == .ended {
+            let velocity = gr.velocity(in: canvasView)
+            let magnitude = hypot(velocity.x, velocity.y)
+            if magnitude > 350 {
+                let factor: CGFloat = 0.22
+                var target = canvasView.contentOffset
+                target.x -= velocity.x * factor
+                target.y -= velocity.y * factor
+                target.x = min(max(0, target.x), maxX)
+                target.y = min(max(0, target.y), maxY)
+                UIView.animate(withDuration: 0.35, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+                    self.canvasView.setContentOffset(target, animated: false)
+                }
+            }
+        }
+    }
 
     // MARK: - Configurable
 
@@ -79,6 +121,7 @@ final class InfiniteNotebookViewController: UIViewController {
     private func applyDrawingPolicy() {
         if currentCanvasToolType == .pan {
             canvasView.drawingGestureRecognizer.isEnabled = false
+            pencilScrollPanGesture.isEnabled = true
             canvasView.panGestureRecognizer.allowedTouchTypes = [
                 NSNumber(value: UITouch.TouchType.direct.rawValue),
                 NSNumber(value: UITouch.TouchType.pencil.rawValue)
@@ -87,6 +130,7 @@ final class InfiniteNotebookViewController: UIViewController {
             return
         }
 
+        pencilScrollPanGesture.isEnabled = false
         canvasView.drawingPolicy = pencilOnly ? .pencilOnly : .anyInput
         // In pencilOnly mode (Standard):
         // - 1 finger moves / scrolls smoothly across the canvas
@@ -254,6 +298,13 @@ final class InfiniteNotebookViewController: UIViewController {
         paperOverlayView.bounds = CGRect(origin: .zero, size: canvasView.contentSize)
         paperOverlayView.isUserInteractionEnabled = true
         canvasView.addSubview(paperOverlayView)
+
+        pencilScrollPanGesture.isEnabled = (currentCanvasToolType == .pan)
+        canvasView.addGestureRecognizer(pencilScrollPanGesture)
+
+        let pencilInteraction = UIPencilInteraction()
+        pencilInteraction.delegate = self
+        view.addInteraction(pencilInteraction)
 
         setupCanvasLongPress()
         setupCanvasTapToDeselect()
@@ -958,6 +1009,9 @@ extension InfiniteNotebookViewController {
     // MARK: - Universal Transform Box & Lasso Selection Tools (Markieren, Verschieben, Drehen, Vergrößern)
 
     func setCanvasToolType(_ tool: CanvasToolType) {
+        if tool != .pan && tool != .lasso {
+            previousDrawingTool = tool
+        }
         currentCanvasToolType = tool
         if tool == .lasso {
             enableLassoMode()
@@ -968,12 +1022,14 @@ extension InfiniteNotebookViewController {
         if tool == .pan {
             // Verschieben (Pan) mode: disable drawing, enable 1-touch Apple Pencil & finger canvas navigation
             canvasView.drawingGestureRecognizer.isEnabled = false
+            pencilScrollPanGesture.isEnabled = true
             canvasView.panGestureRecognizer.allowedTouchTypes = [
                 NSNumber(value: UITouch.TouchType.direct.rawValue),
                 NSNumber(value: UITouch.TouchType.pencil.rawValue)
             ]
             canvasView.panGestureRecognizer.minimumNumberOfTouches = 1
         } else {
+            pencilScrollPanGesture.isEnabled = false
             if tool != .lasso {
                 canvasView.drawingGestureRecognizer.isEnabled = true
             }
@@ -2931,8 +2987,14 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
             }
         }
 
+        // Allow pinch gesture to recognize alongside pencil scroll pan for seamless 2-finger zoom while panning
+        if (gestureRecognizer === pencilScrollPanGesture && otherGestureRecognizer is UIPinchGestureRecognizer) ||
+           (otherGestureRecognizer === pencilScrollPanGesture && gestureRecognizer is UIPinchGestureRecognizer) {
+            return true
+        }
+
         // Allow canvasLongPress to recognize alongside PKCanvasView's drawing gesture
-        // so that holding the Apple Pencil for 0.32s is not cancelled by ink drawing
+        // so that holding the Apple Pencil for 0.28s is not cancelled by ink drawing
         if (gestureRecognizer === canvasLongPress && otherGestureRecognizer === canvasView.drawingGestureRecognizer) ||
            (otherGestureRecognizer === canvasLongPress && gestureRecognizer === canvasView.drawingGestureRecognizer) {
             return true
@@ -2947,6 +3009,17 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
     }
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === pencilScrollPanGesture {
+            guard currentCanvasToolType == .pan else { return false }
+            if let box = activeTransformBox {
+                let loc = gestureRecognizer.location(in: box)
+                if box.bounds.insetBy(dx: -15, dy: -15).contains(loc) {
+                    return false
+                }
+            }
+            return true
+        }
+
         if gestureRecognizer === canvasLongPress {
             // Never trigger canvas long press during 2-finger pinch or scroll gestures
             if gestureRecognizer.numberOfTouches > 1 {
@@ -2960,6 +3033,23 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
             }
         }
         return true
+    }
+}
+
+// MARK: - UIPencilInteractionDelegate (Apple Pencil Double-Tap to Toggle Writing / Scrolling)
+
+extension InfiniteNotebookViewController: UIPencilInteractionDelegate {
+    func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+        if currentCanvasToolType == .pan {
+            let target = previousDrawingTool == .pan ? .pen : previousDrawingTool
+            setCanvasToolType(target)
+            onToolChanged?(target)
+        } else {
+            previousDrawingTool = currentCanvasToolType
+            setCanvasToolType(.pan)
+            onToolChanged?(.pan)
+        }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 }
 

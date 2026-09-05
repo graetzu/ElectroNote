@@ -279,17 +279,21 @@ final class CornerHandleView: UIView {
         backgroundColor = .clear
         isUserInteractionEnabled = true
 
-        visualDot.frame = CGRect(x: 15, y: 15, width: 14, height: 14)
+        visualDot.frame = CGRect(x: 13, y: 13, width: 18, height: 18)
         visualDot.backgroundColor = .white
         visualDot.layer.borderColor = UIColor.systemBlue.cgColor
-        visualDot.layer.borderWidth = 2.5
-        visualDot.layer.cornerRadius = 7
+        visualDot.layer.borderWidth = 3.0
+        visualDot.layer.cornerRadius = 9
         visualDot.layer.shadowColor = UIColor.black.cgColor
-        visualDot.layer.shadowOpacity = 0.25
-        visualDot.layer.shadowRadius = 3
-        visualDot.layer.shadowOffset = CGSize(width: 0, height: 1.5)
+        visualDot.layer.shadowOpacity = 0.3
+        visualDot.layer.shadowRadius = 4
+        visualDot.layer.shadowOffset = CGSize(width: 0, height: 2)
         visualDot.isUserInteractionEnabled = false
         addSubview(visualDot)
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        return bounds.insetBy(dx: -16, dy: -16).contains(point)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -652,17 +656,18 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     // MARK: - Corner Scaling Handling (Vergrößern / Verkleinern)
 
     @objc private func handleCornerScalePan(_ gr: UIPanGestureRecognizer) {
+        guard let sv = superview else { return }
         switch gr.state {
         case .began:
-            initialCornerDistance = hypot(bounds.width * 0.5, bounds.height * 0.5)
+            let touchInParent = gr.location(in: sv)
+            initialCornerDistance = max(hypot(touchInParent.x - currentCenter.x, touchInParent.y - currentCenter.y), 15)
             initialScaleOnCornerPan = currentScale
             showBadge(text: "\(Int(round(currentScale * 100)))%")
         case .changed:
-            let touchInBox = gr.location(in: self)
-            let boxCenter = CGPoint(x: bounds.midX, y: bounds.midY)
-            let currentDist = hypot(touchInBox.x - boxCenter.x, touchInBox.y - boxCenter.y)
-            let multiplier = currentDist / max(initialCornerDistance, 10)
-            currentScale = max(0.15, min(6.0, initialScaleOnCornerPan * multiplier))
+            let touchInParent = gr.location(in: sv)
+            let currentDist = hypot(touchInParent.x - currentCenter.x, touchInParent.y - currentCenter.y)
+            let ratio = currentDist / initialCornerDistance
+            currentScale = max(0.15, min(6.0, initialScaleOnCornerPan * ratio))
 
             updateLayout()
             showBadge(text: "\(Int(round(currentScale * 100)))%")
@@ -851,11 +856,12 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
                 }
             }
         }
-        if rotationHandle.frame.insetBy(dx: -12, dy: -12).contains(point) {
+        if rotationHandle.frame.insetBy(dx: -14, dy: -14).contains(point) {
             return rotationHandle
         }
         for h in [topLeftHandle, topRightHandle, bottomLeftHandle, bottomRightHandle] {
-            if h.frame.insetBy(dx: -10, dy: -10).contains(point) {
+            let ptInH = convert(point, to: h)
+            if h.bounds.insetBy(dx: -16, dy: -16).contains(ptInH) {
                 return h
             }
         }

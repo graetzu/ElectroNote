@@ -154,13 +154,27 @@ struct InfiniteNotebookHostView: View {
             }
             .accessibilityLabel("Vorlage & Zeilenabstand")
 
-            // Pencil-only toggle
-            Toggle(isOn: $vm.pencilOnly) {
-                Image(systemName: vm.pencilOnly ? "pencil.and.scribble" : "hand.draw")
+            // Mode Switch: Schreiben (Stift schreibt, Finger scrollt) vs. Scrollen (Stift & Finger scrollen)
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    vm.togglePanMode()
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: vm.activeTool == .pan ? "hand.draw.fill" : "pencil.tip")
+                        .font(.system(size: 13, weight: .bold))
+                    Text(vm.activeTool == .pan ? "Scrollen" : "Schreiben")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(vm.activeTool == .pan ? Color.blue : Color(uiColor: .tertiarySystemFill))
+                .foregroundColor(vm.activeTool == .pan ? .white : .primary)
+                .clipShape(Capsule())
             }
-            .toggleStyle(.button)
-            .tint(.blue)
-            .accessibilityLabel(vm.pencilOnly ? "Nur Pencil" : "Finger & Pencil")
+            .buttonStyle(.plain)
+            .accessibilityLabel(vm.activeTool == .pan ? "Scroll-Modus aktiv: Stift & Finger scrollen" : "Schreib-Modus aktiv: Stift schreibt")
+            .help(vm.activeTool == .pan ? "Tippen zum Schreiben mit dem Stift" : "Tippen zum Scrollen/Bewegen mit dem Stift")
 
             // Keyboard text insertion
             Button { vm.triggerNativeTextInput = true } label: {
@@ -174,6 +188,14 @@ struct InfiniteNotebookHostView: View {
             // "Mehr" menu — consolidates less-used actions to keep toolbar compact in portrait
             Menu {
                 Section("Ansicht") {
+                    Toggle(isOn: $vm.pencilOnly) {
+                        Label(
+                            vm.pencilOnly ? "Nur Pencil schreibt (1 Finger scrollt)" : "Finger & Pencil zeichnen",
+                            systemImage: vm.pencilOnly ? "pencil.and.scribble" : "hand.draw"
+                        )
+                    }
+                    .tint(.blue)
+
                     Toggle(isOn: $vm.rulerActive) {
                         Label("Lineal", systemImage: "ruler")
                     }
@@ -358,6 +380,8 @@ struct PenToolbarView: View {
                         Button {
                             if activeTool == tool && tool == .eraser {
                                 eraserType = eraserType == .vector ? .bitmap : .vector
+                            } else if activeTool == tool && tool == .pan {
+                                activeTool = .pen
                             } else {
                                 activeTool = tool
                             }

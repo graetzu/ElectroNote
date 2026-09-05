@@ -15,6 +15,9 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
         vc.onDrawingChanged = { [weak vm] in
             Task { @MainActor in vm?.markUnsaved() }
         }
+        vc.onToolChanged = { [weak vm] newTool in
+            Task { @MainActor in vm?.activeTool = newTool }
+        }
         context.coordinator.vc = vc
         return vc
     }
@@ -48,11 +51,15 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
         }
         if let preset = vm.pendingInkPreset {
             vm.pendingInkPreset = nil
-            vc.canvasView.tool = preset.pkTool
+            if vm.activeTool != .pan && vm.activeTool != .lasso {
+                vc.canvasView.tool = preset.pkTool
+            }
         }
         if let tool = vm.pendingPKTool {
             vm.pendingPKTool = nil
-            vc.canvasView.tool = tool
+            if vm.activeTool != .pan && vm.activeTool != .lasso {
+                vc.canvasView.tool = tool
+            }
         }
         if let insertion = vm.pendingTextInsertion {
             vm.pendingTextInsertion = nil
