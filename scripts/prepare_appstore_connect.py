@@ -140,7 +140,7 @@ def main():
 
     # 4. Inspect Provisioning Profiles
     print("--> Inspecting Provisioning Profiles...")
-    prof_res = session.get(f"{BASE_URL}/profiles?filter[profileType]=IOS_APP_STORE&include=bundleId&limit=50")
+    prof_res = session.get(f"{BASE_URL}/profiles?filter[profileType]=IOS_APP_STORE&fields[profiles]=name,profileState,profileType,uuid,profileContent&include=bundleId&limit=50")
     profs = prof_res.json().get("data", []) if prof_res.status_code == 200 else []
     print(f"Found {len(profs)} iOS App Store provisioning profile(s):")
     matching_prof = None
@@ -192,8 +192,16 @@ def main():
     # 6. Install downloaded profile if available
     if matching_prof:
         p_uuid = matching_prof["attributes"]["uuid"]
-        p_content = matching_prof["attributes"]["profileContent"]
-        install_profile(p_uuid, base64.b64decode(p_content))
+        p_content = matching_prof["attributes"].get("profileContent")
+        if not p_content:
+            print(f"Fetching full profile resource for {p_uuid}...")
+            single_res = session.get(f"{BASE_URL}/profiles/{matching_prof['id']}")
+            if single_res.status_code == 200:
+                p_content = single_res.json().get("data", {}).get("attributes", {}).get("profileContent")
+        if p_content:
+            install_profile(p_uuid, base64.b64decode(p_content))
+        else:
+            print("Warning: Could not obtain profileContent for profile")
 
     print("--> App Store Connect inspection complete.")
 
