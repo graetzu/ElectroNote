@@ -610,7 +610,13 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        return true
+        // Only allow simultaneous recognition between pinch and rotate on this transform box
+        let isOurPinch = gestureRecognizer is UIPinchGestureRecognizer && gestureRecognizer.view === self
+        let isOurRotate = gestureRecognizer is UIRotationGestureRecognizer && gestureRecognizer.view === self
+        let otherIsOurPinch = otherGestureRecognizer is UIPinchGestureRecognizer && otherGestureRecognizer.view === self
+        let otherIsOurRotate = otherGestureRecognizer is UIRotationGestureRecognizer && otherGestureRecognizer.view === self
+
+        return (isOurPinch && otherIsOurRotate) || (isOurRotate && otherIsOurPinch)
     }
 
     // MARK: - Move Handling (Verschieben)

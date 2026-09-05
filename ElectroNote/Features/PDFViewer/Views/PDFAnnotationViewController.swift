@@ -30,9 +30,7 @@ final class PDFOverlayCanvasView: PKCanvasView {
             }
         }
 
-        if pencilOnly {
-            return nil
-        }
+        // When event?.allTouches is nil/empty during initial hit testing, return super so PencilKit can receive Apple Pencil touches
         return super.hitTest(point, with: event)
     }
 }

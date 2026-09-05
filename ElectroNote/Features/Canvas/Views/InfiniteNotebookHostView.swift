@@ -251,7 +251,7 @@ struct InfiniteNotebookHostView: View {
 
                 Section("Lesezeichen") {
                     Button { vm.triggerAddBookmark   = true } label: {
-                        Label("Lesezeichen setzen", systemImage: "bookmark.badge.plus")
+                        Label("Lesezeichen setzen", systemImage: "bookmark")
                     }
                     Button { vm.triggerShowBookmarks = true } label: {
                         Label("Lesezeichen anzeigen", systemImage: "list.bullet")
@@ -483,7 +483,7 @@ struct PenToolbarView: View {
                 }
                 .fixedSize()
 
-                if activeTool != .eraser && activeTool != .lasso {
+                if activeTool != .eraser && activeTool != .lasso && activeTool != .pan {
                     Divider()
                         .frame(height: 22)
 

@@ -1523,7 +1523,7 @@ struct PAPDesignerView: View {
                         vm.connectMode = true
                         vm.connectFromId = node.id
                     } label: {
-                        Label("Rechts zu bestehendem Block verbinden…", systemImage: "arrow.triangle.turn.up.right.circle")
+                        Label("Rechts zu bestehendem Block verbinden…", systemImage: "arrow.turn.up.right")
                     }
                 } label: {
                     HStack(spacing: 2) {
@@ -1558,7 +1558,7 @@ struct PAPDesignerView: View {
                         vm.connectMode = true
                         vm.connectFromId = node.id
                     } label: {
-                        Label("Links zu bestehendem Block verbinden…", systemImage: "arrow.triangle.turn.up.left.circle")
+                        Label("Links zu bestehendem Block verbinden…", systemImage: "arrow.turn.up.left")
                     }
                 } label: {
                     HStack(spacing: 2) {

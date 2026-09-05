@@ -20,8 +20,9 @@ final class InfiniteNotebookViewController: UIViewController {
     var canvasView  = PKCanvasView()
     let toolPicker  = PKToolPicker()
 
-    // MARK: - Content layers & views (below the PencilKit Metal layer)
+    // MARK: - Content layers & views (below and above the PencilKit Metal layer)
     private var paperBackgroundView = PaperBackgroundContainerView()
+    private var paperOverlayView    = PaperOverlayContainerView()
     private var pageBreakContainer  = UIView()
     private var pdfViews:    [UIImageView] = []
     private var pdfLayers:   [CALayer] = []
@@ -76,6 +77,16 @@ final class InfiniteNotebookViewController: UIViewController {
     }
 
     private func applyDrawingPolicy() {
+        if currentCanvasToolType == .pan {
+            canvasView.drawingGestureRecognizer.isEnabled = false
+            canvasView.panGestureRecognizer.allowedTouchTypes = [
+                NSNumber(value: UITouch.TouchType.direct.rawValue),
+                NSNumber(value: UITouch.TouchType.pencil.rawValue)
+            ]
+            canvasView.panGestureRecognizer.minimumNumberOfTouches = 1
+            return
+        }
+
         canvasView.drawingPolicy = pencilOnly ? .pencilOnly : .anyInput
         // In pencilOnly mode (Standard):
         // - 1 finger moves / scrolls smoothly across the canvas
@@ -84,6 +95,9 @@ final class InfiniteNotebookViewController: UIViewController {
         // In anyInput mode (Finger & Stift):
         // - 1 finger or pencil writes
         // - 2 fingers scroll and pinch to zoom
+        canvasView.panGestureRecognizer.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue)
+        ]
         canvasView.panGestureRecognizer.minimumNumberOfTouches = pencilOnly ? 1 : 2
     }
 
@@ -235,6 +249,12 @@ final class InfiniteNotebookViewController: UIViewController {
         paperBackgroundView.isUserInteractionEnabled = true
         canvasView.insertSubview(paperBackgroundView, at: 0)
 
+        paperOverlayView.layer.anchorPoint = .zero
+        paperOverlayView.layer.position = .zero
+        paperOverlayView.bounds = CGRect(origin: .zero, size: canvasView.contentSize)
+        paperOverlayView.isUserInteractionEnabled = true
+        canvasView.addSubview(paperOverlayView)
+
         setupCanvasLongPress()
         setupCanvasTapToDeselect()
         setupExternalFileObserver()
@@ -383,6 +403,12 @@ final class InfiniteNotebookViewController: UIViewController {
         paperBackgroundView.transform = .identity
         paperBackgroundView.bounds = CGRect(origin: .zero, size: unscaledSize)
         paperBackgroundView.transform = CGAffineTransform(scaleX: zoom, y: zoom)
+
+        paperOverlayView.transform = .identity
+        paperOverlayView.bounds = CGRect(origin: .zero, size: unscaledSize)
+        paperOverlayView.transform = CGAffineTransform(scaleX: zoom, y: zoom)
+        canvasView.bringSubviewToFront(paperOverlayView)
+
         lassoOverlay?.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         updatePageBreakDividers()
         centerCanvasContent()
@@ -937,6 +963,21 @@ extension InfiniteNotebookViewController {
         } else {
             disableLassoMode()
         }
+
+        if tool == .pan {
+            // Verschieben (Pan) mode: disable drawing, enable 1-touch Apple Pencil & finger canvas navigation
+            canvasView.drawingGestureRecognizer.isEnabled = false
+            canvasView.panGestureRecognizer.allowedTouchTypes = [
+                NSNumber(value: UITouch.TouchType.direct.rawValue),
+                NSNumber(value: UITouch.TouchType.pencil.rawValue)
+            ]
+            canvasView.panGestureRecognizer.minimumNumberOfTouches = 1
+        } else {
+            if tool != .lasso {
+                canvasView.drawingGestureRecognizer.isEnabled = true
+            }
+            applyDrawingPolicy()
+        }
     }
 
     private func enableLassoMode() {
@@ -953,6 +994,7 @@ extension InfiniteNotebookViewController {
                 self?.activeTransformBox?.dismiss()
             }
         }
+        canvasView.bringSubviewToFront(paperOverlayView)
         canvasView.drawingGestureRecognizer.isEnabled = false
     }
 
@@ -960,7 +1002,9 @@ extension InfiniteNotebookViewController {
         activeTransformBox?.dismiss()
         lassoOverlay?.removeFromSuperview()
         lassoOverlay = nil
-        canvasView.drawingGestureRecognizer.isEnabled = true
+        if currentCanvasToolType != .pan {
+            canvasView.drawingGestureRecognizer.isEnabled = true
+        }
     }
 
     private func handleLassoSelection(points: [CGPoint], boundingBox: CGRect) {
@@ -1014,7 +1058,8 @@ extension InfiniteNotebookViewController {
         box.strokeOriginalIndices = indices
         box.baseTransforms = strokes.map { $0.transform }
 
-        paperBackgroundView.addSubview(box)
+        paperOverlayView.addSubview(box)
+        canvasView.bringSubviewToFront(paperOverlayView)
         activeTransformBox = box
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
@@ -1124,7 +1169,8 @@ extension InfiniteNotebookViewController {
         box.isTextElement = isText
         box.baseFontSize = entry.fontSize
 
-        paperBackgroundView.addSubview(box)
+        paperOverlayView.addSubview(box)
+        canvasView.bringSubviewToFront(paperOverlayView)
         activeTransformBox = box
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
@@ -1211,11 +1257,12 @@ extension InfiniteNotebookViewController {
     func setupCanvasLongPress() {
         let lp = UILongPressGestureRecognizer(target: self, action: #selector(handleCanvasLongPress(_:)))
         lp.minimumPressDuration = 0.32
-        lp.allowableMovement = 20.0
+        lp.allowableMovement = 25.0
         lp.allowedTouchTypes = [
             NSNumber(value: UITouch.TouchType.direct.rawValue),
             NSNumber(value: UITouch.TouchType.pencil.rawValue)
         ]
+        lp.cancelsTouchesInView = true
         lp.delegate = self
         canvasView.addGestureRecognizer(lp)
         canvasLongPress = lp
@@ -1248,6 +1295,10 @@ extension InfiniteNotebookViewController {
             if let box = activeTransformBox, box.frame.insetBy(dx: -15, dy: -15).contains(loc) {
                 return
             }
+
+            // Immediately abort the stroke that PKCanvasView's drawing gesture began while pressing
+            canvasView.drawingGestureRecognizer.isEnabled = false
+            canvasView.drawingGestureRecognizer.isEnabled = true
 
             // 1. Check if an inserted element (image, text block, etc.) is under the touch
             if let elementId = findElement(near: loc) {
@@ -2081,6 +2132,7 @@ extension InfiniteNotebookViewController: PKCanvasViewDelegate {
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         let scale = canvasView.zoomScale
         paperBackgroundView.transform = CGAffineTransform(scaleX: scale, y: scale)
+        paperOverlayView.transform = CGAffineTransform(scaleX: scale, y: scale)
         centerCanvasContent()
     }
 }
@@ -2836,7 +2888,32 @@ extension InfiniteNotebookViewController {
 
 extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        return true
+        // Never recognize simultaneously with system gestures or gestures outside our view hierarchy
+        guard let gView = gestureRecognizer.view, let oView = otherGestureRecognizer.view,
+              gView.window != nil, gView.window === oView.window else {
+            return false
+        }
+
+        // Tap-to-deselect can run alongside canvas pan so touching outside doesn't cancel scroll
+        if gestureRecognizer.view === canvasView && otherGestureRecognizer.view === canvasView {
+            if gestureRecognizer is UITapGestureRecognizer || otherGestureRecognizer is UITapGestureRecognizer {
+                return true
+            }
+        }
+
+        // Allow canvasLongPress to recognize alongside PKCanvasView's drawing gesture
+        // so that holding the Apple Pencil for 0.32s is not cancelled by ink drawing
+        if (gestureRecognizer === canvasLongPress && otherGestureRecognizer === canvasView.drawingGestureRecognizer) ||
+           (otherGestureRecognizer === canvasLongPress && gestureRecognizer === canvasView.drawingGestureRecognizer) {
+            return true
+        }
+
+        // Do not recognize long-press simultaneously with pinch, pan or any other gesture
+        if gestureRecognizer === canvasLongPress || otherGestureRecognizer === canvasLongPress {
+            return false
+        }
+
+        return false
     }
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -2846,6 +2923,9 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
                 return false
             }
             if let pinch = canvasView.pinchGestureRecognizer, pinch.state == .began || pinch.state == .changed {
+                return false
+            }
+            if canvasView.panGestureRecognizer.state == .began || canvasView.panGestureRecognizer.state == .changed {
                 return false
             }
         }
@@ -2872,10 +2952,23 @@ extension UIColor {
 }
 
 // MARK: - PaperBackgroundContainerView
-// Container view that transparently forwards background touches to the PKCanvasView
-// so that drawing and scrolling are never blocked, while nested interactive subviews
-// (UniversalTransformBox, buttons) receive user touches.
+// Container view below the drawing layer that hosts page grid and textures.
 final class PaperBackgroundContainerView: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        if hit === self {
+            return nil
+        }
+        return hit
+    }
+}
+
+// MARK: - PaperOverlayContainerView
+// Topmost container inside PKCanvasView that hosts interactive selection boxes and transform overlays.
+// When an interactive child (UniversalTransformBox, handle, button) is hit, touches (including Apple Pencil)
+// are captured for immediate moving, rotating, scaling, and tapping.
+// Empty areas pass touches straight through to PKCanvasView for drawing and scrolling.
+final class PaperOverlayContainerView: UIView {
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         let hit = super.hitTest(point, with: event)
         if hit === self {

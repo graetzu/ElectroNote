@@ -8,6 +8,7 @@ enum CanvasToolType: String, CaseIterable, Identifiable {
     case pencil     = "Bleistift"
     case eraser     = "Radierer"
     case lasso      = "Lasso"
+    case pan        = "Verschieben"
 
     var id: String { rawValue }
     var iconName: String {
@@ -17,6 +18,7 @@ enum CanvasToolType: String, CaseIterable, Identifiable {
         case .pencil:     return "pencil"
         case .eraser:     return "eraser.fill"
         case .lasso:      return "lasso"
+        case .pan:        return "hand.draw"
         }
     }
 }
@@ -41,6 +43,8 @@ func makePKTool(tool: CanvasToolType, color: Color, width: CGFloat, eraserType: 
         return PKEraserTool(eraserType)
     case .lasso:
         return PKLassoTool()
+    case .pan:
+        return PKInkingTool(.pen, color: .clear, width: 0.1)
     }
 }
 
