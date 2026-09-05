@@ -5,6 +5,8 @@ import Vision
 
 extension Notification.Name {
     static let electroNoteDrawingBegan = Notification.Name("ElectroNote.DrawingBegan")
+    static let electroNoteInsertFileIntoOpenDocument = Notification.Name("ElectroNote.InsertFileIntoOpenDocument")
+    static let electroNoteReloadCurrentPDF = Notification.Name("ElectroNote.ReloadCurrentPDF")
 }
 
 // MARK: - Main
@@ -233,6 +235,11 @@ final class InfiniteNotebookViewController: UIViewController {
 
         setupCanvasLongPress()
         setupCanvasTapToDeselect()
+        setupExternalFileObserver()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     private func setupToolPicker() {
@@ -501,6 +508,30 @@ final class InfiniteNotebookViewController: UIViewController {
 
 extension InfiniteNotebookViewController {
 
+    func setupExternalFileObserver() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleExternalFileInsertion(_:)),
+            name: .electroNoteInsertFileIntoOpenDocument,
+            object: nil
+        )
+    }
+
+    @objc private func handleExternalFileInsertion(_ note: Notification) {
+        guard let url = note.userInfo?["url"] as? URL else { return }
+        if let targetPath = note.userInfo?["targetPath"] as? String,
+           targetPath != store.noteURL.path {
+            return
+        }
+        let ext = url.pathExtension.lowercased()
+        if ["png", "jpg", "jpeg", "heic", "tiff", "webp"].contains(ext),
+           let img = UIImage(contentsOfFile: url.path) {
+            insertImage(img)
+        } else {
+            insertPDF(from: url)
+        }
+    }
+
     func insertPDF(from url: URL) {
         Task { @MainActor in
             let accessing = url.startAccessingSecurityScopedResource()
@@ -543,6 +574,7 @@ extension InfiniteNotebookViewController {
             self.store.saveDocument(self.document)
 
             self.canvasView.setContentOffset(CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
+            self.showToastBanner(text: "PDF eingefügt (\(pdf.pageCount) \(pdf.pageCount == 1 ? "Seite" : "Seiten"))", icon: "doc.text")
         }
     }
 

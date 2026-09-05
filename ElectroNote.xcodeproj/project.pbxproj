@@ -70,6 +70,8 @@
 		LC01000000000000000000AA /* LiveCastServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0100000000000000000AA /* LiveCastServer.swift */; };
 		LC02000000000000000000BB /* LiveCastSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0200000000000000000BB /* LiveCastSheetView.swift */; };
 		LC03000000000000000000CC /* LiveCastBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0300000000000000000CC /* LiveCastBadgeView.swift */; };
+		EFM00001 /* ExternalFileImportManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFMREF01 /* ExternalFileImportManager.swift */; };
+		IFI00001 /* IncomingFileImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = IFIREF01 /* IncomingFileImportSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -138,6 +140,8 @@
 		TEV00001 /* TagEditorView.swift */       = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagEditorView.swift;       sourceTree = "<group>"; };
 		TBV00001 /* TagBrowserView.swift */      = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagBrowserView.swift;      sourceTree = "<group>"; };
 		DTPV0001 /* DocumentTypePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentTypePickerView.swift; sourceTree = "<group>"; };
+		EFMREF01 /* ExternalFileImportManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalFileImportManager.swift; sourceTree = "<group>"; };
+		IFIREF01 /* IncomingFileImportSheet.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomingFileImportSheet.swift;   sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -186,6 +190,7 @@
 				TEV00001 /* TagEditorView.swift */,
 				TBV00001 /* TagBrowserView.swift */,
 				DTPV0001 /* DocumentTypePickerView.swift */,
+				IFIREF01 /* IncomingFileImportSheet.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -377,6 +382,7 @@
 				IMS00001 /* ItemMetadataStore.swift */,
 				TRM00001 /* TrashManager.swift */,
 				DOCREF01 /* DocumentConverter.swift */,
+				EFMREF01 /* ExternalFileImportManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -632,6 +638,8 @@
 				LC01000000000000000000AA /* LiveCastServer.swift in Sources */,
 				LC02000000000000000000BB /* LiveCastSheetView.swift in Sources */,
 				LC03000000000000000000CC /* LiveCastBadgeView.swift in Sources */,
+				EFM00001 /* ExternalFileImportManager.swift in Sources */,
+				IFI00001 /* IncomingFileImportSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

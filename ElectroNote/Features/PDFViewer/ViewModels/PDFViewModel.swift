@@ -6,7 +6,7 @@ final class PDFViewModel: ObservableObject {
     @Published var hasUnsavedAnnotations: Bool = false
 
     let item: DocumentItem
-    let document: PDFDocument?
+    @Published var document: PDFDocument?
     let annotationStore: PDFAnnotationStore?
 
     var loadError: String? { document == nil ? "PDF konnte nicht geöffnet werden." : nil }
@@ -22,6 +22,26 @@ final class PDFViewModel: ObservableObject {
         } else {
             document = nil
             annotationStore = nil
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: .electroNoteReloadCurrentPDF,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            if let targetPath = note.userInfo?["targetPath"] as? String,
+               targetPath != self.item.path.path {
+                return
+            }
+            self.reloadDocument()
+        }
+    }
+
+    func reloadDocument() {
+        if let doc = PDFDocument(url: item.path) {
+            self.document = doc
+            self.objectWillChange.send()
         }
     }
 

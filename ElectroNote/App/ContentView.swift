@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var browserVM = BrowserViewModel()
+    @EnvironmentObject private var importManager: ExternalFileImportManager
     @State private var selectedItem: DocumentItem?
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .automatic
     @State private var showMath = false
@@ -59,6 +60,19 @@ struct ContentView: View {
             MathPanelView()
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $importManager.incomingFile) { file in
+            IncomingFileImportSheet(
+                file: file,
+                browserVM: browserVM,
+                selectedItem: $selectedItem,
+                sidebarVisibility: $sidebarVisibility
+            )
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first else { return false }
+            importManager.handleIncomingURL(url)
+            return true
         }
     }
 }

@@ -3,6 +3,9 @@ import Foundation
 protocol FileServiceProtocol: AnyObject {
     var rootURL: URL { get }
     func listItems(at url: URL) -> [DocumentItem]
+    func listAllDocuments() -> [DocumentItem]
+    func listAllFolders() -> [URL]
+    func displayPath(for item: DocumentItem) -> String
     func createFolder(named name: String, at url: URL) throws -> DocumentItem
     func createNote(named name: String, at url: URL) throws -> DocumentItem
     func createDocument(named name: String, type: DocumentType, at url: URL) throws -> DocumentItem
@@ -79,6 +82,94 @@ final class FileService: FileServiceProtocol {
             if $0.isFolder != $1.isFolder { return $0.isFolder }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
+    }
+
+    func listAllDocuments() -> [DocumentItem] {
+        var results: [DocumentItem] = []
+        let fileManager = FileManager.default
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .isDirectoryKey]
+
+        func scan(directory: URL) {
+            guard let contents = try? fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: keys,
+                options: .skipsHiddenFiles
+            ) else { return }
+
+            for fileURL in contents {
+                let filename = fileURL.lastPathComponent
+                if filename.hasPrefix(".") || filename.lowercased() == ".trash" {
+                    continue
+                }
+                guard let res = try? fileURL.resourceValues(forKeys: Set(keys)) else { continue }
+                let isDir = res.isDirectory ?? false
+                let modified = res.contentModificationDate ?? Date()
+
+                if isDir && filename.hasSuffix(".enote") {
+                    let name = String(filename.dropLast(".enote".count))
+                    results.append(DocumentItem(id: UUID(), name: name, path: fileURL, type: .note, modifiedAt: modified, syncStatus: .local))
+                } else if isDir && filename.hasSuffix(".epap") {
+                    let name = String(filename.dropLast(".epap".count))
+                    results.append(DocumentItem(id: UUID(), name: name, path: fileURL, type: .pap, modifiedAt: modified, syncStatus: .local))
+                } else if isDir && filename.hasSuffix(".ewb") {
+                    let name = String(filename.dropLast(".ewb".count))
+                    results.append(DocumentItem(id: UUID(), name: name, path: fileURL, type: .whiteboard, modifiedAt: modified, syncStatus: .local))
+                } else if isDir && filename.hasSuffix(".emm") {
+                    let name = String(filename.dropLast(".emm".count))
+                    results.append(DocumentItem(id: UUID(), name: name, path: fileURL, type: .mindmap, modifiedAt: modified, syncStatus: .local))
+                } else if !isDir && fileURL.pathExtension.lowercased() == "pdf" {
+                    let name = String(filename.dropLast(".pdf".count))
+                    results.append(DocumentItem(id: UUID(), name: name, path: fileURL, type: .pdf, modifiedAt: modified, syncStatus: .local))
+                } else if isDir && !filename.hasSuffix(".annotations") {
+                    scan(directory: fileURL)
+                }
+            }
+        }
+
+        scan(directory: rootURL)
+        return results.sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
+    func listAllFolders() -> [URL] {
+        var folders: [URL] = [rootURL]
+        let fileManager = FileManager.default
+        let keys: [URLResourceKey] = [.isDirectoryKey]
+
+        func scan(directory: URL) {
+            guard let contents = try? fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: keys,
+                options: .skipsHiddenFiles
+            ) else { return }
+
+            for fileURL in contents {
+                let filename = fileURL.lastPathComponent
+                if filename.hasPrefix(".") || filename.lowercased() == ".trash" { continue }
+                guard let res = try? fileURL.resourceValues(forKeys: Set(keys)),
+                      res.isDirectory ?? false else { continue }
+                if filename.hasSuffix(".enote") || filename.hasSuffix(".epap") ||
+                   filename.hasSuffix(".ewb") || filename.hasSuffix(".emm") ||
+                   filename.hasSuffix(".annotations") {
+                    continue
+                }
+                folders.append(fileURL)
+                scan(directory: fileURL)
+            }
+        }
+
+        scan(directory: rootURL)
+        return folders
+    }
+
+    func displayPath(for item: DocumentItem) -> String {
+        let rootPath = rootURL.path
+        let parentPath = item.path.deletingLastPathComponent().path
+        if parentPath == rootPath || !parentPath.hasPrefix(rootPath) {
+            return "Hauptordner"
+        }
+        let rel = parentPath.dropFirst(rootPath.count)
+        let cleaned = rel.hasPrefix("/") ? String(rel.dropFirst()) : String(rel)
+        return cleaned.replacingOccurrences(of: "/", with: " > ")
     }
 
     func createFolder(named name: String, at url: URL) throws -> DocumentItem {

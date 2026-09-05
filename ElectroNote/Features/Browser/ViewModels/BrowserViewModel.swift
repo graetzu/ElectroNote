@@ -85,6 +85,18 @@ final class BrowserViewModel: ObservableObject {
         }
     }
 
+    func listAllDocuments() -> [DocumentItem] {
+        fileService.listAllDocuments()
+    }
+
+    func listAllFolders() -> [URL] {
+        fileService.listAllFolders()
+    }
+
+    func displayPath(for item: DocumentItem) -> String {
+        fileService.displayPath(for: item)
+    }
+
     func delete(_ items: [DocumentItem]) {
         for item in items {
             do {

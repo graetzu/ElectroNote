@@ -66,13 +66,8 @@ struct BrowserSidebarView: View {
             }
         }
         .sheet(isPresented: $showPDFPicker) {
-            DocumentPicker(contentTypes: [.pdf]) { url in
-                if let item = viewModel.importPDF(from: url) {
-                    selectedItem = item
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        sidebarVisibility = .detailOnly
-                    }
-                }
+            DocumentPicker(contentTypes: DocumentConverter.supportedTypes + [.image]) { url in
+                ExternalFileImportManager.shared.handleIncomingURL(url)
             }
         }
         .sheet(isPresented: $showNextcloud) {
@@ -244,7 +239,7 @@ struct BrowserSidebarView: View {
                 }
                 Divider()
                 Button { showPDFPicker = true } label: {
-                    Label("PDF importieren…", systemImage: "doc.badge.plus")
+                    Label("Datei / PDF importieren…", systemImage: "doc.badge.plus")
                 }
             } label: {
                 Image(systemName: "plus")
