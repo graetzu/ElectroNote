@@ -667,6 +667,7 @@ extension InfiniteNotebookViewController {
         document.documentHeight = canvasView.contentSize.height
         store.saveDocument(document)
         showToastBanner(text: "Grafik eingefügt", icon: "photo")
+        presentTransformBox(forElementId: id)
 
         if registerUndoAction {
             registerCustomUndo(actionName: "Bild einfügen") { [weak self] in
@@ -1061,6 +1062,7 @@ extension InfiniteNotebookViewController {
         paperOverlayView.addSubview(box)
         canvasView.bringSubviewToFront(paperOverlayView)
         activeTransformBox = box
+        canvasView.drawingGestureRecognizer.isEnabled = false
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
         box.onLiveUpdateStrokes = { [weak self, weak box] currentCenter, currentScale, currentRotation in
@@ -1149,6 +1151,9 @@ extension InfiniteNotebookViewController {
         box.onDismiss = { [weak self] in
             if self?.activeTransformBox === box {
                 self?.activeTransformBox = nil
+                if self?.currentCanvasToolType != .pan && self?.currentCanvasToolType != .lasso {
+                    self?.canvasView.drawingGestureRecognizer.isEnabled = true
+                }
             }
         }
     }
@@ -1172,6 +1177,7 @@ extension InfiniteNotebookViewController {
         paperOverlayView.addSubview(box)
         canvasView.bringSubviewToFront(paperOverlayView)
         activeTransformBox = box
+        canvasView.drawingGestureRecognizer.isEnabled = false
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
         box.onLiveUpdateElement = { [weak box, weak self] currentCenter, currentScale, currentRotation in
@@ -1230,7 +1236,7 @@ extension InfiniteNotebookViewController {
             if let image = self.imageViews[id]?.image {
                 let imgView = self.makeImageView(image: image, frame: CGRect(x: clone.startX, y: clone.startY, width: clone.width, height: clone.height))
                 imgView.transform = CGAffineTransform(rotationAngle: clone.rotation ?? 0)
-                self.canvasView.addSubview(imgView)
+                self.paperBackgroundView.addSubview(imgView)
                 self.imageViews[newId] = imgView
                 self.imageLayers[newId] = imgView.layer
                 self.addImageHandle(for: imgView, at: CGRect(x: clone.startX, y: clone.startY, width: clone.width, height: clone.height), id: newId, isText: isText)
@@ -1248,6 +1254,9 @@ extension InfiniteNotebookViewController {
         box.onDismiss = { [weak self] in
             if self?.activeTransformBox === box {
                 self?.activeTransformBox = nil
+                if self?.currentCanvasToolType != .pan && self?.currentCanvasToolType != .lasso {
+                    self?.canvasView.drawingGestureRecognizer.isEnabled = true
+                }
             }
         }
     }
@@ -1256,8 +1265,8 @@ extension InfiniteNotebookViewController {
 
     func setupCanvasLongPress() {
         let lp = UILongPressGestureRecognizer(target: self, action: #selector(handleCanvasLongPress(_:)))
-        lp.minimumPressDuration = 0.32
-        lp.allowableMovement = 25.0
+        lp.minimumPressDuration = 0.28
+        lp.allowableMovement = 30.0
         lp.allowedTouchTypes = [
             NSNumber(value: UITouch.TouchType.direct.rawValue),
             NSNumber(value: UITouch.TouchType.pencil.rawValue)
@@ -1271,17 +1280,36 @@ extension InfiniteNotebookViewController {
     func setupCanvasTapToDeselect() {
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleCanvasTapToDeselect(_:)))
         tap.cancelsTouchesInView = false
+        tap.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.pencil.rawValue)
+        ]
         tap.delegate = self
         canvasView.addGestureRecognizer(tap)
     }
 
     @objc private func handleCanvasTapToDeselect(_ gr: UITapGestureRecognizer) {
-        guard let box = activeTransformBox else { return }
         let rawLoc = gr.location(in: canvasView)
         let zoom = max(canvasView.zoomScale, 0.01)
         let loc = CGPoint(x: rawLoc.x / zoom, y: rawLoc.y / zoom)
-        if !box.frame.insetBy(dx: -25, dy: -25).contains(loc) {
+
+        if let box = activeTransformBox {
+            if box.frame.insetBy(dx: -25, dy: -25).contains(loc) {
+                return
+            }
+            if let elementId = findElement(near: loc) {
+                removeAccidentalDotStroke(near: loc)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                presentTransformBox(forElementId: elementId)
+                return
+            }
             box.dismiss()
+        } else {
+            if let elementId = findElement(near: loc) {
+                removeAccidentalDotStroke(near: loc)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                presentTransformBox(forElementId: elementId)
+            }
         }
     }
 
@@ -1302,6 +1330,7 @@ extension InfiniteNotebookViewController {
 
             // 1. Check if an inserted element (image, text block, etc.) is under the touch
             if let elementId = findElement(near: loc) {
+                removeAccidentalDotStroke(near: loc)
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 presentTransformBox(forElementId: elementId)
                 longPressInitialTouch = loc
@@ -1892,6 +1921,7 @@ extension InfiniteNotebookViewController {
         document.insertedImages.append(entry)
         if addHandle {
             addImageHandle(for: imgView, at: contentFrame, id: id, isText: true)
+            presentTransformBox(forElementId: id)
         }
         let needed = contentOrigin.y + img.size.height + Self.initialHeight * 0.3
         if needed > canvasView.contentSize.height { canvasView.contentSize.height = needed }

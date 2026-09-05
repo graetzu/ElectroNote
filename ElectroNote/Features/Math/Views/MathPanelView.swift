@@ -248,6 +248,7 @@ private struct MathCanvasRepresentable: UIViewRepresentable {
         c.drawing = drawing
         c.delegate = context.coordinator
         c.backgroundColor = .white
+        c.overrideUserInterfaceStyle = .light
         c.drawingPolicy = .anyInput
 
         let picker = PKToolPicker()

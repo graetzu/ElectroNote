@@ -18,7 +18,10 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .white
+        let style: UIUserInterfaceStyle = darkDrawingMode ? .dark : .light
+        overrideUserInterfaceStyle = style
+        view.overrideUserInterfaceStyle = style
+        view.backgroundColor = darkDrawingMode ? UIColor(white: 0.12, alpha: 1) : .white
         setupCanvas()
     }
 
@@ -38,9 +41,14 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
     }
 
     private func setupCanvas() {
+        let style: UIUserInterfaceStyle = darkDrawingMode ? .dark : .light
+        overrideUserInterfaceStyle = style
+        view.overrideUserInterfaceStyle = style
+        canvasView.overrideUserInterfaceStyle = style
+
         canvasView.frame = view.bounds
         canvasView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        canvasView.backgroundColor = .white
+        canvasView.backgroundColor = darkDrawingMode ? UIColor(white: 0.12, alpha: 1) : .white
         canvasView.drawingPolicy = .anyInput  // pencil + finger drawing
         canvasView.minimumZoomScale = 0.5
         canvasView.maximumZoomScale = 4.0
@@ -50,7 +58,8 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
         view.addSubview(canvasView)
 
         // Default tool: Pen
-        canvasView.tool = PKInkingTool(.pen, color: .black, width: 3)
+        let initialColor: UIColor = darkDrawingMode ? .white : .black
+        canvasView.tool = PKInkingTool(.pen, color: initialColor, width: 3)
     }
 
     // MARK: - Shape Snapping
@@ -109,6 +118,18 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
     func refreshBackground(style: BackgroundStyle, dark: Bool) {
         self.backgroundStyle = style
         self.darkDrawingMode = dark
+
+        let targetStyle: UIUserInterfaceStyle = dark ? .dark : .light
+        if overrideUserInterfaceStyle != targetStyle {
+            overrideUserInterfaceStyle = targetStyle
+        }
+        if view.overrideUserInterfaceStyle != targetStyle {
+            view.overrideUserInterfaceStyle = targetStyle
+        }
+        if canvasView.overrideUserInterfaceStyle != targetStyle {
+            canvasView.overrideUserInterfaceStyle = targetStyle
+        }
+
         let bg = dark ? UIColor(white: 0.12, alpha: 1) : UIColor.white
         let line = dark ? UIColor(white: 0.30, alpha: 1) : UIColor.systemGray4
         let pattern = UIColor(patternImage: makePattern(style, bg: bg, line: line))
@@ -256,6 +277,10 @@ struct WhiteboardRepresentable: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> WhiteboardViewController {
         let vc = WhiteboardViewController()
         vc.shapeSnapEnabled = shapeSnapEnabled
+        vc.refreshBackground(style: background, dark: darkDrawingMode)
+        let initialColor: Color = darkDrawingMode ? .white : .black
+        let initialTool = makePKTool(tool: .pen, color: initialColor, width: 3.0, eraserType: .vector, darkDrawingMode: darkDrawingMode)
+        vc.canvasView.tool = initialTool
         DispatchQueue.main.async { vcRef = vc }
         return vc
     }
@@ -389,6 +414,15 @@ struct WhiteboardView: View {
                         .font(.system(size: 14, weight: .bold))
                     }
                 }
+            }
+            .onChange(of: darkDrawingMode) { newDark in
+                if newDark && selectedColor == .black {
+                    selectedColor = .white
+                } else if !newDark && selectedColor == .white {
+                    selectedColor = .black
+                }
+                let tool = makePKTool(tool: activeTool, color: selectedColor, width: selectedWidth, eraserType: eraserType, darkDrawingMode: newDark)
+                vc?.canvasView.tool = tool
             }
         }
     }

@@ -91,6 +91,7 @@ final class StickyNoteView: UIView, UITextViewDelegate, PKCanvasViewDelegate {
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
         canvasView.drawingPolicy = .anyInput  // Apple Pencil & finger handwriting
+        canvasView.overrideUserInterfaceStyle = .light
         canvasView.tool = PKInkingTool(.pen, color: .black, width: 2.2)
         canvasView.delegate = self
         if let data = note.drawingData, let d = try? PKDrawing(data: data) {

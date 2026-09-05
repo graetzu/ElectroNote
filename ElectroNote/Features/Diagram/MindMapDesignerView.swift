@@ -330,6 +330,7 @@ struct MindMapDrawingCanvasRepresentable: UIViewRepresentable {
         cv.backgroundColor = .clear
         cv.isOpaque = false
         cv.drawingPolicy = .anyInput
+        cv.overrideUserInterfaceStyle = .light
         cv.tool = PKInkingTool(.pen, color: .black, width: 3)
         cv.isDrawingMode = isDrawingMode
         DispatchQueue.main.async { canvasViewRef = cv }

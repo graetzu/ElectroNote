@@ -619,6 +619,18 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         return (isOurPinch && otherIsOurRotate) || (isOurRotate && otherIsOurPinch)
     }
 
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Prevent scroll/pan gestures on parent views from stealing touch while moving, rotating, or scaling the transform box
+        if otherGestureRecognizer is UIPanGestureRecognizer && otherGestureRecognizer.view !== self && otherGestureRecognizer.view !== rotationHandle && !isCornerHandle(otherGestureRecognizer.view) {
+            return true
+        }
+        return false
+    }
+
+    private func isCornerHandle(_ view: UIView?) -> Bool {
+        return view === topLeftHandle || view === topRightHandle || view === bottomLeftHandle || view === bottomRightHandle
+    }
+
     // MARK: - Move Handling (Verschieben)
 
     @objc private func handleMovePan(_ gr: UIPanGestureRecognizer) {
@@ -823,11 +835,21 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
 
     // Expand touch hit testing to include floating handles and toolbars
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        if !actionToolbar.isHidden && actionToolbar.frame.insetBy(dx: -8, dy: -8).contains(point) {
-            return actionToolbar.hitTest(convert(point, to: actionToolbar), with: event)
+        if !actionToolbar.isHidden {
+            let pt = convert(point, to: actionToolbar)
+            if actionToolbar.bounds.insetBy(dx: -8, dy: -8).contains(pt) {
+                if let hit = actionToolbar.hitTest(pt, with: event) {
+                    return hit
+                }
+            }
         }
-        if !colorPaletteBar.isHidden && colorPaletteBar.frame.insetBy(dx: -8, dy: -8).contains(point) {
-            return colorPaletteBar.hitTest(convert(point, to: colorPaletteBar), with: event)
+        if !colorPaletteBar.isHidden {
+            let pt = convert(point, to: colorPaletteBar)
+            if colorPaletteBar.bounds.insetBy(dx: -8, dy: -8).contains(pt) {
+                if let hit = colorPaletteBar.hitTest(pt, with: event) {
+                    return hit
+                }
+            }
         }
         if rotationHandle.frame.insetBy(dx: -12, dy: -12).contains(point) {
             return rotationHandle
