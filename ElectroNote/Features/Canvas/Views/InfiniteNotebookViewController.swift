@@ -23,7 +23,6 @@ final class InfiniteNotebookViewController: UIViewController {
     // MARK: - Content layers & views (below the PencilKit Metal layer)
     private var paperBackgroundView = PaperBackgroundContainerView()
     private var pageBreakContainer  = UIView()
-    private var backgroundLayer = CALayer()
     private var pdfViews:    [UIImageView] = []
     private var pdfLayers:   [CALayer] = []
 
@@ -135,11 +134,6 @@ final class InfiniteNotebookViewController: UIViewController {
         super.viewDidLayoutSubviews()
         if canvasView.frame != view.bounds {
             canvasView.frame = view.bounds
-        }
-        let currentW = max(view.bounds.width, 834)
-        if canvasView.contentSize.width != currentW && currentW > 0 {
-            canvasView.contentSize.width = currentW
-            updateBackgroundFrame()
         }
         if !didLoad {
             didLoad = true
@@ -281,11 +275,12 @@ final class InfiniteNotebookViewController: UIViewController {
     // MARK: - Background & Page Breaks
 
     private func setupBackgroundLayer() {
-        paperBackgroundView.frame = CGRect(origin: .zero, size: canvasView.contentSize)
-        backgroundLayer.frame = CGRect(origin: .zero, size: canvasView.contentSize)
-        if backgroundLayer.superlayer == nil {
-            canvasView.layer.insertSublayer(backgroundLayer, at: 0)
-        }
+        let zoom = max(canvasView.zoomScale, 0.01)
+        let unscaledSize = CGSize(
+            width: canvasView.contentSize.width / zoom,
+            height: canvasView.contentSize.height / zoom
+        )
+        paperBackgroundView.bounds = CGRect(origin: .zero, size: unscaledSize)
         setupPageBreakDividers()
     }
 
@@ -299,12 +294,14 @@ final class InfiniteNotebookViewController: UIViewController {
     }
 
     private func updatePageBreakDividers() {
-        pageBreakContainer.frame = CGRect(origin: .zero, size: canvasView.contentSize)
+        let width = paperBackgroundView.bounds.width
+        let totalH = paperBackgroundView.bounds.height
+        guard width > 0 && totalH > 0 else { return }
+
+        pageBreakContainer.frame = CGRect(origin: .zero, size: CGSize(width: width, height: totalH))
         pageBreakContainer.subviews.forEach { $0.removeFromSuperview() }
 
-        let width = canvasView.contentSize.width
         let pageH = width * 1.41421356 // Proportional ISO A4 ratio (1 : √2)
-        let totalH = canvasView.contentSize.height
         let dark = document.darkDrawingMode
 
         var pageNum = 1
@@ -373,7 +370,6 @@ final class InfiniteNotebookViewController: UIViewController {
         paperBackgroundView.layer.borderWidth = 1.0
         paperBackgroundView.layer.borderColor = (dark ? UIColor(white: 0.28, alpha: 0.8) : UIColor(white: 0.80, alpha: 0.8)).cgColor
 
-        backgroundLayer.backgroundColor = pattern.cgColor
         updatePageBreakDividers()
         centerCanvasContent()
     }
@@ -387,7 +383,6 @@ final class InfiniteNotebookViewController: UIViewController {
         paperBackgroundView.transform = .identity
         paperBackgroundView.bounds = CGRect(origin: .zero, size: unscaledSize)
         paperBackgroundView.transform = CGAffineTransform(scaleX: zoom, y: zoom)
-        backgroundLayer.frame = CGRect(origin: .zero, size: unscaledSize)
         lassoOverlay?.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         updatePageBreakDividers()
         centerCanvasContent()
@@ -2162,8 +2157,8 @@ extension InfiniteNotebookViewController {
                 pdfCtx.saveGState()
                 pdfCtx.scaleBy(x: scale, y: scale)
                 pdfCtx.translateBy(x: 0, y: -CGFloat(page) * pageH / scale)
-                // Render background layer
-                backgroundLayer.render(in: pdfCtx)
+                // Render paper background layer
+                paperBackgroundView.layer.render(in: pdfCtx)
                 // Render image layers
                 imageLayers.values.forEach { $0.render(in: pdfCtx) }
                 // Render PDF layers
