@@ -48,6 +48,14 @@ jobs:
           /tmp/asc_venv/bin/pip install --upgrade pyjwt cryptography requests
           /tmp/asc_venv/bin/python3 scripts/prepare_appstore_connect.py
 
+      - name: Update build and marketing version
+        run: |
+          BUILD_NUM=${{ github.run_number }}
+          echo "Setting CFBundleVersion to $BUILD_NUM and CFBundleShortVersionString to 1.0.0"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" ElectroNote/Resources/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.0" ElectroNote/Resources/Info.plist || true
+          grep -A 1 CFBundleVersion ElectroNote/Resources/Info.plist
+
       - name: Build archive
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
