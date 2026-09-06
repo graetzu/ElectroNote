@@ -937,33 +937,37 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         // 1. Toolbars
         if !actionToolbar.isHidden {
             let pt = convert(point, to: actionToolbar)
-            if actionToolbar.bounds.insetBy(dx: -12, dy: -12).contains(pt) {
+            if actionToolbar.bounds.insetBy(dx: -16, dy: -16).contains(pt) {
                 return true
             }
         }
         if !colorPaletteBar.isHidden {
             let pt = convert(point, to: colorPaletteBar)
-            if colorPaletteBar.bounds.insetBy(dx: -12, dy: -12).contains(pt) {
+            if colorPaletteBar.bounds.insetBy(dx: -16, dy: -16).contains(pt) {
                 return true
             }
         }
 
         // 2. Rotation handle
         let ptRot = convert(point, to: rotationHandle)
-        if rotationHandle.bounds.insetBy(dx: -16, dy: -16).contains(ptRot) {
+        if rotationHandle.bounds.insetBy(dx: -20, dy: -20).contains(ptRot) {
             return true
         }
 
         // 3. Corner handles
         for h in [topLeftHandle, topRightHandle, bottomLeftHandle, bottomRightHandle] {
             let ptH = convert(point, to: h)
-            if h.bounds.insetBy(dx: -16, dy: -16).contains(ptH) {
+            if h.bounds.insetBy(dx: -20, dy: -20).contains(ptH) {
                 return true
             }
         }
 
-        // 4. Box body with generous hit target
-        return bounds.insetBy(dx: -20, dy: -20).contains(point)
+        // 4. Box body with generous hit target (at least 140x140 minimum hit area, plus 40pt margin)
+        let minW: CGFloat = 140
+        let minH: CGFloat = 140
+        let extraX = max(0, (minW - bounds.width) / 2) + 40
+        let extraY = max(0, (minH - bounds.height) / 2) + 40
+        return bounds.insetBy(dx: -extraX, dy: -extraY).contains(point)
     }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {

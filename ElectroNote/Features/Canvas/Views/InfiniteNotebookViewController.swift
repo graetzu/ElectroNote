@@ -1192,6 +1192,8 @@ extension InfiniteNotebookViewController {
         activeTransformBox = box
         canvasView.drawingGestureRecognizer.isEnabled = false
         canvasView.isScrollEnabled = false
+        canvasView.pinchGestureRecognizer?.isEnabled = false
+        pencilScrollPanGesture.isEnabled = false
         canvasView.canCancelContentTouches = false
         box.attachCanvasGestureRequirements(canvasView, additionalPanGesture: pencilScrollPanGesture)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -1207,14 +1209,19 @@ extension InfiniteNotebookViewController {
                 .scaledBy(x: currentScale, y: currentScale)
                 .translatedBy(x: -baseCenter.x, y: -baseCenter.y)
 
-            var d = self.canvasView.drawing
+            var allStrokes = self.canvasView.drawing.strokes
             for (i, originalIdx) in box.strokeOriginalIndices.enumerated() {
-                guard originalIdx < d.strokes.count else { continue }
-                var s = box.baseStrokes[i]
-                s.transform = box.baseTransforms[i].concatenating(t)
-                d.strokes[originalIdx] = s
+                guard originalIdx < allStrokes.count else { continue }
+                let base = box.baseStrokes[i]
+                let newTransform = box.baseTransforms[i].concatenating(t)
+                allStrokes[originalIdx] = PKStroke(
+                    ink: base.ink,
+                    path: base.path,
+                    transform: newTransform,
+                    mask: base.mask
+                )
             }
-            self.canvasView.drawing = d
+            self.canvasView.drawing = PKDrawing(strokes: allStrokes)
         }
 
         box.onCommitStrokes = { [weak self] _, _, _ in
@@ -1223,9 +1230,7 @@ extension InfiniteNotebookViewController {
             self.store?.saveDrawing(self.canvasView.drawing)
             self.registerCustomUndo(actionName: "Handschrift transformieren") { [weak self] in
                 guard let self = self else { return }
-                var d = self.canvasView.drawing
-                d.strokes = prevStrokes
-                self.canvasView.drawing = d
+                self.canvasView.drawing = PKDrawing(strokes: prevStrokes)
                 self.activeTransformBox?.dismiss()
                 self.store?.saveDrawing(self.canvasView.drawing)
             }
@@ -1234,18 +1239,22 @@ extension InfiniteNotebookViewController {
         box.onDuplicate = { [weak self, weak box] in
             guard let self = self, let box = box else { return }
             let offset = CGAffineTransform(translationX: 30, y: 30)
+            var allStrokes = self.canvasView.drawing.strokes
             var duplicatedStrokes: [PKStroke] = []
             var newIndices: [Int] = []
-            var d = self.canvasView.drawing
-            let startIdx = d.strokes.count
+            let startIdx = allStrokes.count
             for (i, s) in box.baseStrokes.enumerated() {
-                var clone = s
-                clone.transform = clone.transform.concatenating(offset)
+                let clone = PKStroke(
+                    ink: s.ink,
+                    path: s.path,
+                    transform: s.transform.concatenating(offset),
+                    mask: s.mask
+                )
                 duplicatedStrokes.append(clone)
                 newIndices.append(startIdx + i)
             }
-            d.strokes.append(contentsOf: duplicatedStrokes)
-            self.canvasView.drawing = d
+            allStrokes.append(contentsOf: duplicatedStrokes)
+            self.canvasView.drawing = PKDrawing(strokes: allStrokes)
             self.store?.saveDrawing(self.canvasView.drawing)
             self.showToastBanner(text: "Auswahl dupliziert", icon: "doc.on.doc")
             let newBounds = duplicatedStrokes.reduce(CGRect.null) { $0.union($1.renderBounds) }
@@ -1254,15 +1263,20 @@ extension InfiniteNotebookViewController {
 
         box.onChangeColor = { [weak self, weak box] newColor in
             guard let self = self, let box = box else { return }
-            var d = self.canvasView.drawing
+            var allStrokes = self.canvasView.drawing.strokes
             for (i, originalIdx) in box.strokeOriginalIndices.enumerated() {
-                guard originalIdx < d.strokes.count else { continue }
-                var s = d.strokes[originalIdx]
-                s.ink = PKInk(s.ink.inkType, color: newColor)
-                d.strokes[originalIdx] = s
-                box.baseStrokes[i].ink = PKInk(box.baseStrokes[i].ink.inkType, color: newColor)
+                guard originalIdx < allStrokes.count else { continue }
+                let s = allStrokes[originalIdx]
+                let newStroke = PKStroke(
+                    ink: PKInk(s.ink.inkType, color: newColor),
+                    path: s.path,
+                    transform: s.transform,
+                    mask: s.mask
+                )
+                allStrokes[originalIdx] = newStroke
+                box.baseStrokes[i] = newStroke
             }
-            self.canvasView.drawing = d
+            self.canvasView.drawing = PKDrawing(strokes: allStrokes)
             self.store?.saveDrawing(self.canvasView.drawing)
         }
 
@@ -1270,19 +1284,16 @@ extension InfiniteNotebookViewController {
             guard let self = self, let box = box else { return }
             let prevStrokes = self.canvasView.drawing.strokes
             let removeIndices = Set(box.strokeOriginalIndices)
-            var d = self.canvasView.drawing
-            d.strokes = d.strokes.enumerated().compactMap { idx, stroke in
+            let remaining = self.canvasView.drawing.strokes.enumerated().compactMap { idx, stroke in
                 removeIndices.contains(idx) ? nil : stroke
             }
-            self.canvasView.drawing = d
+            self.canvasView.drawing = PKDrawing(strokes: remaining)
             self.store?.saveDrawing(self.canvasView.drawing)
             box.dismiss()
             self.showToastBanner(text: "Auswahl gelöscht", icon: "trash")
             self.registerCustomUndo(actionName: "Auswahl löschen") { [weak self] in
                 guard let self = self else { return }
-                var d2 = self.canvasView.drawing
-                d2.strokes = prevStrokes
-                self.canvasView.drawing = d2
+                self.canvasView.drawing = PKDrawing(strokes: prevStrokes)
                 self.store?.saveDrawing(self.canvasView.drawing)
             }
         }
@@ -1291,6 +1302,8 @@ extension InfiniteNotebookViewController {
             if self?.activeTransformBox === box {
                 self?.activeTransformBox = nil
                 self?.canvasView.isScrollEnabled = true
+                self?.canvasView.pinchGestureRecognizer?.isEnabled = true
+                self?.pencilScrollPanGesture.isEnabled = (self?.currentCanvasToolType == .pan)
                 self?.canvasView.canCancelContentTouches = true
                 if self?.currentCanvasToolType != .pan && self?.currentCanvasToolType != .lasso {
                     self?.canvasView.drawingGestureRecognizer.isEnabled = true
@@ -1321,6 +1334,8 @@ extension InfiniteNotebookViewController {
         activeTransformBox = box
         canvasView.drawingGestureRecognizer.isEnabled = false
         canvasView.isScrollEnabled = false
+        canvasView.pinchGestureRecognizer?.isEnabled = false
+        pencilScrollPanGesture.isEnabled = false
         canvasView.canCancelContentTouches = false
         box.attachCanvasGestureRequirements(canvasView, additionalPanGesture: pencilScrollPanGesture)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -1402,6 +1417,8 @@ extension InfiniteNotebookViewController {
                 self?.activeTransformBox = nil
                 self?.imageHandles.values.forEach { $0.setSelected(false) }
                 self?.canvasView.isScrollEnabled = true
+                self?.canvasView.pinchGestureRecognizer?.isEnabled = true
+                self?.pencilScrollPanGesture.isEnabled = (self?.currentCanvasToolType == .pan)
                 self?.canvasView.canCancelContentTouches = true
                 if self?.currentCanvasToolType != .pan && self?.currentCanvasToolType != .lasso {
                     self?.canvasView.drawingGestureRecognizer.isEnabled = true
@@ -1476,10 +1493,10 @@ extension InfiniteNotebookViewController {
             // Immediately abort the stroke that PKCanvasView's drawing gesture began while pressing
             canvasView.drawingGestureRecognizer.isEnabled = false
             canvasView.drawingGestureRecognizer.isEnabled = true
+            removeAccidentalDotStroke(near: loc)
 
             // 1. Check if an inserted element (image, text block, etc.) is under the touch
             if let elementId = findElement(near: loc) {
-                removeAccidentalDotStroke(near: loc)
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 presentTransformBox(forElementId: elementId)
                 longPressInitialTouch = loc
@@ -1490,7 +1507,6 @@ extension InfiniteNotebookViewController {
 
             // 2. Check if handwriting / drawing strokes are under the touch
             if let cluster = findStrokeCluster(near: loc) {
-                removeAccidentalDotStroke(near: loc)
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 let unionBounds = cluster.strokes.reduce(CGRect.null) { $0.union($1.renderBounds) }
                 presentTransformBox(for: cluster.strokes, indices: cluster.indices, bounds: unionBounds)
@@ -1581,10 +1597,14 @@ extension InfiniteNotebookViewController {
     }
 
     private func removeAccidentalDotStroke(near point: CGPoint) {
-        guard let lastStroke = canvasView.drawing.strokes.last else { return }
+        var strokes = canvasView.drawing.strokes
+        guard let lastStroke = strokes.last else { return }
+        let age = Date().timeIntervalSince(lastStroke.path.creationDate)
+        guard age < 1.2 else { return }
         let b = lastStroke.renderBounds
-        if b.width < 10 && b.height < 10 && b.insetBy(dx: -16, dy: -16).contains(point) {
-            canvasView.drawing.strokes.removeLast()
+        if b.width < 20 && b.height < 20 && b.insetBy(dx: -25, dy: -25).contains(point) {
+            strokes.removeLast()
+            canvasView.drawing = PKDrawing(strokes: strokes)
         }
     }
 
@@ -3133,10 +3153,10 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        if gestureRecognizer === canvasTapToDeselect {
-            if let box = activeTransformBox {
-                let loc = touch.location(in: box)
-                if box.point(inside: loc, with: nil) {
+        if let box = activeTransformBox {
+            let loc = touch.location(in: box)
+            if box.point(inside: loc, with: nil) {
+                if gestureRecognizer === canvasTapToDeselect || gestureRecognizer === canvasLongPress || gestureRecognizer === pencilScrollPanGesture {
                     return false
                 }
             }
