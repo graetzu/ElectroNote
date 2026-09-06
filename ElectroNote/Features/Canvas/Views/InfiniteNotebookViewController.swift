@@ -53,6 +53,7 @@ final class InfiniteNotebookViewController: UIViewController {
     private var activeTransformBox: UniversalTransformBox?
     private var lassoOverlay: LassoCanvasOverlay?
     private var canvasLongPress: UILongPressGestureRecognizer?
+    private var canvasTapToDeselect: UITapGestureRecognizer?
     private var longPressInitialTouch: CGPoint?
     private var longPressStartCenter: CGPoint?
     private var isLongPressDragging: Bool = false
@@ -1206,14 +1207,14 @@ extension InfiniteNotebookViewController {
                 .scaledBy(x: currentScale, y: currentScale)
                 .translatedBy(x: -baseCenter.x, y: -baseCenter.y)
 
-            var allStrokes = self.canvasView.drawing.strokes
+            var d = self.canvasView.drawing
             for (i, originalIdx) in box.strokeOriginalIndices.enumerated() {
-                guard originalIdx < allStrokes.count else { continue }
+                guard originalIdx < d.strokes.count else { continue }
                 var s = box.baseStrokes[i]
                 s.transform = box.baseTransforms[i].concatenating(t)
-                allStrokes[originalIdx] = s
+                d.strokes[originalIdx] = s
             }
-            self.canvasView.drawing.strokes = allStrokes
+            self.canvasView.drawing = d
         }
 
         box.onCommitStrokes = { [weak self] _, _, _ in
@@ -1222,7 +1223,9 @@ extension InfiniteNotebookViewController {
             self.store?.saveDrawing(self.canvasView.drawing)
             self.registerCustomUndo(actionName: "Handschrift transformieren") { [weak self] in
                 guard let self = self else { return }
-                self.canvasView.drawing.strokes = prevStrokes
+                var d = self.canvasView.drawing
+                d.strokes = prevStrokes
+                self.canvasView.drawing = d
                 self.activeTransformBox?.dismiss()
                 self.store?.saveDrawing(self.canvasView.drawing)
             }
@@ -1233,14 +1236,16 @@ extension InfiniteNotebookViewController {
             let offset = CGAffineTransform(translationX: 30, y: 30)
             var duplicatedStrokes: [PKStroke] = []
             var newIndices: [Int] = []
-            let startIdx = self.canvasView.drawing.strokes.count
+            var d = self.canvasView.drawing
+            let startIdx = d.strokes.count
             for (i, s) in box.baseStrokes.enumerated() {
                 var clone = s
                 clone.transform = clone.transform.concatenating(offset)
                 duplicatedStrokes.append(clone)
                 newIndices.append(startIdx + i)
             }
-            self.canvasView.drawing.strokes.append(contentsOf: duplicatedStrokes)
+            d.strokes.append(contentsOf: duplicatedStrokes)
+            self.canvasView.drawing = d
             self.store?.saveDrawing(self.canvasView.drawing)
             self.showToastBanner(text: "Auswahl dupliziert", icon: "doc.on.doc")
             let newBounds = duplicatedStrokes.reduce(CGRect.null) { $0.union($1.renderBounds) }
@@ -1249,15 +1254,15 @@ extension InfiniteNotebookViewController {
 
         box.onChangeColor = { [weak self, weak box] newColor in
             guard let self = self, let box = box else { return }
-            var allStrokes = self.canvasView.drawing.strokes
+            var d = self.canvasView.drawing
             for (i, originalIdx) in box.strokeOriginalIndices.enumerated() {
-                guard originalIdx < allStrokes.count else { continue }
-                var s = allStrokes[originalIdx]
+                guard originalIdx < d.strokes.count else { continue }
+                var s = d.strokes[originalIdx]
                 s.ink = PKInk(s.ink.inkType, color: newColor)
-                allStrokes[originalIdx] = s
+                d.strokes[originalIdx] = s
                 box.baseStrokes[i].ink = PKInk(box.baseStrokes[i].ink.inkType, color: newColor)
             }
-            self.canvasView.drawing.strokes = allStrokes
+            self.canvasView.drawing = d
             self.store?.saveDrawing(self.canvasView.drawing)
         }
 
@@ -1265,15 +1270,19 @@ extension InfiniteNotebookViewController {
             guard let self = self, let box = box else { return }
             let prevStrokes = self.canvasView.drawing.strokes
             let removeIndices = Set(box.strokeOriginalIndices)
-            self.canvasView.drawing.strokes = self.canvasView.drawing.strokes.enumerated().compactMap { idx, stroke in
+            var d = self.canvasView.drawing
+            d.strokes = d.strokes.enumerated().compactMap { idx, stroke in
                 removeIndices.contains(idx) ? nil : stroke
             }
+            self.canvasView.drawing = d
             self.store?.saveDrawing(self.canvasView.drawing)
             box.dismiss()
             self.showToastBanner(text: "Auswahl gelöscht", icon: "trash")
             self.registerCustomUndo(actionName: "Auswahl löschen") { [weak self] in
                 guard let self = self else { return }
-                self.canvasView.drawing.strokes = prevStrokes
+                var d2 = self.canvasView.drawing
+                d2.strokes = prevStrokes
+                self.canvasView.drawing = d2
                 self.store?.saveDrawing(self.canvasView.drawing)
             }
         }
@@ -1425,6 +1434,7 @@ extension InfiniteNotebookViewController {
         ]
         tap.delegate = self
         canvasView.addGestureRecognizer(tap)
+        self.canvasTapToDeselect = tap
     }
 
     @objc private func handleCanvasTapToDeselect(_ gr: UITapGestureRecognizer) {
@@ -3117,6 +3127,18 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
             }
             if canvasView.panGestureRecognizer.state == .began || canvasView.panGestureRecognizer.state == .changed {
                 return false
+            }
+        }
+        return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if gestureRecognizer === canvasTapToDeselect {
+            if let box = activeTransformBox {
+                let loc = touch.location(in: box)
+                if box.point(inside: loc, with: nil) {
+                    return false
+                }
             }
         }
         return true

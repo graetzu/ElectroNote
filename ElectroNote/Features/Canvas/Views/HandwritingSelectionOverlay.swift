@@ -348,7 +348,17 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     var currentRotation: CGFloat = 0.0
 
     // Stroke selection context (if strokes are selected)
-    var baseStrokes: [PKStroke] = []
+    var isHandwriting: Bool = false {
+        didSet {
+            buildActionToolbar()
+            updateLayout()
+        }
+    }
+    var baseStrokes: [PKStroke] = [] {
+        didSet {
+            isHandwriting = !baseStrokes.isEmpty
+        }
+    }
     var strokeOriginalIndices: [Int] = []
     var baseTransforms: [CGAffineTransform] = []
 
@@ -479,6 +489,7 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     // MARK: - Action Toolbar
 
     private func buildActionToolbar() {
+        actionToolbar.contentView.subviews.forEach { $0.removeFromSuperview() }
         let stack = UIStackView()
         stack.axis = .horizontal
         stack.spacing = 6
@@ -506,8 +517,8 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         }
         stack.addArrangedSubview(dupBtn)
 
-        // 3. Color button (if strokes selected)
-        if !baseStrokes.isEmpty {
+        // 3. Color button (if handwriting strokes selected)
+        if isHandwriting || !baseStrokes.isEmpty {
             let colBtn = makeToolbarButton(title: "Farbe", icon: "paintpalette.fill") { [weak self] in
                 guard let self = self else { return }
                 UIView.animate(withDuration: 0.2) {
@@ -529,8 +540,8 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         }
         stack.addArrangedSubview(doneBtn)
 
-        let totalWidth: CGFloat = baseStrokes.isEmpty ? 290 : 360
-        actionToolbar.frame = CGRect(x: 0, y: 0, width: totalWidth, height: 36)
+        let totalWidth: CGFloat = (isHandwriting || !baseStrokes.isEmpty) ? 360 : 290
+        actionToolbar.bounds = CGRect(x: 0, y: 0, width: totalWidth, height: 36)
     }
 
     private func buildColorPalette() {
@@ -923,11 +934,36 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
 
     // Expand touch hit testing to include floating handles and toolbars
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        // Expand hit area upward by 140pt to cover the rotation handle (y = -30),
-        // degree/scale badge (y = -56), action toolbar (y = -72), and color palette (y = -116).
-        // Also expand by 30pt on left, right, and bottom for comfortable corner handle targets.
-        let touchRect = bounds.inset(by: UIEdgeInsets(top: -140, left: -30, bottom: -30, right: -30))
-        return touchRect.contains(point)
+        // 1. Toolbars
+        if !actionToolbar.isHidden {
+            let pt = convert(point, to: actionToolbar)
+            if actionToolbar.bounds.insetBy(dx: -12, dy: -12).contains(pt) {
+                return true
+            }
+        }
+        if !colorPaletteBar.isHidden {
+            let pt = convert(point, to: colorPaletteBar)
+            if colorPaletteBar.bounds.insetBy(dx: -12, dy: -12).contains(pt) {
+                return true
+            }
+        }
+
+        // 2. Rotation handle
+        let ptRot = convert(point, to: rotationHandle)
+        if rotationHandle.bounds.insetBy(dx: -16, dy: -16).contains(ptRot) {
+            return true
+        }
+
+        // 3. Corner handles
+        for h in [topLeftHandle, topRightHandle, bottomLeftHandle, bottomRightHandle] {
+            let ptH = convert(point, to: h)
+            if h.bounds.insetBy(dx: -16, dy: -16).contains(ptH) {
+                return true
+            }
+        }
+
+        // 4. Box body with generous hit target
+        return bounds.insetBy(dx: -20, dy: -20).contains(point)
     }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
@@ -935,19 +971,23 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
 
         // 1. Toolbars (highest priority)
         if !actionToolbar.isHidden {
-            let pt = convert(point, to: actionToolbar)
-            if actionToolbar.bounds.insetBy(dx: -8, dy: -8).contains(pt) {
-                if let hit = actionToolbar.hitTest(pt, with: event) {
+            let ptInToolbar = convert(point, to: actionToolbar)
+            if actionToolbar.bounds.insetBy(dx: -8, dy: -8).contains(ptInToolbar) {
+                let ptInContent = convert(point, to: actionToolbar.contentView)
+                if let hit = actionToolbar.contentView.hitTest(ptInContent, with: event) {
                     return hit
                 }
+                return actionToolbar
             }
         }
         if !colorPaletteBar.isHidden {
-            let pt = convert(point, to: colorPaletteBar)
-            if colorPaletteBar.bounds.insetBy(dx: -8, dy: -8).contains(pt) {
-                if let hit = colorPaletteBar.hitTest(pt, with: event) {
+            let ptInPalette = convert(point, to: colorPaletteBar)
+            if colorPaletteBar.bounds.insetBy(dx: -8, dy: -8).contains(ptInPalette) {
+                let ptInContent = convert(point, to: colorPaletteBar.contentView)
+                if let hit = colorPaletteBar.contentView.hitTest(ptInContent, with: event) {
                     return hit
                 }
+                return colorPaletteBar
             }
         }
 
@@ -966,10 +1006,6 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         }
 
         // 4. Box body for moving
-        if bounds.insetBy(dx: -10, dy: -10).contains(point) {
-            return self
-        }
-
-        return nil
+        return self
     }
 }
