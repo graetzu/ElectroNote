@@ -121,6 +121,7 @@ final class InfiniteNotebookViewModel: ObservableObject {
     @Published var showPAP:                       Bool = false
     @Published var showMindMap:                   Bool = false
     @Published var showWhiteboard:                Bool = false
+    @Published var showCircuitPicker:             Bool = false
     @Published var pendingInkPreset:              InkPreset? = nil
     @Published var showTextInsertion:             Bool = false
     @Published var pendingTextInsertion:          TypedTextInsertion? = nil

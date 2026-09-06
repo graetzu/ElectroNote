@@ -103,6 +103,11 @@ struct InfiniteNotebookHostView: View {
                 vm.pendingTextInsertion = .init(text: text, fontSize: fontSize)
             }
         }
+        .sheet(isPresented: $vm.showCircuitPicker) {
+            CircuitSymbolPickerView { image in
+                vm.pendingImage = image
+            }
+        }
     }
 
     // MARK: - Toolbar
@@ -233,6 +238,9 @@ struct InfiniteNotebookHostView: View {
                     Button { showClipArtPicker = true } label: {
                         Label("Symbol / ClipArt einfügen", systemImage: "star.square")
                     }
+                    Button { vm.showCircuitPicker = true } label: {
+                        Label("⚡️ Schaltsymbole & Stromkreise…", systemImage: "bolt.badge.clock")
+                    }
                     Button { vm.showTextInsertion = true } label: {
                         Label("Text einfügen", systemImage: "text.cursor")
                     }
@@ -355,6 +363,7 @@ struct PenToolbarView: View {
     var onPaste: (() -> Void)? = nil
     var onTextRecognition: (() -> Void)? = nil
     var onMathRecognition: (() -> Void)? = nil
+    var onOpenCircuits: (() -> Void)? = nil
 
     init(vm: InfiniteNotebookViewModel) {
         self._activeTool = Binding(get: { vm.activeTool }, set: { vm.activeTool = $0 })
@@ -369,6 +378,7 @@ struct PenToolbarView: View {
         self.onPaste = { [weak vm] in vm?.triggerPaste = true }
         self.onTextRecognition = { [weak vm] in vm?.triggerHandwritingRecognition = true }
         self.onMathRecognition = { [weak vm] in vm?.triggerMathRecognition = true }
+        self.onOpenCircuits = { [weak vm] in vm?.showCircuitPicker = true }
     }
 
     var body: some View {
@@ -480,6 +490,27 @@ struct PenToolbarView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Mathe berechnen")
+
+                    // Elektrotechnik (Schaltsymbole & Stromkreise)
+                    Button {
+                        onOpenCircuits?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "bolt.badge.clock")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Schaltplan")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.yellow.opacity(0.95))
+                        .foregroundColor(Color.black)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Schaltsymbole und Stromkreise")
 
                     if activeTool == .lasso {
                         Button {

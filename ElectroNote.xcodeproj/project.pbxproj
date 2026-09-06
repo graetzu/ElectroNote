@@ -66,6 +66,9 @@
 		DOC00001 /* DocumentConverter.swift in Sources */   = {isa = PBXBuildFile; fileRef = DOCREF01 /* DocumentConverter.swift */; };
 		TEVB0001 /* TagEditorView.swift in Sources */       = {isa = PBXBuildFile; fileRef = TEV00001 /* TagEditorView.swift */; };
 		TBVB0001 /* TagBrowserView.swift in Sources */      = {isa = PBXBuildFile; fileRef = TBV00001 /* TagBrowserView.swift */; };
+		ELEC000100000000000000AA /* CircuitSymbol.swift in Sources */ = {isa = PBXBuildFile; fileRef = ELEF000100000000000000AA /* CircuitSymbol.swift */; };
+		ELEC000200000000000000BB /* CircuitSymbolRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = ELEF000200000000000000BB /* CircuitSymbolRenderer.swift */; };
+		ELEC000300000000000000CC /* CircuitSymbolPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ELEF000300000000000000CC /* CircuitSymbolPickerView.swift */; };
 		DTPB0001 /* DocumentTypePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DTPV0001 /* DocumentTypePickerView.swift */; };
 		LC01000000000000000000AA /* LiveCastServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0100000000000000000AA /* LiveCastServer.swift */; };
 		LC02000000000000000000BB /* LiveCastSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0200000000000000000BB /* LiveCastSheetView.swift */; };
@@ -142,6 +145,9 @@
 		DTPV0001 /* DocumentTypePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentTypePickerView.swift; sourceTree = "<group>"; };
 		EFMREF01 /* ExternalFileImportManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalFileImportManager.swift; sourceTree = "<group>"; };
 		IFIREF01 /* IncomingFileImportSheet.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomingFileImportSheet.swift;   sourceTree = "<group>"; };
+		ELEF000100000000000000AA /* CircuitSymbol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/CircuitSymbol.swift; sourceTree = "<group>"; };
+		ELEF000200000000000000BB /* CircuitSymbolRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CircuitSymbolRenderer.swift; sourceTree = "<group>"; };
+		ELEF000300000000000000CC /* CircuitSymbolPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/CircuitSymbolPickerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -313,8 +319,19 @@
 				E444F98B1D4EA227548C3F18 /* Sync */,
 				BB99887766554433221100FF /* Whiteboard */,
 				CC99887766554433221100FF /* LiveCast */,
+				EE99887766554433221100FF /* Electrical */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		EE99887766554433221100FF /* Electrical */ = {
+			isa = PBXGroup;
+			children = (
+				ELEF000100000000000000AA /* CircuitSymbol.swift */,
+				ELEF000200000000000000BB /* CircuitSymbolRenderer.swift */,
+				ELEF000300000000000000CC /* CircuitSymbolPickerView.swift */,
+			);
+			path = Electrical;
 			sourceTree = "<group>";
 		};
 		CC99887766554433221100FF /* LiveCast */ = {
@@ -640,6 +657,9 @@
 				LC03000000000000000000CC /* LiveCastBadgeView.swift in Sources */,
 				EFM00001 /* ExternalFileImportManager.swift in Sources */,
 				IFI00001 /* IncomingFileImportSheet.swift in Sources */,
+				ELEC000100000000000000AA /* CircuitSymbol.swift in Sources */,
+				ELEC000200000000000000BB /* CircuitSymbolRenderer.swift in Sources */,
+				ELEC000300000000000000CC /* CircuitSymbolPickerView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
