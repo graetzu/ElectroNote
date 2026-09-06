@@ -1116,10 +1116,12 @@ extension InfiniteNotebookViewController {
     }
 
     private func disableLassoMode() {
-        activeTransformBox?.dismiss()
-        lassoOverlay?.removeFromSuperview()
-        lassoOverlay = nil
-        if currentCanvasToolType != .pan {
+        if lassoOverlay != nil {
+            activeTransformBox?.dismiss()
+            lassoOverlay?.removeFromSuperview()
+            lassoOverlay = nil
+        }
+        if currentCanvasToolType != .pan && activeTransformBox == nil {
             canvasView.drawingGestureRecognizer.isEnabled = true
         }
     }
@@ -1188,6 +1190,8 @@ extension InfiniteNotebookViewController {
         canvasView.bringSubviewToFront(paperOverlayView)
         activeTransformBox = box
         canvasView.drawingGestureRecognizer.isEnabled = false
+        canvasView.isScrollEnabled = false
+        canvasView.canCancelContentTouches = false
         box.attachCanvasGestureRequirements(canvasView, additionalPanGesture: pencilScrollPanGesture)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
@@ -1277,6 +1281,8 @@ extension InfiniteNotebookViewController {
         box.onDismiss = { [weak self] in
             if self?.activeTransformBox === box {
                 self?.activeTransformBox = nil
+                self?.canvasView.isScrollEnabled = true
+                self?.canvasView.canCancelContentTouches = true
                 if self?.currentCanvasToolType != .pan && self?.currentCanvasToolType != .lasso {
                     self?.canvasView.drawingGestureRecognizer.isEnabled = true
                 }
@@ -1305,6 +1311,8 @@ extension InfiniteNotebookViewController {
         canvasView.bringSubviewToFront(paperOverlayView)
         activeTransformBox = box
         canvasView.drawingGestureRecognizer.isEnabled = false
+        canvasView.isScrollEnabled = false
+        canvasView.canCancelContentTouches = false
         box.attachCanvasGestureRequirements(canvasView, additionalPanGesture: pencilScrollPanGesture)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
@@ -1384,6 +1392,8 @@ extension InfiniteNotebookViewController {
             if self?.activeTransformBox === box {
                 self?.activeTransformBox = nil
                 self?.imageHandles.values.forEach { $0.setSelected(false) }
+                self?.canvasView.isScrollEnabled = true
+                self?.canvasView.canCancelContentTouches = true
                 if self?.currentCanvasToolType != .pan && self?.currentCanvasToolType != .lasso {
                     self?.canvasView.drawingGestureRecognizer.isEnabled = true
                 }
