@@ -104,7 +104,7 @@ struct InfiniteNotebookHostView: View {
             }
         }
         .sheet(isPresented: $vm.showCircuitPicker) {
-            CircuitSymbolPickerView { image in
+            CircuitSymbolPickerView(isDarkCanvas: vm.darkDrawingMode) { image in
                 vm.pendingImage = image
             }
         }

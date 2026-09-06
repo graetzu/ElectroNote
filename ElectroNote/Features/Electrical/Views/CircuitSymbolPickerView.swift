@@ -2,9 +2,9 @@ import SwiftUI
 import UIKit
 
 struct CircuitSymbolPickerView: View {
+    var isDarkCanvas: Bool = false
     let onInsert: (UIImage) -> Void
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
 
     @State private var selectedCategory: CircuitCategory = .passives
     @State private var searchText: String = ""
@@ -14,6 +14,7 @@ struct CircuitSymbolPickerView: View {
     enum CircuitColorChoice: String, CaseIterable, Identifiable {
         case adaptive = "Standard"
         case black    = "Schwarz"
+        case white    = "Weiß"
         case blue     = "Blau"
         case red      = "Rot"
         case green    = "Grün"
@@ -21,12 +22,14 @@ struct CircuitSymbolPickerView: View {
 
         var id: String { rawValue }
 
-        func uiColor(for scheme: ColorScheme) -> UIColor {
+        func uiColor(isDarkCanvas: Bool) -> UIColor {
             switch self {
             case .adaptive:
-                return scheme == .dark ? .white : .black
+                return isDarkCanvas ? .white : .black
             case .black:
                 return .black
+            case .white:
+                return .white
             case .blue:
                 return UIColor(red: 0.08, green: 0.45, blue: 0.95, alpha: 1.0)
             case .red:
@@ -38,10 +41,11 @@ struct CircuitSymbolPickerView: View {
             }
         }
 
-        var previewColor: Color {
+        func previewColor(isDarkCanvas: Bool) -> Color {
             switch self {
-            case .adaptive: return .primary
+            case .adaptive: return isDarkCanvas ? .white : .black
             case .black:    return .black
+            case .white:    return .white
             case .blue:     return .blue
             case .red:      return .red
             case .green:    return .green
@@ -112,17 +116,17 @@ struct CircuitSymbolPickerView: View {
                                     selectedColorKey = choice
                                 } label: {
                                     Circle()
-                                        .fill(choice.previewColor)
+                                        .fill(choice.previewColor(isDarkCanvas: isDarkCanvas))
                                         .frame(width: 22, height: 22)
                                         .overlay(
                                             Circle()
-                                                .stroke(Color.primary.opacity(0.3), lineWidth: 1)
+                                                .stroke(Color.primary.opacity(0.35), lineWidth: 1)
                                         )
                                         .overlay(
                                             selectedColorKey == choice ?
                                                 Image(systemName: "checkmark")
                                                     .font(.system(size: 10, weight: .black))
-                                                    .foregroundColor(choice == .adaptive && colorScheme == .dark ? .black : .white)
+                                                    .foregroundColor(choice == .white || (choice == .adaptive && isDarkCanvas) ? .black : .white)
                                                 : nil
                                         )
                                 }
@@ -155,10 +159,11 @@ struct CircuitSymbolPickerView: View {
                         ForEach(filteredSymbols) { symbol in
                             CircuitSymbolCard(
                                 symbol: symbol,
-                                strokeColor: selectedColorKey.uiColor(for: colorScheme),
-                                lineWidth: isBoldStroke ? 4.2 : 2.6
+                                strokeColor: selectedColorKey.uiColor(isDarkCanvas: isDarkCanvas),
+                                lineWidth: isBoldStroke ? 4.2 : 2.6,
+                                isDarkCanvas: isDarkCanvas
                             ) {
-                                let strokeCol = selectedColorKey.uiColor(for: colorScheme)
+                                let strokeCol = selectedColorKey.uiColor(isDarkCanvas: isDarkCanvas)
                                 let lw: CGFloat = isBoldStroke ? 4.2 : 2.6
                                 let img = CircuitSymbolRenderer.shared.render(
                                     symbol: symbol,
@@ -194,6 +199,7 @@ private struct CircuitSymbolCard: View {
     let symbol: CircuitSymbolType
     let strokeColor: UIColor
     let lineWidth: CGFloat
+    var isDarkCanvas: Bool = false
     let onSelect: () -> Void
 
     @State private var previewImage: UIImage? = nil
@@ -203,7 +209,11 @@ private struct CircuitSymbolCard: View {
             VStack(spacing: 6) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(uiColor: .tertiarySystemBackground))
+                        .fill(isDarkCanvas ? Color(white: 0.16) : Color.white)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                        )
 
                     if let img = previewImage {
                         Image(uiImage: img)

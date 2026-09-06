@@ -931,14 +931,13 @@ final class CircuitSymbolRenderer {
         // Draw DC source on left side
         let sourceY = circuitRect.midY
         let srcR: CGFloat = 22
-        cg.setFillColor(UIColor.systemBackground.cgColor)
-        cg.fill(CGRect(x: circuitRect.minX - srcR - 4, y: sourceY - srcR - 4, width: (srcR + 4)*2, height: (srcR + 4)*2))
+        cg.clear(CGRect(x: circuitRect.minX - srcR - 4, y: sourceY - srcR - 4, width: (srcR + 4)*2, height: (srcR + 4)*2))
         cg.strokeEllipse(in: CGRect(x: circuitRect.minX - srcR, y: sourceY - srcR, width: srcR*2, height: srcR*2))
         drawText("U", at: CGPoint(x: circuitRect.minX - srcR - 16, y: sourceY), color: strokeColor, font: .boldSystemFont(ofSize: 14))
 
         // Draw Switch on top branch
         let swX = circuitRect.midX
-        cg.fill(CGRect(x: swX - 25, y: circuitRect.minY - 12, width: 50, height: 24))
+        cg.clear(CGRect(x: swX - 25, y: circuitRect.minY - 12, width: 50, height: 24))
         cg.move(to: CGPoint(x: swX - 18, y: circuitRect.minY))
         cg.addLine(to: CGPoint(x: swX + 16, y: circuitRect.minY - 14))
         cg.strokePath()
@@ -947,7 +946,7 @@ final class CircuitSymbolRenderer {
         // Draw Lamp on right branch
         let lampY = circuitRect.midY
         let lampR: CGFloat = 20
-        cg.fill(CGRect(x: circuitRect.maxX - lampR - 4, y: lampY - lampR - 4, width: (lampR + 4)*2, height: (lampR + 4)*2))
+        cg.clear(CGRect(x: circuitRect.maxX - lampR - 4, y: lampY - lampR - 4, width: (lampR + 4)*2, height: (lampR + 4)*2))
         cg.strokeEllipse(in: CGRect(x: circuitRect.maxX - lampR, y: lampY - lampR, width: lampR*2, height: lampR*2))
         let ld = lampR * 0.7071
         cg.move(to: CGPoint(x: circuitRect.maxX - ld, y: lampY - ld))
@@ -964,8 +963,7 @@ final class CircuitSymbolRenderer {
 
         // Source left
         let srcR: CGFloat = 22
-        cg.setFillColor(UIColor.systemBackground.cgColor)
-        cg.fill(CGRect(x: circuitRect.minX - srcR - 4, y: circuitRect.midY - srcR - 4, width: (srcR + 4)*2, height: (srcR + 4)*2))
+        cg.clear(CGRect(x: circuitRect.minX - srcR - 4, y: circuitRect.midY - srcR - 4, width: (srcR + 4)*2, height: (srcR + 4)*2))
         cg.strokeEllipse(in: CGRect(x: circuitRect.minX - srcR, y: circuitRect.midY - srcR, width: srcR*2, height: srcR*2))
         drawText("U0", at: CGPoint(x: circuitRect.minX - srcR - 16, y: circuitRect.midY), color: strokeColor, font: .boldSystemFont(ofSize: 13))
 
@@ -976,11 +974,11 @@ final class CircuitSymbolRenderer {
         let r2X = circuitRect.minX + circuitRect.width * 0.75
         let topY = circuitRect.minY
 
-        cg.fill(CGRect(x: r1X - rw/2 - 2, y: topY - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: r1X - rw/2 - 2, y: topY - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: r1X - rw/2, y: topY - rh/2, width: rw, height: rh))
         drawText("R1", at: CGPoint(x: r1X, y: topY - rh/2 - 12), color: strokeColor, font: .boldSystemFont(ofSize: 13))
 
-        cg.fill(CGRect(x: r2X - rw/2 - 2, y: topY - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: r2X - rw/2 - 2, y: topY - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: r2X - rw/2, y: topY - rh/2, width: rw, height: rh))
         drawText("R2", at: CGPoint(x: r2X, y: topY - rh/2 - 12), color: strokeColor, font: .boldSystemFont(ofSize: 13))
     }
@@ -1009,8 +1007,7 @@ final class CircuitSymbolRenderer {
 
         // Source on left
         let srcR: CGFloat = 20
-        cg.setFillColor(UIColor.systemBackground.cgColor)
-        cg.fill(CGRect(x: leftX - srcR - 3, y: (topY+botY)/2 - srcR - 3, width: (srcR+3)*2, height: (srcR+3)*2))
+        cg.clear(CGRect(x: leftX - srcR - 3, y: (topY+botY)/2 - srcR - 3, width: (srcR+3)*2, height: (srcR+3)*2))
         cg.strokeEllipse(in: CGRect(x: leftX - srcR, y: (topY+botY)/2 - srcR, width: srcR*2, height: srcR*2))
         drawText("U", at: CGPoint(x: leftX - srcR - 14, y: (topY+botY)/2), color: strokeColor, font: .boldSystemFont(ofSize: 13))
 
@@ -1018,12 +1015,12 @@ final class CircuitSymbolRenderer {
         let rw: CGFloat = 20
         let rh: CGFloat = 46
         let midY = (topY + botY) / 2
-        cg.fill(CGRect(x: branch1X - rw/2 - 2, y: midY - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: branch1X - rw/2 - 2, y: midY - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: branch1X - rw/2, y: midY - rh/2, width: rw, height: rh))
         drawText("R1", at: CGPoint(x: branch1X + rw/2 + 14, y: midY), color: strokeColor, font: .boldSystemFont(ofSize: 13))
 
         // R2 in branch 2
-        cg.fill(CGRect(x: branch2X - rw/2 - 2, y: midY - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: branch2X - rw/2 - 2, y: midY - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: branch2X - rw/2, y: midY - rh/2, width: rw, height: rh))
         drawText("R2", at: CGPoint(x: branch2X + rw/2 + 14, y: midY), color: strokeColor, font: .boldSystemFont(ofSize: 13))
     }
@@ -1045,12 +1042,11 @@ final class CircuitSymbolRenderer {
         let r1Y = topY + (midY - topY)/2
         let r2Y = midY + (botY - midY)/2
 
-        cg.setFillColor(UIColor.systemBackground.cgColor)
-        cg.fill(CGRect(x: x - rw/2 - 2, y: r1Y - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: x - rw/2 - 2, y: r1Y - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: x - rw/2, y: r1Y - rh/2, width: rw, height: rh))
         drawText("R1", at: CGPoint(x: x - rw/2 - 16, y: r1Y), color: strokeColor, font: .boldSystemFont(ofSize: 13))
 
-        cg.fill(CGRect(x: x - rw/2 - 2, y: r2Y - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: x - rw/2 - 2, y: r2Y - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: x - rw/2, y: r2Y - rh/2, width: rw, height: rh))
         drawText("R2", at: CGPoint(x: x - rw/2 - 16, y: r2Y), color: strokeColor, font: .boldSystemFont(ofSize: 13))
 
@@ -1094,8 +1090,7 @@ final class CircuitSymbolRenderer {
         cg.move(to: leftP); cg.addLine(to: rightP)
         cg.strokePath()
         let vmR: CGFloat = 16
-        cg.setFillColor(UIColor.systemBackground.cgColor)
-        cg.fill(CGRect(x: cx - vmR, y: cy - vmR, width: vmR*2, height: vmR*2))
+        cg.clear(CGRect(x: cx - vmR, y: cy - vmR, width: vmR*2, height: vmR*2))
         cg.strokeEllipse(in: CGRect(x: cx - vmR, y: cy - vmR, width: vmR*2, height: vmR*2))
         drawText("V", at: CGPoint(x: cx, y: cy), color: strokeColor, font: .boldSystemFont(ofSize: 13))
 
@@ -1142,8 +1137,7 @@ final class CircuitSymbolRenderer {
         let rX = rect.midX - 35
         let rw: CGFloat = 50
         let rh: CGFloat = 20
-        cg.setFillColor(UIColor.systemBackground.cgColor)
-        cg.fill(CGRect(x: rX - rw/2 - 2, y: topY - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: rX - rw/2 - 2, y: topY - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: rX - rw/2, y: topY - rh/2, width: rw, height: rh))
         drawText("R", at: CGPoint(x: rX, y: topY - rh/2 - 12), color: strokeColor, font: .boldSystemFont(ofSize: 13))
 
@@ -1151,7 +1145,7 @@ final class CircuitSymbolRenderer {
         let capY = (topY + botY) / 2
         let ch: CGFloat = 12
         let cw: CGFloat = 34
-        cg.fill(CGRect(x: capX - cw/2, y: capY - ch/2, width: cw, height: ch))
+        cg.clear(CGRect(x: capX - cw/2, y: capY - ch/2, width: cw, height: ch))
         cg.move(to: CGPoint(x: capX - cw/2, y: capY - ch/2))
         cg.addLine(to: CGPoint(x: capX + cw/2, y: capY - ch/2))
         cg.move(to: CGPoint(x: capX - cw/2, y: capY + ch/2))
@@ -1185,8 +1179,7 @@ final class CircuitSymbolRenderer {
         let capX = rect.midX - 35
         let ch: CGFloat = 34
         let cw: CGFloat = 12
-        cg.setFillColor(UIColor.systemBackground.cgColor)
-        cg.fill(CGRect(x: capX - cw/2, y: topY - ch/2, width: cw, height: ch))
+        cg.clear(CGRect(x: capX - cw/2, y: topY - ch/2, width: cw, height: ch))
         cg.move(to: CGPoint(x: capX - cw/2, y: topY - ch/2))
         cg.addLine(to: CGPoint(x: capX - cw/2, y: topY + ch/2))
         cg.move(to: CGPoint(x: capX + cw/2, y: topY - ch/2))
@@ -1198,7 +1191,7 @@ final class CircuitSymbolRenderer {
         let rY = (topY + botY) / 2
         let rw: CGFloat = 20
         let rh: CGFloat = 46
-        cg.fill(CGRect(x: rBranchX - rw/2 - 2, y: rY - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: rBranchX - rw/2 - 2, y: rY - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: rBranchX - rw/2, y: rY - rh/2, width: rw, height: rh))
         drawText("R", at: CGPoint(x: rBranchX + rw/2 + 14, y: rY), color: strokeColor, font: .boldSystemFont(ofSize: 13))
 
@@ -1246,8 +1239,7 @@ final class CircuitSymbolRenderer {
 
         let rw: CGFloat = 18
         let rh: CGFloat = 40
-        cg.setFillColor(UIColor.systemBackground.cgColor)
-        cg.fill(CGRect(x: loadX - rw/2 - 2, y: cy - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: loadX - rw/2 - 2, y: cy - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: loadX - rw/2, y: cy - rh/2, width: rw, height: rh))
         drawText("RL", at: CGPoint(x: loadX + rw/2 + 12, y: cy), color: strokeColor, font: .boldSystemFont(ofSize: 11))
 
@@ -1299,8 +1291,7 @@ final class CircuitSymbolRenderer {
         let r1X = (inX + nodeX) / 2
         let rw: CGFloat = 40
         let rh: CGFloat = 16
-        cg.setFillColor(UIColor.systemBackground.cgColor)
-        cg.fill(CGRect(x: r1X - rw/2 - 2, y: inY1 - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: r1X - rw/2 - 2, y: inY1 - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: r1X - rw/2, y: inY1 - rh/2, width: rw, height: rh))
         drawText("R1", at: CGPoint(x: r1X, y: inY1 - rh/2 - 10), color: strokeColor, font: .boldSystemFont(ofSize: 11))
 
@@ -1321,7 +1312,7 @@ final class CircuitSymbolRenderer {
 
         // Rf in feedback wire
         let rfX = cx
-        cg.fill(CGRect(x: rfX - rw/2 - 2, y: fbY - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: rfX - rw/2 - 2, y: fbY - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: rfX - rw/2, y: fbY - rh/2, width: rw, height: rh))
         drawText("Rf", at: CGPoint(x: rfX, y: fbY - rh/2 - 10), color: strokeColor, font: .boldSystemFont(ofSize: 11))
 
@@ -1380,8 +1371,7 @@ final class CircuitSymbolRenderer {
         let rw: CGFloat = 38
         let rh: CGFloat = 16
         let rfX = cx
-        cg.setFillColor(UIColor.systemBackground.cgColor)
-        cg.fill(CGRect(x: rfX - rw/2 - 2, y: fbY - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: rfX - rw/2 - 2, y: fbY - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: rfX - rw/2, y: fbY - rh/2, width: rw, height: rh))
         drawText("R2", at: CGPoint(x: rfX, y: fbY - rh/2 - 10), color: strokeColor, font: .boldSystemFont(ofSize: 11))
 
@@ -1391,7 +1381,7 @@ final class CircuitSymbolRenderer {
         cg.strokePath()
 
         let r1Y = inY1 + 18
-        cg.fill(CGRect(x: nodeX - rh/2 - 2, y: r1Y - rw/2 - 2, width: rh + 4, height: rw + 4))
+        cg.clear(CGRect(x: nodeX - rh/2 - 2, y: r1Y - rw/2 - 2, width: rh + 4, height: rw + 4))
         cg.stroke(CGRect(x: nodeX - rh/2, y: r1Y - rw/2, width: rh, height: rw))
         drawText("R1", at: CGPoint(x: nodeX - rh/2 - 12, y: r1Y), color: strokeColor, font: .boldSystemFont(ofSize: 11))
 
@@ -1405,8 +1395,7 @@ final class CircuitSymbolRenderer {
 
         // DC Source on left
         let srcR: CGFloat = 20
-        cg.setFillColor(UIColor.systemBackground.cgColor)
-        cg.fill(CGRect(x: circuitRect.minX - srcR - 4, y: circuitRect.midY - srcR - 4, width: (srcR+4)*2, height: (srcR+4)*2))
+        cg.clear(CGRect(x: circuitRect.minX - srcR - 4, y: circuitRect.midY - srcR - 4, width: (srcR+4)*2, height: (srcR+4)*2))
         cg.strokeEllipse(in: CGRect(x: circuitRect.minX - srcR, y: circuitRect.midY - srcR, width: srcR*2, height: srcR*2))
         drawText("U0", at: CGPoint(x: circuitRect.minX - srcR - 14, y: circuitRect.midY), color: strokeColor, font: .boldSystemFont(ofSize: 13))
 
@@ -1414,7 +1403,7 @@ final class CircuitSymbolRenderer {
         let rvX = circuitRect.minX + circuitRect.width * 0.4
         let rw: CGFloat = 46
         let rh: CGFloat = 18
-        cg.fill(CGRect(x: rvX - rw/2 - 2, y: circuitRect.minY - rh/2 - 2, width: rw + 4, height: rh + 4))
+        cg.clear(CGRect(x: rvX - rw/2 - 2, y: circuitRect.minY - rh/2 - 2, width: rw + 4, height: rh + 4))
         cg.stroke(CGRect(x: rvX - rw/2, y: circuitRect.minY - rh/2, width: rw, height: rh))
         drawText("Rv", at: CGPoint(x: rvX, y: circuitRect.minY - rh/2 - 12), color: strokeColor, font: .boldSystemFont(ofSize: 13))
 
@@ -1422,7 +1411,7 @@ final class CircuitSymbolRenderer {
         let ledY = circuitRect.midY
         let dw: CGFloat = 26
         let dh: CGFloat = 26
-        cg.fill(CGRect(x: circuitRect.maxX - dw - 6, y: ledY - dh/2 - 6, width: (dw+6)*2, height: dh + 12))
+        cg.clear(CGRect(x: circuitRect.maxX - dw - 6, y: ledY - dh/2 - 6, width: (dw+6)*2, height: dh + 12))
 
         cg.move(to: CGPoint(x: circuitRect.maxX - dw/2, y: ledY - dh/2))
         cg.addLine(to: CGPoint(x: circuitRect.maxX + dw/2, y: ledY - dh/2))

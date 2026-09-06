@@ -328,6 +328,10 @@ final class RotationHandleView: UIView {
         visualCircle.addSubview(icon)
     }
 
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        return bounds.insetBy(dx: -16, dy: -16).contains(point)
+    }
+
     required init?(coder: NSCoder) { fatalError() }
 }
 
@@ -355,6 +359,7 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     var baseFontSize: CGFloat?
 
     // Gesture tracking state
+    private var movePan: UIPanGestureRecognizer?
     private var initialCornerDistance: CGFloat = 100
     private var initialScaleOnCornerPan: CGFloat = 1.0
 
@@ -590,6 +595,7 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         movePan.allowedTouchTypes = touchTypes
         movePan.delegate = self
         addGestureRecognizer(movePan)
+        self.movePan = movePan
 
         // 2. Rotation Pan
         let rotPan = UIPanGestureRecognizer(target: self, action: #selector(handleRotationPan(_:)))
@@ -613,6 +619,26 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         addGestureRecognizer(rotate)
     }
 
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if gestureRecognizer === movePan {
+            // Never allow movePan to start if the user touched a corner handle, rotation handle, or toolbar
+            if touch.view is CornerHandleView || touch.view is RotationHandleView {
+                return false
+            }
+            if let v = touch.view {
+                if v.isDescendant(of: rotationHandle) || v.isDescendant(of: actionToolbar) || v.isDescendant(of: colorPaletteBar) {
+                    return false
+                }
+                for h in [topLeftHandle, topRightHandle, bottomLeftHandle, bottomRightHandle] {
+                    if v === h || v.isDescendant(of: h) {
+                        return false
+                    }
+                }
+            }
+        }
+        return true
+    }
+
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         // Only allow simultaneous recognition between pinch and rotate on this transform box
         let isOurPinch = gestureRecognizer is UIPinchGestureRecognizer && gestureRecognizer.view === self
@@ -624,9 +650,12 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        // Prevent scroll/pan gestures on parent views from stealing touch while moving, rotating, or scaling the transform box
-        if otherGestureRecognizer is UIPanGestureRecognizer && otherGestureRecognizer.view !== self && otherGestureRecognizer.view !== rotationHandle && !isCornerHandle(otherGestureRecognizer.view) {
-            return true
+        // Prevent scroll/pan/pinch gestures on parent views (like canvasView) from stealing touches while interacting with the transform box
+        let isParentGesture = otherGestureRecognizer.view !== self && otherGestureRecognizer.view !== rotationHandle && !isCornerHandle(otherGestureRecognizer.view)
+        if isParentGesture {
+            if otherGestureRecognizer is UIPanGestureRecognizer || otherGestureRecognizer is UIPinchGestureRecognizer || otherGestureRecognizer is UIRotationGestureRecognizer {
+                return true
+            }
         }
         return false
     }
@@ -839,7 +868,18 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     }
 
     // Expand touch hit testing to include floating handles and toolbars
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        // Expand hit area upward by 140pt to cover the rotation handle (y = -30),
+        // degree/scale badge (y = -56), action toolbar (y = -72), and color palette (y = -116).
+        // Also expand by 30pt on left, right, and bottom for comfortable corner handle targets.
+        let touchRect = bounds.inset(by: UIEdgeInsets(top: -140, left: -30, bottom: -30, right: -30))
+        return touchRect.contains(point)
+    }
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard self.point(inside: point, with: event) else { return nil }
+
+        // 1. Toolbars (highest priority)
         if !actionToolbar.isHidden {
             let pt = convert(point, to: actionToolbar)
             if actionToolbar.bounds.insetBy(dx: -8, dy: -8).contains(pt) {
@@ -856,18 +896,26 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
                 }
             }
         }
-        if rotationHandle.frame.insetBy(dx: -14, dy: -14).contains(point) {
+
+        // 2. Rotation handle
+        let ptInRot = convert(point, to: rotationHandle)
+        if rotationHandle.bounds.insetBy(dx: -16, dy: -16).contains(ptInRot) {
             return rotationHandle
         }
+
+        // 3. Corner handles
         for h in [topLeftHandle, topRightHandle, bottomLeftHandle, bottomRightHandle] {
             let ptInH = convert(point, to: h)
             if h.bounds.insetBy(dx: -16, dy: -16).contains(ptInH) {
                 return h
             }
         }
-        if bounds.insetBy(dx: -12, dy: -12).contains(point) {
+
+        // 4. Box body for moving
+        if bounds.insetBy(dx: -10, dy: -10).contains(point) {
             return self
         }
+
         return nil
     }
 }

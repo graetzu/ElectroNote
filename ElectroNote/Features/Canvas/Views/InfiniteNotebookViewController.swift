@@ -1067,11 +1067,20 @@ extension InfiniteNotebookViewController {
     private func handleLassoSelection(points: [CGPoint], boundingBox: CGRect) {
         activeTransformBox?.dismiss()
 
+        let zoom = max(canvasView.zoomScale, 0.01)
+        let unscaledPoints = points.map { CGPoint(x: $0.x / zoom, y: $0.y / zoom) }
+        let unscaledBox = CGRect(
+            x: boundingBox.origin.x / zoom,
+            y: boundingBox.origin.y / zoom,
+            width: boundingBox.width / zoom,
+            height: boundingBox.height / zoom
+        )
+
         // 1. Check for handwriting strokes inside the lasso
         let lassoPolygon = UIBezierPath()
-        if let first = points.first {
+        if let first = unscaledPoints.first {
             lassoPolygon.move(to: first)
-            for pt in points.dropFirst() { lassoPolygon.addLine(to: pt) }
+            for pt in unscaledPoints.dropFirst() { lassoPolygon.addLine(to: pt) }
             lassoPolygon.close()
         }
 
@@ -1081,7 +1090,7 @@ extension InfiniteNotebookViewController {
         for (idx, stroke) in canvasView.drawing.strokes.enumerated() {
             let b = stroke.renderBounds
             let mid = CGPoint(x: b.midX, y: b.midY)
-            if lassoPolygon.contains(mid) || boundingBox.contains(b) {
+            if lassoPolygon.contains(mid) || unscaledBox.contains(b) {
                 selectedIndices.append(idx)
                 selectedStrokes.append(stroke)
             }
@@ -1096,7 +1105,7 @@ extension InfiniteNotebookViewController {
         // 2. Check for inserted images / text elements
         for entry in document.insertedImages {
             let entryRect = CGRect(x: entry.startX, y: entry.startY, width: entry.width, height: entry.height)
-            if boundingBox.intersects(entryRect) || boundingBox.contains(entryRect) {
+            if unscaledBox.intersects(entryRect) || unscaledBox.contains(entryRect) {
                 presentTransformBox(forElementId: entry.id)
                 return
             }
@@ -1344,12 +1353,11 @@ extension InfiniteNotebookViewController {
     }
 
     @objc private func handleCanvasTapToDeselect(_ gr: UITapGestureRecognizer) {
-        let rawLoc = gr.location(in: canvasView)
-        let zoom = max(canvasView.zoomScale, 0.01)
-        let loc = CGPoint(x: rawLoc.x / zoom, y: rawLoc.y / zoom)
+        let loc = gr.location(in: paperBackgroundView)
 
         if let box = activeTransformBox {
-            if box.frame.insetBy(dx: -25, dy: -25).contains(loc) {
+            let locInBox = gr.location(in: box)
+            if box.point(inside: locInBox, with: nil) {
                 return
             }
             if let elementId = findElement(near: loc) {
@@ -1369,14 +1377,15 @@ extension InfiniteNotebookViewController {
     }
 
     @objc private func handleCanvasLongPress(_ gr: UILongPressGestureRecognizer) {
-        let rawLoc = gr.location(in: canvasView)
-        let zoom = max(canvasView.zoomScale, 0.01)
-        let loc = CGPoint(x: rawLoc.x / zoom, y: rawLoc.y / zoom)
+        let loc = gr.location(in: paperBackgroundView)
 
         switch gr.state {
         case .began:
-            if let box = activeTransformBox, box.frame.insetBy(dx: -15, dy: -15).contains(loc) {
-                return
+            if let box = activeTransformBox {
+                let locInBox = gr.location(in: box)
+                if box.point(inside: locInBox, with: nil) {
+                    return
+                }
             }
 
             // Immediately abort the stroke that PKCanvasView's drawing gesture began while pressing
