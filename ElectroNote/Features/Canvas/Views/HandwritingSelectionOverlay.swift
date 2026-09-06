@@ -359,9 +359,13 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     var baseFontSize: CGFloat?
 
     // Gesture tracking state
-    private var movePan: UIPanGestureRecognizer?
+    var movePan: UIPanGestureRecognizer?
+    var pinch: UIPinchGestureRecognizer?
+    var rotate: UIRotationGestureRecognizer?
     private var initialCornerDistance: CGFloat = 100
     private var initialScaleOnCornerPan: CGFloat = 1.0
+    private var initialPinchCenter: CGPoint = .zero
+    private var initialBoxCenterOnPinch: CGPoint = .zero
 
     // Callbacks
     var onLiveUpdateStrokes: ((_ center: CGPoint, _ scale: CGFloat, _ rotation: CGFloat) -> Void)?
@@ -600,12 +604,14 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         // 2. Rotation Pan
         let rotPan = UIPanGestureRecognizer(target: self, action: #selector(handleRotationPan(_:)))
         rotPan.allowedTouchTypes = touchTypes
+        rotPan.delegate = self
         rotationHandle.addGestureRecognizer(rotPan)
 
         // 3. Corner Scale Pans
         for h in [topLeftHandle, topRightHandle, bottomLeftHandle, bottomRightHandle] {
             let cornerPan = UIPanGestureRecognizer(target: self, action: #selector(handleCornerScalePan(_:)))
             cornerPan.allowedTouchTypes = touchTypes
+            cornerPan.delegate = self
             h.addGestureRecognizer(cornerPan)
         }
 
@@ -613,10 +619,42 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
         pinch.delegate = self
         addGestureRecognizer(pinch)
+        self.pinch = pinch
 
         let rotate = UIRotationGestureRecognizer(target: self, action: #selector(handleRotate(_:)))
         rotate.delegate = self
         addGestureRecognizer(rotate)
+        self.rotate = rotate
+    }
+
+    /// Explicitly tells the PKCanvasView's scroll and pinch recognizers to yield to our transform box
+    func attachCanvasGestureRequirements(_ canvasView: PKCanvasView, additionalPanGesture: UIPanGestureRecognizer? = nil) {
+        if let movePan {
+            canvasView.panGestureRecognizer.require(toFail: movePan)
+            additionalPanGesture?.require(toFail: movePan)
+        }
+        if let pinch {
+            canvasView.pinchGestureRecognizer?.require(toFail: pinch)
+            canvasView.panGestureRecognizer.require(toFail: pinch)
+            additionalPanGesture?.require(toFail: pinch)
+        }
+        if let rotate {
+            canvasView.pinchGestureRecognizer?.require(toFail: rotate)
+            canvasView.panGestureRecognizer.require(toFail: rotate)
+            additionalPanGesture?.require(toFail: rotate)
+        }
+        for h in [topLeftHandle, topRightHandle, bottomLeftHandle, bottomRightHandle] {
+            for gr in h.gestureRecognizers ?? [] {
+                canvasView.panGestureRecognizer.require(toFail: gr)
+                canvasView.pinchGestureRecognizer?.require(toFail: gr)
+                additionalPanGesture?.require(toFail: gr)
+            }
+        }
+        for gr in rotationHandle.gestureRecognizers ?? [] {
+            canvasView.panGestureRecognizer.require(toFail: gr)
+            canvasView.pinchGestureRecognizer?.require(toFail: gr)
+            additionalPanGesture?.require(toFail: gr)
+        }
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
@@ -649,7 +687,7 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         return (isOurPinch && otherIsOurRotate) || (isOurRotate && otherIsOurPinch)
     }
 
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         // Prevent scroll/pan/pinch gestures on parent views (like canvasView) from stealing touches while interacting with the transform box
         let isParentGesture = otherGestureRecognizer.view !== self && otherGestureRecognizer.view !== rotationHandle && !isCornerHandle(otherGestureRecognizer.view)
         if isParentGesture {
@@ -657,6 +695,10 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
                 return true
             }
         }
+        return false
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         return false
     }
 
@@ -753,15 +795,27 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     // MARK: - Two-finger Gestures
 
     @objc private func handlePinch(_ gr: UIPinchGestureRecognizer) {
-        if gr.state == .changed {
+        guard let sv = superview else { return }
+        switch gr.state {
+        case .began:
+            initialPinchCenter = gr.location(in: sv)
+            initialBoxCenterOnPinch = currentCenter
+            showBadge(text: "\(Int(round(currentScale * 100)))%")
+        case .changed:
+            let touchLoc = gr.location(in: sv)
+            let dx = touchLoc.x - initialPinchCenter.x
+            let dy = touchLoc.y - initialPinchCenter.y
+            currentCenter = CGPoint(x: initialBoxCenterOnPinch.x + dx, y: initialBoxCenterOnPinch.y + dy)
             currentScale = max(0.15, min(6.0, currentScale * gr.scale))
             gr.scale = 1.0
             updateLayout()
             showBadge(text: "\(Int(round(currentScale * 100)))%")
             triggerLiveUpdate()
-        } else if gr.state == .ended || gr.state == .cancelled {
+        case .ended, .cancelled:
             hideBadge()
             triggerCommit()
+        default:
+            hideBadge()
         }
     }
 

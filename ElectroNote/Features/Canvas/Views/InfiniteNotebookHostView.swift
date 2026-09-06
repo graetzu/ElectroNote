@@ -5,7 +5,7 @@ import PhotosUI
 struct InfiniteNotebookHostView: View {
     let item: DocumentItem
 
-    @StateObject private var vm = InfiniteNotebookViewModel()
+    @StateObject private var vm: InfiniteNotebookViewModel
     @StateObject private var syncVM = SyncViewModel()
     @State private var showNextcloudSheet = false
     @State private var showClipArtPicker  = false
@@ -14,7 +14,16 @@ struct InfiniteNotebookHostView: View {
 
     init(item: DocumentItem) {
         self.item  = item
-        self.store = NotebookDocumentStore(noteURL: item.path)
+        let st = NotebookDocumentStore(noteURL: item.path)
+        self.store = st
+        let doc = st.loadDocument()
+        let vm = InfiniteNotebookViewModel()
+        vm.background = doc.background
+        vm.lineSpacing = doc.lineSpacing
+        vm.mathEnabled = doc.mathEnabled
+        vm.darkDrawingMode = doc.darkDrawingMode
+        vm.shapeSnapEnabled = doc.shapeSnapEnabled
+        self._vm = StateObject(wrappedValue: vm)
     }
 
     var body: some View {
@@ -135,8 +144,28 @@ struct InfiniteNotebookHostView: View {
                 .labelStyle(.iconOnly)
                 .help("Automatischer Speicherstatus")
 
+            // Dark Mode / Hellmodus Direktschalter (1 Fingertipp)
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    vm.darkDrawingMode.toggle()
+                }
+            } label: {
+                Image(systemName: vm.darkDrawingMode ? "moon.fill" : "moon")
+            }
+            .tint(vm.darkDrawingMode ? .indigo : .primary)
+            .accessibilityLabel(vm.darkDrawingMode ? "Hellmodus aktivieren" : "Dunkelmodus aktivieren")
+            .help("Dunkelmodus umschalten")
+
             // Background template + line spacing
             Menu {
+                Section("Papierfarbe") {
+                    Toggle(isOn: $vm.darkDrawingMode) {
+                        Label(
+                            vm.darkDrawingMode ? "Dunkles Papier (Aktiv)" : "Dunkles Papier",
+                            systemImage: vm.darkDrawingMode ? "moon.fill" : "moon"
+                        )
+                    }
+                }
                 Section("Vorlage") {
                     ForEach(BackgroundStyle.allCases) { style in
                         Button { vm.background = style } label: {

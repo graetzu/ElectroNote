@@ -18,6 +18,7 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
         vc.onToolChanged = { [weak vm] newTool in
             Task { @MainActor in vm?.activeTool = newTool }
         }
+        vm.attach(vc: vc)
         context.coordinator.vc = vc
         return vc
     }

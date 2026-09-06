@@ -198,6 +198,7 @@ final class InfiniteNotebookViewController: UIViewController {
             loadDocument()
         }
         centerCanvasContent()
+        updateVisibleImages()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -337,9 +338,29 @@ final class InfiniteNotebookViewController: UIViewController {
         setupBackgroundLayer()
         refreshBackground()
 
-        document.insertedPDFs.forEach   { loadPDFEntry($0) }
+        // 1. Only unpack PDF if insertedImages is empty (migration / backwards compatibility)
+        if document.insertedImages.isEmpty {
+            document.insertedPDFs.forEach { loadPDFEntry($0) }
+        } else {
+            // De-duplicate any historic duplicate entries at the exact same location (recovers from multi-load bug)
+            var seenCoords = Set<String>()
+            var deduped: [InsertedImage] = []
+            for img in document.insertedImages {
+                let key = "\(Int(round(img.startX)))_\(Int(round(img.startY)))_\(Int(round(img.width)))_\(Int(round(img.height)))"
+                if !seenCoords.contains(key) {
+                    seenCoords.insert(key)
+                    deduped.append(img)
+                }
+            }
+            if deduped.count != document.insertedImages.count {
+                document.insertedImages = deduped
+                store?.saveDocument(document)
+            }
+        }
+
         document.insertedImages.forEach { loadImageEntry($0) }
         document.stickyNotes.forEach    { mountStickyNoteView($0) }
+        updateVisibleImages()
 
     }
 
@@ -921,17 +942,56 @@ extension InfiniteNotebookViewController {
     }
 
     private func loadImageEntry(_ entry: InsertedImage) {
-        guard let img = UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) else { return }
         let contentFrame = CGRect(x: entry.startX, y: entry.startY,
                                   width: entry.width, height: entry.height)
-        let imgView = makeImageView(image: img, frame: contentFrame)
+        let imgView = makeImageView(image: nil, frame: contentFrame)
         if let rot = entry.rotation, rot != 0 {
             imgView.transform = CGAffineTransform(rotationAngle: rot)
         }
         paperBackgroundView.addSubview(imgView)
         imageViews[entry.id] = imgView
         imageLayers[entry.id] = imgView.layer
+
+        if entry.textContent != nil {
+            // For text elements, load text image immediately so it's always readable
+            if let img = UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) {
+                imgView.image = img
+            }
+        }
+
         addImageHandle(for: imgView, at: contentFrame, id: entry.id, isText: entry.textContent != nil)
+    }
+
+    /// Dynamically loads bitmaps for images near the visible viewport and evicts offscreen bitmaps to keep RAM usage low.
+    func updateVisibleImages() {
+        guard !document.insertedImages.isEmpty else { return }
+        let zoom = max(canvasView.zoomScale, 0.01)
+        let scrollY = canvasView.contentOffset.y / zoom
+        let viewH = canvasView.bounds.height > 0 ? (canvasView.bounds.height / zoom) : 1000
+        // Generous prefetch buffer: ~2 screens above and below so scrolling is completely smooth
+        let buffer = max(viewH * 2.0, 1800)
+        let minVisibleY = scrollY - buffer
+        let maxVisibleY = scrollY + viewH + buffer
+
+        for entry in document.insertedImages {
+            guard let imgView = imageViews[entry.id] else { continue }
+            if entry.textContent != nil { continue }
+
+            let entryMaxY = entry.startY + entry.height
+            let isNearViewport = entryMaxY >= minVisibleY && entry.startY <= maxVisibleY
+
+            if isNearViewport {
+                if imgView.image == nil {
+                    let path = store.imageURL(filename: entry.filename).path
+                    imgView.image = UIImage(contentsOfFile: path)
+                }
+            } else {
+                if imgView.image != nil {
+                    // Evict offscreen bitmap from RAM
+                    imgView.image = nil
+                }
+            }
+        }
     }
 
     // MARK: - Layer helpers
@@ -966,7 +1026,7 @@ extension InfiniteNotebookViewController {
         return page.thumbnail(of: targetSize, for: .cropBox)
     }
 
-    private func makeImageView(image: UIImage, frame: CGRect) -> UIImageView {
+    private func makeImageView(image: UIImage?, frame: CGRect) -> UIImageView {
         let imgView = UIImageView(frame: frame)
         imgView.image = image
         imgView.contentMode = .scaleAspectFit
@@ -1128,6 +1188,7 @@ extension InfiniteNotebookViewController {
         canvasView.bringSubviewToFront(paperOverlayView)
         activeTransformBox = box
         canvasView.drawingGestureRecognizer.isEnabled = false
+        box.attachCanvasGestureRequirements(canvasView, additionalPanGesture: pencilScrollPanGesture)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
         box.onLiveUpdateStrokes = { [weak self, weak box] currentCenter, currentScale, currentRotation in
@@ -1239,10 +1300,12 @@ extension InfiniteNotebookViewController {
         box.isTextElement = isText
         box.baseFontSize = entry.fontSize
 
+        imageHandles.values.forEach { $0.setSelected(false) }
         paperOverlayView.addSubview(box)
         canvasView.bringSubviewToFront(paperOverlayView)
         activeTransformBox = box
         canvasView.drawingGestureRecognizer.isEnabled = false
+        box.attachCanvasGestureRequirements(canvasView, additionalPanGesture: pencilScrollPanGesture)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
         box.onLiveUpdateElement = { [weak box, weak self] currentCenter, currentScale, currentRotation in
@@ -1298,7 +1361,8 @@ extension InfiniteNotebookViewController {
             )
             self.document.insertedImages.append(clone)
             self.store?.saveDocument(self.document)
-            if let image = self.imageViews[id]?.image {
+            let image = self.imageViews[id]?.image ?? UIImage(contentsOfFile: self.store.imageURL(filename: orig.filename).path)
+            if let image {
                 let imgView = self.makeImageView(image: image, frame: CGRect(x: clone.startX, y: clone.startY, width: clone.width, height: clone.height))
                 imgView.transform = CGAffineTransform(rotationAngle: clone.rotation ?? 0)
                 self.paperBackgroundView.addSubview(imgView)
@@ -1319,6 +1383,7 @@ extension InfiniteNotebookViewController {
         box.onDismiss = { [weak self] in
             if self?.activeTransformBox === box {
                 self?.activeTransformBox = nil
+                self?.imageHandles.values.forEach { $0.setSelected(false) }
                 if self?.currentCanvasToolType != .pan && self?.currentCanvasToolType != .lasso {
                     self?.canvasView.drawingGestureRecognizer.isEnabled = true
                 }
@@ -2228,6 +2293,11 @@ extension InfiniteNotebookViewController: PKCanvasViewDelegate {
         paperBackgroundView.transform = CGAffineTransform(scaleX: scale, y: scale)
         paperOverlayView.transform = CGAffineTransform(scaleX: scale, y: scale)
         centerCanvasContent()
+        updateVisibleImages()
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        updateVisibleImages()
     }
 }
 
@@ -2717,7 +2787,7 @@ extension InfiniteNotebookViewController {
 
     func deleteInsertedElement(id: UUID, registerUndoAction: Bool = true) {
         let existingEntry = document.insertedImages.first(where: { $0.id == id })
-        let existingImage = imageViews[id]?.image
+        let existingImage = imageViews[id]?.image ?? (existingEntry.flatMap { UIImage(contentsOfFile: store.imageURL(filename: $0.filename).path) })
 
         if let imgView = imageViews.removeValue(forKey: id) {
             UIView.animate(withDuration: 0.15, animations: {
@@ -3014,7 +3084,7 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
             guard currentCanvasToolType == .pan else { return false }
             if let box = activeTransformBox {
                 let loc = gestureRecognizer.location(in: box)
-                if box.bounds.insetBy(dx: -15, dy: -15).contains(loc) {
+                if box.point(inside: loc, with: nil) {
                     return false
                 }
             }
@@ -3022,6 +3092,12 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
         }
 
         if gestureRecognizer === canvasLongPress {
+            if let box = activeTransformBox {
+                let loc = gestureRecognizer.location(in: box)
+                if box.point(inside: loc, with: nil) {
+                    return false
+                }
+            }
             // Never trigger canvas long press during 2-finger pinch or scroll gestures
             if gestureRecognizer.numberOfTouches > 1 {
                 return false
