@@ -235,6 +235,10 @@ final class InfiniteNotebookViewController: UIViewController {
         if !didLoad {
             didLoad = true
             loadDocument()
+            if canvasView.contentSize.width > view.bounds.width && view.bounds.width > 0 {
+                let fitScale = view.bounds.width / canvasView.contentSize.width
+                canvasView.setZoomScale(fitScale, animated: false)
+            }
         }
         centerCanvasContent()
         updateVisibleImages()
@@ -380,7 +384,9 @@ final class InfiniteNotebookViewController: UIViewController {
 
         let drawingMaxY = canvasView.drawing.bounds.isNull ? 0 : canvasView.drawing.bounds.maxY
         let h = max(document.documentHeight, drawingMaxY + Self.initialHeight * 0.5)
-        let w = max(view.bounds.width > 0 ? view.bounds.width : 834, 834)
+        let screenW = view.bounds.width > 0 ? view.bounds.width : 820
+        let docPagesMaxW = document.insertedImages.filter { isDocumentPage($0) }.map { $0.startX + $0.width }.max() ?? 0
+        let w = max(docPagesMaxW, min(screenW, 834), 820)
         canvasView.contentSize = CGSize(width: w, height: h)
 
         canvasView.overrideUserInterfaceStyle = document.darkDrawingMode ? .dark : .light
@@ -407,23 +413,26 @@ final class InfiniteNotebookViewController: UIViewController {
             }
         }
 
-        // Auto-scale existing document pages to full A4 page width
+        // Ensure document pages are flagged and laid out sequentially without overlapping
         var docPagesUpdated = false
+        var lastPageBottom: CGFloat = 0
+        var hasSeenDocPage = false
         for idx in 0..<document.insertedImages.count {
             if isDocumentPage(document.insertedImages[idx]) {
                 if document.insertedImages[idx].isDocumentPage != true {
                     document.insertedImages[idx].isDocumentPage = true
                     docPagesUpdated = true
                 }
-                if document.insertedImages[idx].width < w || document.insertedImages[idx].startX > 0 {
-                    let oldW = document.insertedImages[idx].width
-                    let oldH = document.insertedImages[idx].height
-                    let ratio = oldH / max(oldW, 1)
-                    document.insertedImages[idx].startX = 0
-                    document.insertedImages[idx].width = w
-                    let a4PageH = w * 1.41421356
-                    document.insertedImages[idx].height = (abs(ratio - 1.41421356) < 0.05) ? a4PageH : (w * ratio)
-                    docPagesUpdated = true
+                if !hasSeenDocPage {
+                    lastPageBottom = document.insertedImages[idx].startY + document.insertedImages[idx].height
+                    hasSeenDocPage = true
+                } else {
+                    // If a previous bug caused this page to overlap the prior page, repair startY
+                    if document.insertedImages[idx].startY < lastPageBottom {
+                        document.insertedImages[idx].startY = lastPageBottom
+                        docPagesUpdated = true
+                    }
+                    lastPageBottom = document.insertedImages[idx].startY + document.insertedImages[idx].height
                 }
             }
         }
@@ -572,11 +581,14 @@ final class InfiniteNotebookViewController: UIViewController {
         let offsetX = max((boundsSize.width - scaledWidth) * 0.5, 0)
         let offsetY = max((boundsSize.height - scaledHeight) * 0.5, 0)
 
+        // Only add horizontal inset if there is ample margin, avoiding right-side clipping
+        let horizontalInset: CGFloat = (boundsSize.width > scaledWidth + 32) ? max(offsetX, 16) : max(offsetX, 0)
+
         canvasView.contentInset = UIEdgeInsets(
             top: max(offsetY, 24),
-            left: max(offsetX, 16),
+            left: horizontalInset,
             bottom: max(offsetY, 24),
-            right: max(offsetX, 16)
+            right: horizontalInset
         )
     }
 
@@ -633,7 +645,7 @@ final class InfiniteNotebookViewController: UIViewController {
 
     private func cornellImage(spacing: CGFloat, bg: UIColor, line: UIColor) -> UIImage {
         // Dynamic A4 section matching current canvas width
-        let w = canvasView.contentSize.width > 0 ? canvasView.contentSize.width : max(view.bounds.width, 834)
+        let w = canvasView.contentSize.width > 0 ? canvasView.contentSize.width : (view.bounds.width > 0 ? view.bounds.width : 820)
         let h = w * 1.41421356 // Proportional ISO A4
         let cueCol: CGFloat   = max(w * 0.28, 175)
         let summaryH: CGFloat = max(h * 0.18, 160)
@@ -827,27 +839,32 @@ extension InfiniteNotebookViewController {
                 return
             }
 
-            let docW = max(self.canvasView.contentSize.width, 834)
-            let a4PageH = docW * 1.41421356
+            let docW = self.canvasView.contentSize.width > 0 ? self.canvasView.contentSize.width : (self.view.bounds.width > 0 ? self.view.bounds.width : 820)
 
             let drawingBottom = self.canvasView.drawing.bounds.isNull ? 0 : self.canvasView.drawing.bounds.maxY
             let pdfBottom     = self.document.insertedPDFs.last?.endY ?? 0
             let imgBottom     = self.document.insertedImages.last.map { $0.startY + $0.height } ?? 0
             let maxContent    = max(drawingBottom, pdfBottom, imgBottom)
 
-            let startY: CGFloat = (maxContent <= 10) ? 0 : (ceil(maxContent / a4PageH) * a4PageH)
+            let startY: CGFloat = (maxContent <= 10) ? 0 : (maxContent + 24)
             var y = startY
             var heights: [CGFloat] = []
 
             for i in 0..<pdf.pageCount {
                 guard let page = pdf.page(at: i) else { continue }
-                let b = page.bounds(for: .cropBox)
+                let b = page.bounds(for: .cropBox).width > 0 ? page.bounds(for: .cropBox) : page.bounds(for: .mediaBox)
+                let rot = (page.rotation % 360 + 360) % 360
+                let isLandscape = (rot == 90 || rot == 270)
+                let unscaledW = max(isLandscape ? b.height : b.width, 1)
+                let unscaledH = max(isLandscape ? b.width : b.height, 1)
+
                 let pageW = docW
-                let ratio = (b.width > 0 && b.height > 0) ? (b.height / b.width) : 1.41421356
-                let pageH = (abs(ratio - 1.41421356) < 0.05) ? a4PageH : (docW * ratio)
+                let pageH = (unscaledH / unscaledW) * pageW
                 heights.append(pageH)
 
-                let img = self.renderPDFPage(page, width: pageW, height: pageH)
+                let img = autoreleasepool {
+                    self.renderPDFPage(page, width: pageW, height: pageH)
+                }
                 let pageText = await OCRService.shared.extractText(from: page, fallbackImage: img)
                 if let imgFilename = try? self.store.saveImage(img) {
                     let pageId = UUID()
@@ -872,8 +889,9 @@ extension InfiniteNotebookViewController {
             let needed = y + Self.initialHeight * 0.3
             if needed > self.canvasView.contentSize.height {
                 self.canvasView.contentSize.height = needed
-                self.updateBackgroundFrame()
             }
+            self.updateBackgroundFrame()
+            self.updateVisibleImages()
 
             let entry = InsertedPDF(id: UUID(), filename: filename, startY: startY, pageHeights: heights)
             self.document.insertedPDFs.append(entry)
@@ -1217,17 +1235,22 @@ extension InfiniteNotebookViewController {
     private func loadPDFEntry(_ entry: InsertedPDF) {
         guard let pdf = PDFDocument(url: store.pdfURL(filename: entry.filename)) else { return }
         var y = entry.startY
-        let docW = max(canvasView.contentSize.width, 834)
-        let a4PageH = docW * 1.41421356
+        let docW = canvasView.contentSize.width > 0 ? canvasView.contentSize.width : (view.bounds.width > 0 ? view.bounds.width : 820)
 
         for (i, h) in entry.pageHeights.enumerated() {
             guard let page = pdf.page(at: i) else { continue }
-            let b = page.bounds(for: .cropBox)
-            let pageW = docW
-            let ratio = (b.width > 0 && b.height > 0) ? (b.height / b.width) : 1.41421356
-            let pageH = (abs(ratio - 1.41421356) < 0.05) ? a4PageH : (h > 0 ? h : (docW * ratio))
+            let b = page.bounds(for: .cropBox).width > 0 ? page.bounds(for: .cropBox) : page.bounds(for: .mediaBox)
+            let rot = (page.rotation % 360 + 360) % 360
+            let isLandscape = (rot == 90 || rot == 270)
+            let unscaledW = max(isLandscape ? b.height : b.width, 1)
+            let unscaledH = max(isLandscape ? b.width : b.height, 1)
 
-            let img = renderPDFPage(page, width: pageW, height: pageH)
+            let pageW = docW
+            let pageH = (h > 0) ? h : ((unscaledH / unscaledW) * pageW)
+
+            let img = autoreleasepool {
+                renderPDFPage(page, width: pageW, height: pageH)
+            }
             if let imgFilename = try? store.saveImage(img) {
                 let pageId = UUID()
                 let imageEntry = InsertedImage(
@@ -1327,8 +1350,8 @@ extension InfiniteNotebookViewController {
         if entry.isDocumentPage == true { return true }
         if entry.textContent == nil {
             let ratio = entry.height / max(entry.width, 1)
-            let docW = max(canvasView.contentSize.width, 834)
-            if (entry.width >= docW - 50 || entry.width == 595 || abs(entry.width - docW) < 5) && ratio >= 1.2 && ratio <= 1.65 {
+            let docW = canvasView.contentSize.width > 0 ? canvasView.contentSize.width : (view.bounds.width > 0 ? view.bounds.width : 820)
+            if (entry.width >= docW - 80 || entry.width == 595 || abs(entry.width - docW) < 10) && ratio >= 1.1 && ratio <= 1.7 {
                 return true
             }
             if document.insertedPDFs.contains(where: { $0.filename == entry.filename }) {
@@ -1545,10 +1568,14 @@ extension InfiniteNotebookViewController {
 
     @discardableResult
     private func addPDFLayer(page: PDFPage, at y: CGFloat, height: CGFloat? = nil) -> CGFloat {
-        let bounds = page.bounds(for: .cropBox)
-        let w      = canvasView.contentSize.width > 0 ? canvasView.contentSize.width : view.bounds.width
-        let scale  = w / max(bounds.width, 1)
-        let h      = height ?? (bounds.height * scale)
+        let bounds = page.bounds(for: .cropBox).width > 0 ? page.bounds(for: .cropBox) : page.bounds(for: .mediaBox)
+        let rot = (page.rotation % 360 + 360) % 360
+        let isLandscape = (rot == 90 || rot == 270)
+        let unscaledW = max(isLandscape ? bounds.height : bounds.width, 1)
+        let unscaledH = max(isLandscape ? bounds.width : bounds.height, 1)
+        let w      = canvasView.contentSize.width > 0 ? canvasView.contentSize.width : (view.bounds.width > 0 ? view.bounds.width : 820)
+        let scale  = w / unscaledW
+        let h      = height ?? (unscaledH * scale)
         let image  = renderPDFPage(page, width: w, height: h)
 
         let imgView = UIImageView(frame: CGRect(x: 0, y: y, width: w, height: h))
@@ -1569,13 +1596,38 @@ extension InfiniteNotebookViewController {
 
     private func renderPDFPage(_ page: PDFPage, width: CGFloat, height: CGFloat) -> UIImage {
         let scale = max(UIScreen.main.scale, 2.0)
-        let targetSize = CGSize(width: max(width, 100) * scale, height: max(height, 100) * scale)
-        let thumb = page.thumbnail(of: targetSize, for: .cropBox)
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        let pixelSize = CGSize(
+            width: max(round(width * scale), 100),
+            height: max(round(height * scale), 100)
+        )
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1.0 // Render 1:1 at exact pixel dimensions
+        let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
+
         return renderer.image { ctx in
             UIColor.white.setFill()
-            ctx.fill(CGRect(origin: .zero, size: targetSize))
-            thumb.draw(in: CGRect(origin: .zero, size: targetSize))
+            ctx.fill(CGRect(origin: .zero, size: pixelSize))
+
+            let cg = ctx.cgContext
+            cg.saveGState()
+
+            // Flip UIKit top-left coordinates to CoreGraphics bottom-left coordinates
+            cg.translateBy(x: 0, y: pixelSize.height)
+            cg.scaleBy(x: 1.0, y: -1.0)
+
+            let box = page.bounds(for: .cropBox).width > 0 ? page.bounds(for: .cropBox) : page.bounds(for: .mediaBox)
+            let rot = (page.rotation % 360 + 360) % 360
+            let isLandscape = (rot == 90 || rot == 270)
+            let unscaledW = max(isLandscape ? box.height : box.width, 1)
+            let unscaledH = max(isLandscape ? box.width : box.height, 1)
+
+            let scaleX = pixelSize.width / max(unscaledW, 1)
+            let scaleY = pixelSize.height / max(unscaledH, 1)
+            cg.scaleBy(x: scaleX, y: scaleY)
+
+            cg.translateBy(x: -box.origin.x, y: -box.origin.y)
+            page.draw(with: .cropBox, to: cg)
+            cg.restoreGState()
         }
     }
 
