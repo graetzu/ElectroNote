@@ -405,6 +405,8 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
 
     private let actionToolbar = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
     private let colorPaletteBar = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+    private var toolbarButtons: [UIButton] = []
+    private var colorButtons: [UIButton] = []
 
     // MARK: - Initializer
 
@@ -489,12 +491,16 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     // MARK: - Action Toolbar
 
     private func buildActionToolbar() {
+        toolbarButtons.removeAll()
+        actionToolbar.isUserInteractionEnabled = true
+        actionToolbar.contentView.isUserInteractionEnabled = true
         actionToolbar.contentView.subviews.forEach { $0.removeFromSuperview() }
         let stack = UIStackView()
         stack.axis = .horizontal
         stack.spacing = 6
         stack.alignment = .center
         stack.distribution = .fillProportionally
+        stack.isUserInteractionEnabled = true
         stack.translatesAutoresizingMaskIntoConstraints = false
         actionToolbar.contentView.addSubview(stack)
 
@@ -510,12 +516,14 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
             self?.rotateBy90Degrees()
         }
         stack.addArrangedSubview(rotBtn)
+        toolbarButtons.append(rotBtn)
 
         // 2. Duplicate button
         let dupBtn = makeToolbarButton(title: "Kopieren", icon: "doc.on.doc") { [weak self] in
             self?.onDuplicate?()
         }
         stack.addArrangedSubview(dupBtn)
+        toolbarButtons.append(dupBtn)
 
         // 3. Color button (if handwriting strokes selected)
         if isHandwriting || !baseStrokes.isEmpty {
@@ -526,6 +534,7 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
                 }
             }
             stack.addArrangedSubview(colBtn)
+            toolbarButtons.append(colBtn)
         }
 
         // 4. Delete button
@@ -533,23 +542,31 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
             self?.onDelete?()
         }
         stack.addArrangedSubview(delBtn)
+        toolbarButtons.append(delBtn)
 
         // 5. Done button
         let doneBtn = makeToolbarButton(title: "Fertig", icon: "checkmark", tint: .systemGreen) { [weak self] in
             self?.dismiss()
         }
         stack.addArrangedSubview(doneBtn)
+        toolbarButtons.append(doneBtn)
 
         let totalWidth: CGFloat = (isHandwriting || !baseStrokes.isEmpty) ? 360 : 290
         actionToolbar.bounds = CGRect(x: 0, y: 0, width: totalWidth, height: 36)
+        actionToolbar.layoutIfNeeded()
     }
 
     private func buildColorPalette() {
+        colorButtons.removeAll()
+        colorPaletteBar.isUserInteractionEnabled = true
+        colorPaletteBar.contentView.isUserInteractionEnabled = true
+        colorPaletteBar.contentView.subviews.forEach { $0.removeFromSuperview() }
         let stack = UIStackView()
         stack.axis = .horizontal
         stack.spacing = 8
         stack.alignment = .center
         stack.distribution = .equalSpacing
+        stack.isUserInteractionEnabled = true
         stack.translatesAutoresizingMaskIntoConstraints = false
         colorPaletteBar.contentView.addSubview(stack)
 
@@ -569,14 +586,17 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
             dot.layer.borderColor = UIColor.systemGray3.cgColor
             dot.widthAnchor.constraint(equalToConstant: 22).isActive = true
             dot.heightAnchor.constraint(equalToConstant: 22).isActive = true
+            dot.isUserInteractionEnabled = true
             dot.addAction(UIAction { [weak self] _ in
                 self?.onChangeColor?(c)
                 UIView.animate(withDuration: 0.2) { self?.colorPaletteBar.isHidden = true }
             }, for: .touchUpInside)
             stack.addArrangedSubview(dot)
+            colorButtons.append(dot)
         }
 
         colorPaletteBar.frame = CGRect(x: 0, y: 0, width: 230, height: 32)
+        colorPaletteBar.layoutIfNeeded()
     }
 
     private func makeToolbarButton(title: String, icon: String, tint: UIColor = .white, action: @escaping () -> Void) -> UIButton {
@@ -592,6 +612,7 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         cfg.attributedTitle = titleAttr
 
         let btn = UIButton(configuration: cfg)
+        btn.isUserInteractionEnabled = true
         btn.addAction(UIAction { _ in action() }, for: .touchUpInside)
         return btn
     }
@@ -670,12 +691,9 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         if gestureRecognizer === movePan {
-            // Never allow movePan to start if the user touched a corner handle, rotation handle, or toolbar
-            if touch.view is CornerHandleView || touch.view is RotationHandleView {
-                return false
-            }
+            // Never allow movePan to start if the user touched a button, handle, or toolbar
             if let v = touch.view {
-                if v.isDescendant(of: rotationHandle) || v.isDescendant(of: actionToolbar) || v.isDescendant(of: colorPaletteBar) {
+                if v is UIControl || v.isDescendant(of: actionToolbar) || v.isDescendant(of: colorPaletteBar) || v is CornerHandleView || v is RotationHandleView {
                     return false
                 }
                 for h in [topLeftHandle, topRightHandle, bottomLeftHandle, bottomRightHandle] {
@@ -699,13 +717,6 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        // Prevent scroll/pan/pinch gestures on parent views (like canvasView) from stealing touches while interacting with the transform box
-        let isParentGesture = otherGestureRecognizer.view !== self && otherGestureRecognizer.view !== rotationHandle && !isCornerHandle(otherGestureRecognizer.view)
-        if isParentGesture {
-            if otherGestureRecognizer is UIPanGestureRecognizer || otherGestureRecognizer is UIPinchGestureRecognizer || otherGestureRecognizer is UIRotationGestureRecognizer {
-                return true
-            }
-        }
         return false
     }
 
@@ -973,35 +984,41 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard self.point(inside: point, with: event) else { return nil }
 
-        // 1. Toolbars (highest priority)
-        if !actionToolbar.isHidden {
-            let ptInToolbar = convert(point, to: actionToolbar)
-            if actionToolbar.bounds.insetBy(dx: -8, dy: -8).contains(ptInToolbar) {
-                let ptInContent = convert(point, to: actionToolbar.contentView)
-                if let hit = actionToolbar.contentView.hitTest(ptInContent, with: event) {
-                    return hit
-                }
-                return actionToolbar
-            }
-        }
+        // 1. Color palette buttons if visible
         if !colorPaletteBar.isHidden {
-            let ptInPalette = convert(point, to: colorPaletteBar)
-            if colorPaletteBar.bounds.insetBy(dx: -8, dy: -8).contains(ptInPalette) {
-                let ptInContent = convert(point, to: colorPaletteBar.contentView)
-                if let hit = colorPaletteBar.contentView.hitTest(ptInContent, with: event) {
-                    return hit
+            for btn in colorButtons {
+                let ptInBtn = convert(point, to: btn)
+                if btn.bounds.insetBy(dx: -8, dy: -8).contains(ptInBtn) {
+                    return btn
                 }
+            }
+            let ptInPal = convert(point, to: colorPaletteBar)
+            if colorPaletteBar.bounds.insetBy(dx: -8, dy: -8).contains(ptInPal) {
                 return colorPaletteBar
             }
         }
 
-        // 2. Rotation handle
+        // 2. Action toolbar buttons directly
+        if !actionToolbar.isHidden {
+            for btn in toolbarButtons {
+                let ptInBtn = convert(point, to: btn)
+                if btn.bounds.insetBy(dx: -6, dy: -8).contains(ptInBtn) {
+                    return btn
+                }
+            }
+            let ptInBar = convert(point, to: actionToolbar)
+            if actionToolbar.bounds.insetBy(dx: -8, dy: -8).contains(ptInBar) {
+                return actionToolbar
+            }
+        }
+
+        // 3. Rotation handle
         let ptInRot = convert(point, to: rotationHandle)
         if rotationHandle.bounds.insetBy(dx: -16, dy: -16).contains(ptInRot) {
             return rotationHandle
         }
 
-        // 3. Corner handles
+        // 4. Corner handles
         for h in [topLeftHandle, topRightHandle, bottomLeftHandle, bottomRightHandle] {
             let ptInH = convert(point, to: h)
             if h.bounds.insetBy(dx: -16, dy: -16).contains(ptInH) {
@@ -1009,7 +1026,7 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
             }
         }
 
-        // 4. Box body for moving
+        // 5. Box body for moving
         return self
     }
 }
