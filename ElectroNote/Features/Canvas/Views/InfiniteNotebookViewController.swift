@@ -3881,6 +3881,61 @@ extension InfiniteNotebookViewController {
             self.showToastBanner(text: "Textfeld eingefügt", icon: "character.textbox")
         }
     }
+
+    // MARK: - AI Context Extraction
+
+    func collectContextText() async -> String {
+        let zoom = max(canvasView.zoomScale, 0.01)
+        let scrollY = canvasView.contentOffset.y / zoom
+        let viewH = canvasView.bounds.height > 0 ? (canvasView.bounds.height / zoom) : 1000
+        let visibleRect = CGRect(x: 0, y: scrollY, width: canvasView.contentSize.width, height: viewH)
+
+        var texts: [String] = []
+
+        // 1. PDF / Document pages in visible view
+        for (idx, img) in document.insertedImages.enumerated() {
+            let imgRect = CGRect(x: img.startX, y: img.startY, width: img.width, height: img.height)
+            if imgRect.intersects(visibleRect) {
+                if let t = img.extractedText, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    texts.append("📄 [Dokumentseite \(idx + 1)]:\n\(t)")
+                }
+            }
+        }
+
+        // 2. Visible handwriting OCR
+        let visibleDrawing = canvasView.drawing
+        let visibleStrokes = visibleDrawing.strokes.filter { $0.renderBounds.intersects(visibleRect) }
+        if !visibleStrokes.isEmpty {
+            let subDrawing = PKDrawing(strokes: visibleStrokes)
+            let img = subDrawing.image(from: visibleRect, scale: 2.0)
+            if let hwText = try? await OCRService.shared.recognizeText(in: img),
+               !hwText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                texts.append("✍️ [Handschrift auf dieser Seite]:\n\(hwText)")
+            }
+        }
+
+        // 3. Sticky notes in visible rect
+        for note in document.stickyNotes {
+            let noteRect = CGRect(x: note.x, y: note.y, width: 220, height: 220)
+            if noteRect.intersects(visibleRect) && !note.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                texts.append("📌 [Notizzettel]:\n\(note.text)")
+            }
+        }
+
+        // 4. Fallback if current visible rect had no content: grab all document text
+        if texts.isEmpty {
+            for (idx, img) in document.insertedImages.enumerated() {
+                if let t = img.extractedText, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    texts.append("📄 [Dokumentseite \(idx + 1)]:\n\(t)")
+                }
+            }
+            for note in document.stickyNotes where !note.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                texts.append("📌 [Notizzettel]:\n\(note.text)")
+            }
+        }
+
+        return texts.joined(separator: "\n\n")
+    }
 }
 
 // MARK: - UIGestureRecognizerDelegate

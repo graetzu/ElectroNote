@@ -158,9 +158,13 @@ final class InfiniteNotebookViewModel: ObservableObject {
     @Published var currentSearchMatchIndex:    Int = 0
     @Published var triggerNextSearchMatch:     Bool = false
     @Published var triggerPreviousSearchMatch: Bool = false
+    // MARK: - AI Assistant Sidebar
+    @Published var showAISidebar: Bool = false
 
-
-
+    func collectContextTextForAI() async -> String {
+        guard let vc = vcRef else { return "" }
+        return await vc.collectContextText()
+    }
     struct TypedTextInsertion {
         let text: String
         let fontSize: CGFloat

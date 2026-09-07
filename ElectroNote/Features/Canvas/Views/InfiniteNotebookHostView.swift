@@ -37,7 +37,7 @@ struct InfiniteNotebookHostView: View {
 
             Divider()
 
-            ZStack(alignment: .top) {
+            ZStack(alignment: .topTrailing) {
                 InfiniteNotebookRepresentable(store: store, vm: vm)
                     .ignoresSafeArea(edges: .bottom)
 
@@ -55,7 +55,22 @@ struct InfiniteNotebookHostView: View {
                         }
                     )
                     .padding(.top, 10)
+                    .frame(maxWidth: .infinity, alignment: .top)
                     .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(20)
+                }
+
+                if vm.showAISidebar {
+                    AISidebarView(
+                        vm: vm,
+                        onClose: {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                                vm.showAISidebar = false
+                            }
+                        }
+                    )
+                    .transition(.move(edge: .trailing))
+                    .zIndex(30)
                 }
             }
         }
@@ -282,6 +297,25 @@ struct InfiniteNotebookHostView: View {
             .tint(vm.showSearch ? .accentColor : .primary)
             .accessibilityLabel(vm.showSearch ? "Suche schließen" : "In Notiz suchen")
             .help("In Notiz und Handschrift suchen")
+
+            // KI-Assistent Seitenleiste (ChatGPT, Claude, Gemini)
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    vm.showAISidebar.toggle()
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: vm.showAISidebar ? "sparkles.rectangle.stack.fill" : "sparkles")
+                    if vm.showAISidebar {
+                        Text("KI")
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                    }
+                }
+            }
+            .tint(vm.showAISidebar ? .purple : .primary)
+            .accessibilityLabel(vm.showAISidebar ? "KI-Assistent schließen" : "KI-Assistent öffnen")
+            .help("KI-Seitenleiste (ChatGPT, Claude, Gemini)")
 
             // Background template + line spacing
             Menu {
@@ -596,6 +630,7 @@ struct PenToolbarView: View {
     var onOpenCircuits: (() -> Void)? = nil
     var onImportDocument: (() -> Void)? = nil
     var onImportNextcloud: (() -> Void)? = nil
+    var onToggleAI: (() -> Void)? = nil
 
     init(vm: InfiniteNotebookViewModel, onNextcloud: (() -> Void)? = nil) {
         self._activeTool = Binding(get: { vm.activeTool }, set: { vm.activeTool = $0 })
@@ -613,6 +648,11 @@ struct PenToolbarView: View {
         self.onOpenCircuits = { [weak vm] in vm?.showCircuitPicker = true }
         self.onImportDocument = { [weak vm] in vm?.showPDFPicker = true }
         self.onImportNextcloud = onNextcloud
+        self.onToggleAI = { [weak vm] in
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                vm?.showAISidebar.toggle()
+            }
+        }
     }
 
     var body: some View {
@@ -787,6 +827,27 @@ struct PenToolbarView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Datei aus Nextcloud importieren")
+
+                    // KI-Assistent Button (ChatGPT, Claude, Gemini)
+                    Button {
+                        onToggleAI?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("KI")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.purple)
+                        .foregroundColor(Color.white)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("KI-Assistent Seitenleiste")
 
                     if activeTool == .lasso {
                         Button {

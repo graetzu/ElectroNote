@@ -86,6 +86,7 @@
 		NIS00001000000000000001 /* NoteIndexingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = NISREF010000000000000001 /* NoteIndexingService.swift */; };
 		CFB00001000000000000001 /* CanvasFindBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFBREF010000000000000001 /* CanvasFindBarView.swift */; };
 		CSH00001000000000000001 /* CanvasSearchHighlightOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CSHREF010000000000000001 /* CanvasSearchHighlightOverlay.swift */; };
+		AIS00001000000000000001 /* AISidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AISREF010000000000000001 /* AISidebarView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -170,6 +171,7 @@
 		NISREF010000000000000001 /* NoteIndexingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Search/NoteIndexingService.swift; sourceTree = "<group>"; };
 		CFBREF010000000000000001 /* CanvasFindBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasFindBarView.swift; sourceTree = "<group>"; };
 		CSHREF010000000000000001 /* CanvasSearchHighlightOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSearchHighlightOverlay.swift; sourceTree = "<group>"; };
+		AISREF010000000000000001 /* AISidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISidebarView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -544,6 +546,7 @@
 				MPSREF010000000000000001 /* MediaPlaybackSheetView.swift */,
 				CFBREF010000000000000001 /* CanvasFindBarView.swift */,
 				CSHREF010000000000000001 /* CanvasSearchHighlightOverlay.swift */,
+				AISREF010000000000000001 /* AISidebarView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -704,6 +707,7 @@
 				NIS00001000000000000001 /* NoteIndexingService.swift in Sources */,
 				CFB00001000000000000001 /* CanvasFindBarView.swift in Sources */,
 				CSH00001000000000000001 /* CanvasSearchHighlightOverlay.swift in Sources */,
+				AIS00001000000000000001 /* AISidebarView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
