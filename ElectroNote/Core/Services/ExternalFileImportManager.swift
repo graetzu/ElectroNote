@@ -69,6 +69,9 @@ final class ExternalFileImportManager: ObservableObject {
         let incomingDir = fileManager.temporaryDirectory.appendingPathComponent("IncomingSharedFiles", isDirectory: true)
         try? fileManager.createDirectory(at: incomingDir, withIntermediateDirectories: true)
 
+        // Clean up temporary shared files older than 30 minutes
+        cleanOldIncomingFiles(in: incomingDir)
+
         let origFilename = url.lastPathComponent
         let base = url.deletingPathExtension().lastPathComponent
         let ext = url.pathExtension.lowercased()
@@ -103,10 +106,22 @@ final class ExternalFileImportManager: ObservableObject {
         }
     }
 
-    func dismiss() {
-        if let file = incomingFile {
-            try? FileManager.default.removeItem(at: file.localURL)
+    private func cleanOldIncomingFiles(in directory: URL) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey]) else { return }
+        let cutoff = Date().addingTimeInterval(-1800) // 30 minutes
+        for file in files {
+            if let attrs = try? fm.attributesOfItem(atPath: file.path),
+               let creationDate = attrs[.creationDate] as? Date,
+               creationDate < cutoff {
+                try? fm.removeItem(at: file)
+            }
         }
+    }
+
+    func dismiss() {
+        // Do not immediately delete file.localURL, as asynchronous import/conversion
+        // tasks in open notebooks or store workers may still be actively reading it.
         incomingFile = nil
         isProcessing = false
         statusMessage = nil

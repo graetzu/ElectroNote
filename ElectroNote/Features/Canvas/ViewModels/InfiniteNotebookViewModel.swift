@@ -8,6 +8,7 @@ enum CanvasToolType: String, CaseIterable, Identifiable {
     case pencil     = "Bleistift"
     case eraser     = "Radierer"
     case lasso      = "Lasso"
+    case textSelect = "Text"
     case pan        = "Verschieben"
 
     var id: String { rawValue }
@@ -18,6 +19,7 @@ enum CanvasToolType: String, CaseIterable, Identifiable {
         case .pencil:     return "pencil"
         case .eraser:     return "eraser.fill"
         case .lasso:      return "lasso"
+        case .textSelect: return "text.viewfinder"
         case .pan:        return "hand.draw"
         }
     }
@@ -33,7 +35,7 @@ func makePKTool(tool: CanvasToolType, color: Color, width: CGFloat, eraserType: 
         uiColor = UIColor(color)
     }
     switch tool {
-    case .pen:
+    case .pen, .textSelect, .pan:
         return PKInkingTool(.pen, color: uiColor, width: width)
     case .marker:
         return PKInkingTool(.marker, color: uiColor, width: max(width * 3.0, 10))
@@ -43,8 +45,6 @@ func makePKTool(tool: CanvasToolType, color: Color, width: CGFloat, eraserType: 
         return PKEraserTool(eraserType)
     case .lasso:
         return PKLassoTool()
-    case .pan:
-        return PKInkingTool(.pen, color: .clear, width: 0.1)
     }
 }
 
@@ -55,7 +55,7 @@ final class InfiniteNotebookViewModel: ObservableObject {
     @Published var lastDrawingTool: CanvasToolType = .pen
     @Published var activeTool: CanvasToolType = .pen {
         didSet {
-            if activeTool != .pan && activeTool != .lasso {
+            if activeTool != .pan && activeTool != .lasso && activeTool != .textSelect {
                 lastDrawingTool = activeTool
             }
             applyCurrentTool()
@@ -87,7 +87,7 @@ final class InfiniteNotebookViewModel: ObservableObject {
         if activeTool == .pan {
             activeTool = lastDrawingTool
         } else {
-            if activeTool != .lasso {
+            if activeTool != .lasso && activeTool != .textSelect {
                 lastDrawingTool = activeTool
             }
             activeTool = .pan
@@ -95,7 +95,7 @@ final class InfiniteNotebookViewModel: ObservableObject {
     }
 
     func applyCurrentTool() {
-        if activeTool == .pan || activeTool == .lasso {
+        if activeTool == .pan || activeTool == .lasso || activeTool == .textSelect {
             pendingPKTool = nil
             return
         }
@@ -122,6 +122,7 @@ final class InfiniteNotebookViewModel: ObservableObject {
     @Published var showMindMap:                   Bool = false
     @Published var showWhiteboard:                Bool = false
     @Published var showCircuitPicker:             Bool = false
+    @Published var showElektroSim:                Bool = false
     @Published var pendingInkPreset:              InkPreset? = nil
     @Published var showTextInsertion:             Bool = false
     @Published var pendingTextInsertion:          TypedTextInsertion? = nil

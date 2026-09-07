@@ -388,6 +388,12 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     var onChangeColor: ((UIColor) -> Void)?
     var onDelete: (() -> Void)?
     var onDismiss: (() -> Void)?
+    var onCopyText: (() -> Void)? {
+        didSet {
+            buildActionToolbar()
+            updateLayout()
+        }
+    }
 
     // Subviews
     private let contentBorderView = UIView()
@@ -512,6 +518,12 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         }
 
         var buttons: [UIButton] = [rotBtn, dupBtn]
+        if let copyTextAction = onCopyText {
+            let textBtn = makeToolbarButton(title: "Text", icon: "doc.text") {
+                copyTextAction()
+            }
+            buttons.append(textBtn)
+        }
         if showColor {
             let colBtn = makeToolbarButton(title: "Farbe", icon: "paintpalette.fill") { [weak self] in
                 guard let self = self else { return }
@@ -533,6 +545,7 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
             switch title {
             case "90°": btnWidth = 58
             case "Kopieren": btnWidth = 84
+            case "Text": btnWidth = 66
             case "Farbe": btnWidth = 68
             case "Löschen": btnWidth = 78
             case "Fertig": btnWidth = 68
@@ -934,12 +947,17 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     }
 
     func dismiss() {
+        targetElementView = nil
         onDismiss?()
-        UIView.animate(withDuration: 0.15, animations: {
-            self.alpha = 0
-        }) { _ in
-            self.removeFromSuperview()
+        layer.removeAllAnimations()
+        gestureRecognizers?.forEach { removeGestureRecognizer($0) }
+        interactions.forEach { removeInteraction($0) }
+        actionToolbar.contentView.subviews.forEach { btn in
+            btn.layer.removeAllAnimations()
+            btn.gestureRecognizers?.forEach { btn.removeGestureRecognizer($0) }
+            btn.interactions.forEach { btn.removeInteraction($0) }
         }
+        removeFromSuperview()
     }
 
     // Expand touch hit testing to include floating handles and toolbars

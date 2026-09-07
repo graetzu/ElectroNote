@@ -6,11 +6,16 @@ struct LiveCastSheetView: View {
     @State private var copiedURL = false
     @State private var copiedIP = false
     @State private var copiedPort = false
+    @State private var showPortEditSheet = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
+                    if let errorMsg = liveCast.lastErrorMessage {
+                        errorCard(errorMsg)
+                    }
+
                     // Header Status Card
                     statusCard
 
@@ -43,8 +48,42 @@ struct LiveCastSheetView: View {
             .onAppear {
                 liveCast.refreshIP()
             }
+            .sheet(isPresented: $showPortEditSheet) {
+                PortSettingsSheet()
+            }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    // MARK: - Error Card
+
+    private func errorCard(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.red)
+                .font(.title3)
+
+            Text(message)
+                .font(.caption)
+                .foregroundColor(.primary)
+
+            Spacer()
+
+            Button {
+                showPortEditSheet = true
+            } label: {
+                Text("Port ändern")
+                    .font(.caption.bold())
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.red.opacity(0.15))
+                    .foregroundColor(.red)
+                    .clipShape(Capsule())
+            }
+        }
+        .padding(14)
+        .background(Color.red.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     // MARK: - Status Card
@@ -89,7 +128,7 @@ struct LiveCastSheetView: View {
                                 .fontWeight(.semibold)
                             Text("•")
                                 .foregroundColor(.secondary)
-                            Text("Port: \(liveCast.port)")
+                            Text("Port: \(String(liveCast.port))")
                                 .fontWeight(.semibold)
                         }
                         .font(.subheadline)
@@ -200,16 +239,29 @@ struct LiveCastSheetView: View {
 
                 // Port Card
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("PORT")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.secondary)
                     HStack {
-                        Text("\(liveCast.port)")
+                        Text("PORT")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Button {
+                            showPortEditSheet = true
+                        } label: {
+                            HStack(spacing: 2) {
+                                Image(systemName: "pencil")
+                                Text("Ändern")
+                            }
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.blue)
+                        }
+                    }
+                    HStack {
+                        Text(String(liveCast.port))
                             .font(.system(.subheadline, design: .monospaced).bold())
                             .foregroundColor(.primary)
                         Spacer()
                         Button {
-                            UIPasteboard.general.string = "\(liveCast.port)"
+                            UIPasteboard.general.string = String(liveCast.port)
                             copiedPort = true
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { copiedPort = false }
                         } label: {
@@ -305,6 +357,29 @@ struct LiveCastSheetView: View {
 
             Divider()
 
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "network")
+                        .foregroundColor(.blue)
+                    Text("Server-Port:")
+                        .font(.subheadline)
+                }
+
+                Spacer()
+
+                Text(String(liveCast.port))
+                    .font(.system(.subheadline, design: .monospaced).bold())
+                    .foregroundColor(.primary)
+
+                Button("Ändern") {
+                    showPortEditSheet = true
+                }
+                .font(.subheadline.bold())
+                .foregroundColor(.blue)
+            }
+
+            Divider()
+
             VStack(alignment: .leading, spacing: 8) {
                 Text("Bildrate & Qualität")
                     .font(.subheadline.bold())
@@ -344,9 +419,17 @@ struct LiveCastSheetView: View {
                 Image(systemName: "wifi")
                     .foregroundColor(.blue)
                     .font(.caption)
-                Text("IP: **\(liveCast.localIP.isEmpty ? "WLAN prüfen" : liveCast.localIP)** • Port: **\(liveCast.port)**")
+                Text("IP: **\(liveCast.localIP.isEmpty ? "WLAN prüfen" : liveCast.localIP)** • Port: **\(String(liveCast.port))**")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                Button {
+                    showPortEditSheet = true
+                } label: {
+                    Text("Port ändern")
+                        .font(.caption.bold())
+                        .foregroundColor(.blue)
+                }
             }
             .padding(.top, 4)
 
@@ -369,5 +452,142 @@ struct LiveCastSheetView: View {
         .padding(24)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+// MARK: - PortSettingsSheet
+
+struct PortSettingsSheet: View {
+    @ObservedObject private var liveCast = LiveCastServer.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var portText: String = ""
+    @State private var validationError: String? = nil
+
+    private let commonPorts: [(name: String, port: UInt16)] = [
+        ("8080 (Standard)", 8080),
+        ("8081 (Alternative 1)", 8081),
+        ("8888 (Web-Port)", 8888),
+        ("9090 (Netzwerk-Port)", 9090),
+        ("5000 (Universal-Port)", 5000)
+    ]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.shield.fill")
+                                .foregroundColor(.green)
+                            Text("Apple-Netzwerkfreigabe")
+                                .font(.subheadline.bold())
+                        }
+                        Text("Apple erlaubt Apps auf iOS & iPadOS die freie Belegung beliebiger unprivilegierter Ports zwischen **1024** und **65535** (Standard ist 8080).")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("Port eingeben") {
+                    HStack {
+                        Text("Server-Port:")
+                            .font(.body.bold())
+                        Spacer()
+                        TextField("8080", text: $portText)
+                            .keyboardType(.numberPad)
+                            .font(.system(.body, design: .monospaced).bold())
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 130)
+                            .onChange(of: portText) {
+                                validationError = nil
+                            }
+                    }
+
+                    if let err = validationError {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                            Text(err)
+                        }
+                        .font(.caption)
+                        .foregroundColor(.red)
+                    }
+                }
+
+                Section("Häufig genutzte Ports") {
+                    ForEach(commonPorts, id: \.port) { item in
+                        Button {
+                            portText = String(item.port)
+                            validationError = nil
+                        } label: {
+                            HStack {
+                                Text(item.name)
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                if portText == String(item.port) {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.blue)
+                                        .bold()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section("Vorschau der Web-Adresse") {
+                    let previewPort = portText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    HStack {
+                        Text("Adresse:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("http://\(liveCast.localIP.isEmpty ? "192.168.x.x" : liveCast.localIP):\(previewPort.isEmpty ? "8080" : previewPort)")
+                            .font(.system(.caption, design: .monospaced).bold())
+                            .foregroundColor(.blue)
+                    }
+
+                    if liveCast.isStreaming {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .foregroundColor(.orange)
+                            Text("Der laufende Stream wird nach dem Speichern automatisch auf dem neuen Port fortgesetzt.")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Server-Port anpassen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Speichern") {
+                        savePort()
+                    }
+                    .bold()
+                }
+            }
+            .onAppear {
+                portText = String(liveCast.port)
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func savePort() {
+        let cleaned = portText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = UInt16(cleaned), value >= 1024 && value <= 65535 else {
+            validationError = "Ungültiger Port. Bitte eine Zahl zwischen 1024 und 65535 eingeben."
+            return
+        }
+        let res = liveCast.updatePort(value)
+        if res.success {
+            dismiss()
+        } else {
+            validationError = res.message
+        }
     }
 }

@@ -89,7 +89,11 @@ final class NotebookDocumentStore {
         do {
             pdfURL = try await DocumentConverter.shared.convertToPDF(sourceURL: sourceURL)
         } catch {
-            pdfURL = sourceURL
+            if sourceURL.pathExtension.lowercased() == "pdf" {
+                pdfURL = sourceURL
+            } else {
+                throw error
+            }
         }
 
         let pdfAccessing = (pdfURL != sourceURL) ? pdfURL.startAccessingSecurityScopedResource() : false
@@ -107,26 +111,44 @@ final class NotebookDocumentStore {
         let drawingBottom = drawing.bounds.isNull ? 0 : drawing.bounds.maxY
         let pdfBottom     = doc.insertedPDFs.last?.endY ?? 0
         let imgBottom     = doc.insertedImages.last.map { $0.startY + $0.height } ?? 0
-        let startY        = max(drawingBottom, pdfBottom, imgBottom) + 40
+        let maxContent    = max(drawingBottom, pdfBottom, imgBottom)
+        let docWidth: CGFloat = NotebookDocument.pageWidth
+        let a4PageH       = docWidth * 1.41421356
+        let startY        = maxContent <= 10 ? 0 : (ceil(maxContent / a4PageH) * a4PageH)
 
         var y = startY
         var heights: [CGFloat] = []
-        let docWidth: CGFloat = NotebookDocument.pageWidth
 
         for i in 0..<pdf.pageCount {
             guard let page = pdf.page(at: i) else { continue }
             let b = page.bounds(for: .cropBox)
-            let scale = docWidth / max(b.width, 1)
-            let h = b.height * scale
+            let ratio = (b.width > 0 && b.height > 0) ? (b.height / b.width) : 1.41421356
+            let h = (abs(ratio - 1.41421356) < 0.05) ? a4PageH : (docWidth * ratio)
             heights.append(h)
 
             let targetSize = CGSize(width: max(docWidth, 100) * 2, height: max(h, 100) * 2)
             let thumb = page.thumbnail(of: targetSize, for: .cropBox)
-            if let imgFilename = try? saveImage(thumb) {
-                let imgEntry = InsertedImage(id: UUID(), filename: imgFilename, startX: 20, startY: y, width: docWidth, height: h)
+            let renderer = UIGraphicsImageRenderer(size: targetSize)
+            let whiteThumb = renderer.image { ctx in
+                UIColor.white.setFill()
+                ctx.fill(CGRect(origin: .zero, size: targetSize))
+                thumb.draw(in: CGRect(origin: .zero, size: targetSize))
+            }
+            let pageText = await OCRService.shared.extractText(from: page, fallbackImage: whiteThumb)
+            if let imgFilename = try? saveImage(whiteThumb) {
+                let imgEntry = InsertedImage(
+                    id: UUID(),
+                    filename: imgFilename,
+                    startX: 0,
+                    startY: y,
+                    width: docWidth,
+                    height: h,
+                    extractedText: pageText.isEmpty ? nil : pageText,
+                    isDocumentPage: true
+                )
                 doc.insertedImages.append(imgEntry)
             }
-            y += h + 24
+            y += h
         }
 
         let needed = y + NotebookDocument.initialHeight * 0.3
@@ -141,11 +163,13 @@ final class NotebookDocumentStore {
     }
 
     @discardableResult
-    func appendImage(_ image: UIImage) throws -> InsertedImage {
+    func appendImage(_ image: UIImage) async throws -> InsertedImage {
         guard image.size.width > 0 && image.size.height > 0 else {
             throw NSError(domain: "ElectroNote", code: -1, userInfo: [NSLocalizedDescriptionKey: "Ungültiges Bild."])
         }
         let filename = try saveImage(image)
+        let extractedText = await OCRService.shared.extractText(from: image)
+
         var doc = loadDocument()
         let drawing = loadDrawing()
 
@@ -165,7 +189,15 @@ final class NotebookDocumentStore {
             doc.documentHeight = needed
         }
 
-        let entry = InsertedImage(id: UUID(), filename: filename, startX: startX, startY: startY, width: w, height: h)
+        let entry = InsertedImage(
+            id: UUID(),
+            filename: filename,
+            startX: startX,
+            startY: startY,
+            width: w,
+            height: h,
+            extractedText: extractedText.isEmpty ? nil : extractedText
+        )
         doc.insertedImages.append(entry)
         saveDocument(doc)
         return entry

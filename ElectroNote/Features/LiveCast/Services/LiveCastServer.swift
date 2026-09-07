@@ -9,14 +9,21 @@ import CryptoKit
 @MainActor
 final class LiveCastServer: ObservableObject {
     static let shared = LiveCastServer()
+    private static let portDefaultsKey = "LiveCastServer_Port"
 
     @Published var isStreaming: Bool = false
     @Published var viewerCount: Int = 0
     @Published var serverURL: String = ""
     @Published var localIP: String = ""
-    @Published var port: UInt16 = 8080
+    @Published var port: UInt16 = 8080 {
+        didSet {
+            UserDefaults.standard.set(Int(port), forKey: Self.portDefaultsKey)
+            refreshIP()
+        }
+    }
     @Published var targetFPS: Int = 20
     @Published var streamQuality: CGFloat = 0.70
+    @Published var lastErrorMessage: String? = nil
 
     private var listener: NWListener?
     private var webSocketConnections: [NWConnection] = []
@@ -26,18 +33,42 @@ final class LiveCastServer: ObservableObject {
     private let queue = DispatchQueue(label: "de.graetz.electronote.livecast", qos: .userInteractive)
 
     private init() {
+        let savedPort = UserDefaults.standard.integer(forKey: Self.portDefaultsKey)
+        if savedPort >= 1024 && savedPort <= 65535 {
+            self.port = UInt16(savedPort)
+        } else {
+            self.port = 8080
+        }
         refreshIP()
     }
 
     func refreshIP() {
+        let portStr = String(port)
         if let ip = getLocalIPAddress() {
             localIP = ip
-            serverURL = "http://\(ip):\(port)"
+            serverURL = "http://\(ip):\(portStr)"
         } else {
             localIP = "127.0.0.1"
-            serverURL = "http://127.0.0.1:\(port)"
+            serverURL = "http://127.0.0.1:\(portStr)"
         }
-        debugLog("[LiveCast] refreshIP: localIP=\(localIP), port=\(port), url=\(serverURL)")
+        debugLog("[LiveCast] refreshIP: localIP=\(localIP), port=\(portStr), url=\(serverURL)")
+    }
+
+    @discardableResult
+    func updatePort(_ newPort: UInt16) -> (success: Bool, message: String) {
+        guard newPort >= 1024 && newPort <= 65535 else {
+            return (false, "Der Port muss zwischen 1024 und 65535 liegen.")
+        }
+        let wasStreaming = isStreaming
+        if wasStreaming {
+            stopStreaming()
+        }
+        port = newPort
+        lastErrorMessage = nil
+        if wasStreaming {
+            startStreaming()
+        }
+        return (true, "Port erfolgreich auf \(String(newPort)) geändert.")
     }
 
     // MARK: - Start / Stop
@@ -57,8 +88,12 @@ final class LiveCastServer: ObservableObject {
         do {
             let parameters = NWParameters.tcp
             parameters.allowLocalEndpointReuse = true
-            guard let nwPort = NWEndpoint.Port(rawValue: port) else { return }
+            guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+                lastErrorMessage = "Ungültiger Port: \(String(port))"
+                return
+            }
             listener = try NWListener(using: parameters, on: nwPort)
+            lastErrorMessage = nil
 
             listener?.newConnectionHandler = { [weak self] connection in
                 Task { @MainActor [weak self] in
@@ -71,8 +106,10 @@ final class LiveCastServer: ObservableObject {
                     switch state {
                     case .ready:
                         self?.isStreaming = true
+                        self?.lastErrorMessage = nil
                     case .failed(let error):
                         print("[LiveCast] Listener failed: \(error)")
+                        self?.lastErrorMessage = "Port \(String(self?.port ?? 0)) nicht verfügbar: \(error.localizedDescription)"
                         self?.stopStreaming()
                     case .cancelled:
                         self?.isStreaming = false
@@ -88,6 +125,7 @@ final class LiveCastServer: ObservableObject {
             print("[LiveCast] Server gestartet auf \(serverURL)")
         } catch {
             print("[LiveCast] Start-Fehler: \(error)")
+            lastErrorMessage = "Konnte Port \(String(port)) nicht binden: \(error.localizedDescription). Wähle bitte einen anderen Port."
             isStreaming = false
         }
     }

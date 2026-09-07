@@ -473,7 +473,7 @@ struct IncomingFileImportSheet: View {
                     let noteItem = try browserVM.fileService.createNote(named: name, at: selectedFolderURL)
                     if let img = UIImage(contentsOfFile: file.localURL.path) {
                         let store = NotebookDocumentStore(noteURL: noteItem.path)
-                        try store.appendImage(img)
+                        try await store.appendImage(img)
                     }
                     finalItem = noteItem
                 } else if file.isOfficeOrDoc {
@@ -523,12 +523,16 @@ struct IncomingFileImportSheet: View {
             do {
                 if target.type == .note {
                     if selectedItem?.id == target.id {
-                        // Currently open note: notify view controller to insert live
+                        // Currently open note: copy to a dedicated temporary file so it remains valid
+                        let workingURL = FileManager.default.temporaryDirectory
+                            .appendingPathComponent("InsertLive_\(UUID().uuidString)_\(file.originalFilename)")
+                        try FileManager.default.copyItem(at: file.localURL, to: workingURL)
+
                         await MainActor.run {
                             NotificationCenter.default.post(
                                 name: .electroNoteInsertFileIntoOpenDocument,
                                 object: nil,
-                                userInfo: ["url": file.localURL, "targetPath": target.path.path]
+                                userInfo: ["url": workingURL, "targetPath": target.path.path]
                             )
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 sidebarVisibility = .detailOnly
@@ -542,7 +546,7 @@ struct IncomingFileImportSheet: View {
                         // Closed note: append to note bundle on disk
                         let store = NotebookDocumentStore(noteURL: target.path)
                         if file.isImage, let img = UIImage(contentsOfFile: file.localURL.path) {
-                            try store.appendImage(img)
+                            try await store.appendImage(img)
                         } else {
                             try await store.appendPDF(from: file.localURL)
                         }

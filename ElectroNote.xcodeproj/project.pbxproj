@@ -64,11 +64,13 @@
 		TRB00001 /* TrashManager.swift in Sources */        = {isa = PBXBuildFile; fileRef = TRM00001 /* TrashManager.swift */; };
 		TRVB0001 /* TrashView.swift in Sources */           = {isa = PBXBuildFile; fileRef = TRV00001 /* TrashView.swift */; };
 		DOC00001 /* DocumentConverter.swift in Sources */   = {isa = PBXBuildFile; fileRef = DOCREF01 /* DocumentConverter.swift */; };
+		OCR00001 /* OCRService.swift in Sources */          = {isa = PBXBuildFile; fileRef = OCRREF01 /* OCRService.swift */; };
 		TEVB0001 /* TagEditorView.swift in Sources */       = {isa = PBXBuildFile; fileRef = TEV00001 /* TagEditorView.swift */; };
 		TBVB0001 /* TagBrowserView.swift in Sources */      = {isa = PBXBuildFile; fileRef = TBV00001 /* TagBrowserView.swift */; };
 		ELEC000100000000000000AA /* CircuitSymbol.swift in Sources */ = {isa = PBXBuildFile; fileRef = ELEF000100000000000000AA /* CircuitSymbol.swift */; };
 		ELEC000200000000000000BB /* CircuitSymbolRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = ELEF000200000000000000BB /* CircuitSymbolRenderer.swift */; };
 		ELEC000300000000000000CC /* CircuitSymbolPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ELEF000300000000000000CC /* CircuitSymbolPickerView.swift */; };
+		ELEC000400000000000000DD /* ElektroSimWebSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ELEF000400000000000000DD /* ElektroSimWebSheetView.swift */; };
 		DTPB0001 /* DocumentTypePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DTPV0001 /* DocumentTypePickerView.swift */; };
 		LC01000000000000000000AA /* LiveCastServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0100000000000000000AA /* LiveCastServer.swift */; };
 		LC02000000000000000000BB /* LiveCastSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0200000000000000000BB /* LiveCastSheetView.swift */; };
@@ -140,6 +142,7 @@
 		LCF0200000000000000000BB /* LiveCastSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/LiveCastSheetView.swift; sourceTree = "<group>"; };
 		LCF0300000000000000000CC /* LiveCastBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/LiveCastBadgeView.swift; sourceTree = "<group>"; };
 		DOCREF01 /* DocumentConverter.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentConverter.swift;    sourceTree = "<group>"; };
+		OCRREF01 /* OCRService.swift */           = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCRService.swift;           sourceTree = "<group>"; };
 		TEV00001 /* TagEditorView.swift */       = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagEditorView.swift;       sourceTree = "<group>"; };
 		TBV00001 /* TagBrowserView.swift */      = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagBrowserView.swift;      sourceTree = "<group>"; };
 		DTPV0001 /* DocumentTypePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentTypePickerView.swift; sourceTree = "<group>"; };
@@ -148,6 +151,7 @@
 		ELEF000100000000000000AA /* CircuitSymbol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/CircuitSymbol.swift; sourceTree = "<group>"; };
 		ELEF000200000000000000BB /* CircuitSymbolRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CircuitSymbolRenderer.swift; sourceTree = "<group>"; };
 		ELEF000300000000000000CC /* CircuitSymbolPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/CircuitSymbolPickerView.swift; sourceTree = "<group>"; };
+		ELEF000400000000000000DD /* ElektroSimWebSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ElektroSimWebSheetView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -330,6 +334,7 @@
 				ELEF000100000000000000AA /* CircuitSymbol.swift */,
 				ELEF000200000000000000BB /* CircuitSymbolRenderer.swift */,
 				ELEF000300000000000000CC /* CircuitSymbolPickerView.swift */,
+				ELEF000400000000000000DD /* ElektroSimWebSheetView.swift */,
 			);
 			path = Electrical;
 			sourceTree = "<group>";
@@ -399,6 +404,7 @@
 				IMS00001 /* ItemMetadataStore.swift */,
 				TRM00001 /* TrashManager.swift */,
 				DOCREF01 /* DocumentConverter.swift */,
+				OCRREF01 /* OCRService.swift */,
 				EFMREF01 /* ExternalFileImportManager.swift */,
 			);
 			path = Services;
@@ -652,6 +658,7 @@
 				TBVB0001 /* TagBrowserView.swift in Sources */,
 				DTPB0001 /* DocumentTypePickerView.swift in Sources */,
 				DOC00001 /* DocumentConverter.swift in Sources */,
+				OCR00001 /* OCRService.swift in Sources */,
 				LC01000000000000000000AA /* LiveCastServer.swift in Sources */,
 				LC02000000000000000000BB /* LiveCastSheetView.swift in Sources */,
 				LC03000000000000000000CC /* LiveCastBadgeView.swift in Sources */,
@@ -660,6 +667,7 @@
 				ELEC000100000000000000AA /* CircuitSymbol.swift in Sources */,
 				ELEC000200000000000000BB /* CircuitSymbolRenderer.swift in Sources */,
 				ELEC000300000000000000CC /* CircuitSymbolPickerView.swift in Sources */,
+				ELEC000400000000000000DD /* ElektroSimWebSheetView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

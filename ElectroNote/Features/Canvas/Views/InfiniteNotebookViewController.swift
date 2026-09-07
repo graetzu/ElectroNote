@@ -2,6 +2,7 @@ import UIKit
 import PencilKit
 import PDFKit
 import Vision
+import VisionKit
 
 extension Notification.Name {
     static let electroNoteDrawingBegan = Notification.Name("ElectroNote.DrawingBegan")
@@ -47,6 +48,7 @@ final class InfiniteNotebookViewController: UIViewController {
     private var imageViews:   [UUID: UIImageView]     = [:]
     private var imageLayers:  [UUID: CALayer]         = [:]
     private var imageHandles: [UUID: ImageHandleView] = [:]
+    private var documentLiveTextViews: [UUID: DocumentPageLiveTextView] = [:]
 
     // MARK: - Sticky notes (UIView overlays positioned via KVO on scroll/zoom)
     private var stickyNoteViews: [UUID: StickyNoteView] = [:]
@@ -147,7 +149,20 @@ final class InfiniteNotebookViewController: UIViewController {
             return
         }
 
+        if currentCanvasToolType == .textSelect {
+            canvasView.drawingGestureRecognizer.isEnabled = false
+            pencilScrollPanGesture.isEnabled = false
+            canvasView.panGestureRecognizer.allowedTouchTypes = [
+                NSNumber(value: UITouch.TouchType.direct.rawValue)
+            ]
+            canvasView.panGestureRecognizer.minimumNumberOfTouches = pencilOnly ? 1 : 2
+            return
+        }
+
         pencilScrollPanGesture.isEnabled = false
+        if currentCanvasToolType != .lasso {
+            canvasView.drawingGestureRecognizer.isEnabled = true
+        }
         canvasView.drawingPolicy = pencilOnly ? .pencilOnly : .anyInput
         // In pencilOnly mode (Standard):
         // - 1 finger moves / scrolls smoothly across the canvas
@@ -373,6 +388,30 @@ final class InfiniteNotebookViewController: UIViewController {
                 document.insertedImages = deduped
                 store?.saveDocument(document)
             }
+        }
+
+        // Auto-scale existing document pages to full A4 page width
+        var docPagesUpdated = false
+        for idx in 0..<document.insertedImages.count {
+            if isDocumentPage(document.insertedImages[idx]) {
+                if document.insertedImages[idx].isDocumentPage != true {
+                    document.insertedImages[idx].isDocumentPage = true
+                    docPagesUpdated = true
+                }
+                if document.insertedImages[idx].width < w || document.insertedImages[idx].startX > 0 {
+                    let oldW = document.insertedImages[idx].width
+                    let oldH = document.insertedImages[idx].height
+                    let ratio = oldH / max(oldW, 1)
+                    document.insertedImages[idx].startX = 0
+                    document.insertedImages[idx].width = w
+                    let a4PageH = w * 1.41421356
+                    document.insertedImages[idx].height = (abs(ratio - 1.41421356) < 0.05) ? a4PageH : (w * ratio)
+                    docPagesUpdated = true
+                }
+            }
+        }
+        if docPagesUpdated {
+            store?.saveDocument(document)
         }
 
         document.insertedImages.forEach { loadImageEntry($0) }
@@ -649,17 +688,90 @@ extension InfiniteNotebookViewController {
            targetPath != store.noteURL.path {
             return
         }
+        insertFile(from: url)
+    }
+
+    func insertFile(from url: URL) {
         let ext = url.pathExtension.lowercased()
         if ["png", "jpg", "jpeg", "heic", "tiff", "webp"].contains(ext),
            let img = UIImage(contentsOfFile: url.path) {
             insertImage(img)
+            if url.path.contains("InsertLive_") {
+                try? FileManager.default.removeItem(at: url)
+            }
+        } else if ext == "docx" {
+            promptDocxImportMode(url: url)
         } else {
             insertPDF(from: url)
         }
     }
 
+    private func promptDocxImportMode(url: URL) {
+        let alert = UIAlertController(
+            title: "Word-Dokument importieren",
+            message: "Wie möchtest du das Dokument in dein Notizbuch einfügen?",
+            preferredStyle: .actionSheet
+        )
+
+        alert.addAction(UIAlertAction(title: "📄 Als A4-Dokumentseiten (zum handschriftlichen Beschriften)", style: .default) { [weak self] _ in
+            self?.insertPDF(from: url)
+        })
+
+        alert.addAction(UIAlertAction(title: "✍️ Als Notiztext (mit Handschrift & Tastatur bearbeitbar)", style: .default) { [weak self] _ in
+            self?.insertDocxAsEditableText(from: url)
+        })
+
+        alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel) { _ in
+            if url.path.contains("InsertLive_") {
+                try? FileManager.default.removeItem(at: url)
+            }
+        })
+
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+        }
+        present(alert, animated: true)
+    }
+
+    private func insertDocxAsEditableText(from url: URL) {
+        Task { @MainActor in
+            defer {
+                if url.path.contains("InsertLive_") {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+            let text: String
+            do {
+                text = try DocumentConverter.shared.extractTextFromDocx(sourceURL: url)
+            } catch {
+                self.showToastBanner(text: "Konnte Text nicht extrahieren: \(error.localizedDescription)", icon: "exclamationmark.triangle")
+                return
+            }
+
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                self.showToastBanner(text: "Kein Text im Dokument gefunden", icon: "doc.text")
+                return
+            }
+
+            let startY = self.nextInsertY()
+            let origin = CGPoint(x: 40, y: startY)
+            _ = self.insertTypedText(text: text, fontSize: 18, contentOrigin: origin)
+            self.canvasView.setContentOffset(CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
+            self.showToastBanner(text: "Dokumenttext als Notiztext eingefügt", icon: "character.textbox")
+        }
+    }
+
     func insertPDF(from url: URL) {
         Task { @MainActor in
+            defer {
+                if url.path.contains("InsertLive_") {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
@@ -667,42 +779,72 @@ extension InfiniteNotebookViewController {
             do {
                 pdfURL = try await DocumentConverter.shared.convertToPDF(sourceURL: url)
             } catch {
-                pdfURL = url
+                if url.pathExtension.lowercased() == "pdf" {
+                    pdfURL = url
+                } else {
+                    self.showToastBanner(text: "Import fehlgeschlagen: \(error.localizedDescription)", icon: "exclamationmark.triangle")
+                    return
+                }
             }
 
             let pdfAccessing = (pdfURL != url) ? pdfURL.startAccessingSecurityScopedResource() : false
-            defer { if pdfAccessing { pdfURL.stopAccessingSecurityScopedResource() } }
+            defer {
+                if pdfAccessing { pdfURL.stopAccessingSecurityScopedResource() }
+                if pdfURL != url {
+                    try? FileManager.default.removeItem(at: pdfURL)
+                }
+            }
 
-            guard let filename = try? self.store.copyPDF(from: pdfURL) else { return }
+            guard let filename = try? self.store.copyPDF(from: pdfURL) else {
+                self.showToastBanner(text: "Dokument konnte nicht kopiert werden", icon: "exclamationmark.triangle")
+                return
+            }
             let storedURL = self.store.pdfURL(filename: filename)
-            guard let pdf = PDFDocument(url: storedURL), pdf.pageCount > 0 else { return }
+            guard let pdf = PDFDocument(url: storedURL), pdf.pageCount > 0 else {
+                self.showToastBanner(text: "Ungültiges PDF-Dokument", icon: "exclamationmark.triangle")
+                return
+            }
 
-            let startY = self.nextInsertY()
-            var y = startY
             let docW = max(self.canvasView.contentSize.width, 834)
-            let pageMargin: CGFloat = 20
-            let availableW = docW - pageMargin * 2
+            let a4PageH = docW * 1.41421356
+
+            let drawingBottom = self.canvasView.drawing.bounds.isNull ? 0 : self.canvasView.drawing.bounds.maxY
+            let pdfBottom     = self.document.insertedPDFs.last?.endY ?? 0
+            let imgBottom     = self.document.insertedImages.last.map { $0.startY + $0.height } ?? 0
+            let maxContent    = max(drawingBottom, pdfBottom, imgBottom)
+
+            let startY: CGFloat = (maxContent <= 10) ? 0 : (ceil(maxContent / a4PageH) * a4PageH)
+            var y = startY
             var heights: [CGFloat] = []
 
             for i in 0..<pdf.pageCount {
                 guard let page = pdf.page(at: i) else { continue }
                 let b = page.bounds(for: .cropBox)
-                let pageW = min(availableW, b.width > 0 ? b.width : 595)
-                let scale = pageW / max(b.width, 1)
-                let pageH = (b.height > 0 ? b.height : 842) * scale
+                let pageW = docW
+                let ratio = (b.width > 0 && b.height > 0) ? (b.height / b.width) : 1.41421356
+                let pageH = (abs(ratio - 1.41421356) < 0.05) ? a4PageH : (docW * ratio)
                 heights.append(pageH)
 
                 let img = self.renderPDFPage(page, width: pageW, height: pageH)
+                let pageText = await OCRService.shared.extractText(from: page, fallbackImage: img)
                 if let imgFilename = try? self.store.saveImage(img) {
                     let pageId = UUID()
-                    let startX: CGFloat = max(pageMargin, (docW - pageW) / 2)
-                    let entry = InsertedImage(id: pageId, filename: imgFilename, startX: startX, startY: y, width: pageW, height: pageH)
+                    let entry = InsertedImage(
+                        id: pageId,
+                        filename: imgFilename,
+                        startX: 0,
+                        startY: y,
+                        width: pageW,
+                        height: pageH,
+                        extractedText: pageText.isEmpty ? nil : pageText,
+                        isDocumentPage: true
+                    )
                     self.document.insertedImages.append(entry)
                     self.loadImageEntry(entry)
                 } else {
                     self.addPDFLayer(page: page, at: y, height: pageH)
                 }
-                y += pageH + 24
+                y += pageH
             }
 
             let needed = y + Self.initialHeight * 0.3
@@ -757,6 +899,19 @@ extension InfiniteNotebookViewController {
         store.saveDocument(document)
         showToastBanner(text: "Grafik eingefügt", icon: "photo")
         presentTransformBox(forElementId: id)
+
+        // Asynchronously extract and cache text from image in background
+        Task { [weak self] in
+            let text = await OCRService.shared.extractText(from: image)
+            if !text.isEmpty, let self = self {
+                await MainActor.run {
+                    if let idx = self.document.insertedImages.firstIndex(where: { $0.id == id }) {
+                        self.document.insertedImages[idx].extractedText = text
+                        self.store.saveDocument(self.document)
+                    }
+                }
+            }
+        }
 
         if registerUndoAction {
             registerCustomUndo(actionName: "Bild einfügen") { [weak self] in
@@ -934,36 +1089,51 @@ extension InfiniteNotebookViewController {
         guard let pdf = PDFDocument(url: store.pdfURL(filename: entry.filename)) else { return }
         var y = entry.startY
         let docW = max(canvasView.contentSize.width, 834)
-        let pageMargin: CGFloat = 20
-        let availableW = docW - pageMargin * 2
+        let a4PageH = docW * 1.41421356
 
         for (i, h) in entry.pageHeights.enumerated() {
             guard let page = pdf.page(at: i) else { continue }
             let b = page.bounds(for: .cropBox)
-            let pageW = min(availableW, b.width > 0 ? b.width : 595)
-            let scale = pageW / max(b.width, 1)
-            let pageH = h > 0 ? h : ((b.height > 0 ? b.height : 842) * scale)
+            let pageW = docW
+            let ratio = (b.width > 0 && b.height > 0) ? (b.height / b.width) : 1.41421356
+            let pageH = (abs(ratio - 1.41421356) < 0.05) ? a4PageH : (h > 0 ? h : (docW * ratio))
 
             let img = renderPDFPage(page, width: pageW, height: pageH)
             if let imgFilename = try? store.saveImage(img) {
                 let pageId = UUID()
-                let startX: CGFloat = max(pageMargin, (docW - pageW) / 2)
-                let imageEntry = InsertedImage(id: pageId, filename: imgFilename, startX: startX, startY: y, width: pageW, height: pageH)
+                let imageEntry = InsertedImage(
+                    id: pageId,
+                    filename: imgFilename,
+                    startX: 0,
+                    startY: y,
+                    width: pageW,
+                    height: pageH,
+                    isDocumentPage: true
+                )
                 document.insertedImages.append(imageEntry)
                 loadImageEntry(imageEntry)
             } else {
                 addPDFLayer(page: page, at: y, height: pageH)
             }
-            y += pageH + 24
+            y += pageH
         }
     }
 
     private func loadImageEntry(_ entry: InsertedImage) {
+        let isDoc = isDocumentPage(entry)
         let contentFrame = CGRect(x: entry.startX, y: entry.startY,
                                   width: entry.width, height: entry.height)
         let imgView = makeImageView(image: nil, frame: contentFrame)
         if let rot = entry.rotation, rot != 0 {
             imgView.transform = CGAffineTransform(rotationAngle: rot)
+        }
+        if isDoc {
+            imgView.backgroundColor = .white
+            imgView.layer.masksToBounds = true
+            imgView.layer.shadowColor = UIColor.black.cgColor
+            imgView.layer.shadowOpacity = 0.08
+            imgView.layer.shadowOffset = CGSize(width: 0, height: 2)
+            imgView.layer.shadowRadius = 4
         }
         paperBackgroundView.addSubview(imgView)
         imageViews[entry.id] = imgView
@@ -976,7 +1146,11 @@ extension InfiniteNotebookViewController {
             }
         }
 
-        addImageHandle(for: imgView, at: contentFrame, id: entry.id, isText: entry.textContent != nil)
+        if isDoc {
+            attachLiveTextOverlay(for: entry, contentFrame: contentFrame)
+        } else {
+            addImageHandle(for: imgView, at: contentFrame, id: entry.id, isText: entry.textContent != nil)
+        }
     }
 
     /// Dynamically loads bitmaps for images near the visible viewport and evicts offscreen bitmaps to keep RAM usage low.
@@ -1000,7 +1174,12 @@ extension InfiniteNotebookViewController {
             if isNearViewport {
                 if imgView.image == nil {
                     let path = store.imageURL(filename: entry.filename).path
-                    imgView.image = UIImage(contentsOfFile: path)
+                    if let loadedImg = UIImage(contentsOfFile: path) {
+                        imgView.image = loadedImg
+                        if isDocumentPage(entry), let overlay = documentLiveTextViews[entry.id], overlay.interaction.analysis == nil {
+                            analyzeImage(loadedImg, for: overlay, entryId: entry.id)
+                        }
+                    }
                 }
             } else {
                 if imgView.image != nil {
@@ -1009,6 +1188,224 @@ extension InfiniteNotebookViewController {
                 }
             }
         }
+    }
+
+    func isDocumentPage(_ entry: InsertedImage) -> Bool {
+        if entry.isDocumentPage == true { return true }
+        if entry.textContent == nil {
+            let ratio = entry.height / max(entry.width, 1)
+            let docW = max(canvasView.contentSize.width, 834)
+            if (entry.width >= docW - 50 || entry.width == 595 || abs(entry.width - docW) < 5) && ratio >= 1.2 && ratio <= 1.65 {
+                return true
+            }
+            if document.insertedPDFs.contains(where: { $0.filename == entry.filename }) {
+                return true
+            }
+        }
+        return false
+    }
+
+    func isTouchInsideDocumentPage(_ loc: CGPoint) -> Bool {
+        for entry in document.insertedImages {
+            guard isDocumentPage(entry) else { continue }
+            let rect = CGRect(x: entry.startX, y: entry.startY, width: entry.width, height: entry.height)
+            if rect.contains(loc) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func attachLiveTextOverlay(for entry: InsertedImage, contentFrame: CGRect) {
+        documentLiveTextViews[entry.id]?.removeFromSuperview()
+
+        let overlay = DocumentPageLiveTextView(pageId: entry.id, frame: contentFrame, controller: self)
+        paperOverlayView.addSubview(overlay)
+        documentLiveTextViews[entry.id] = overlay
+
+        let imageURL = store.imageURL(filename: entry.filename)
+        if let image = imageViews[entry.id]?.image ?? UIImage(contentsOfFile: imageURL.path) {
+            analyzeImage(image, for: overlay, entryId: entry.id)
+        }
+    }
+
+    private func analyzeImage(_ image: UIImage, for overlay: DocumentPageLiveTextView, entryId: UUID) {
+        guard ImageAnalyzer.isSupported else { return }
+        Task { @MainActor [weak self, weak overlay] in
+            guard let self, let overlay else { return }
+            let analyzer = ImageAnalyzer()
+            let config = ImageAnalyzer.Configuration([.text, .machineReadableCode])
+            do {
+                let analysis = try await analyzer.analyze(image, orientation: .up, configuration: config)
+                overlay.analysis = analysis
+
+                if let idx = self.document.insertedImages.firstIndex(where: { $0.id == entryId }),
+                   (self.document.insertedImages[idx].extractedText == nil || self.document.insertedImages[idx].extractedText?.isEmpty == true) {
+                    let fullText = (try? await OCRService.shared.recognizeText(in: image)) ?? ""
+                    if !fullText.isEmpty {
+                        self.document.insertedImages[idx].extractedText = fullText
+                        self.store?.saveDocument(self.document)
+                    }
+                }
+            } catch {
+                debugLog("Live Text analysis failed: \(error)")
+            }
+        }
+    }
+
+    func duplicateDocumentPage(id: UUID) {
+        guard let idx = document.insertedImages.firstIndex(where: { $0.id == id }) else { return }
+        let original = document.insertedImages[idx]
+
+        let newId = UUID()
+        let newY = original.startY + original.height
+
+        for i in 0..<document.insertedImages.count {
+            if document.insertedImages[i].startY >= newY {
+                document.insertedImages[i].startY += original.height
+                if let view = imageViews[document.insertedImages[i].id] {
+                    view.frame.origin.y = document.insertedImages[i].startY
+                }
+                if let overlay = documentLiveTextViews[document.insertedImages[i].id] {
+                    overlay.frame.origin.y = document.insertedImages[i].startY
+                }
+                if let handle = imageHandles[document.insertedImages[i].id] {
+                    handle.frame.origin.y = document.insertedImages[i].startY
+                }
+            }
+        }
+
+        let newEntry = InsertedImage(
+            id: newId,
+            filename: original.filename,
+            startX: original.startX,
+            startY: newY,
+            width: original.width,
+            height: original.height,
+            extractedText: original.extractedText,
+            isDocumentPage: true
+        )
+
+        document.insertedImages.insert(newEntry, at: idx + 1)
+
+        let needed = newY + original.height + Self.initialHeight * 0.3
+        if needed > canvasView.contentSize.height {
+            canvasView.contentSize.height = needed
+            updateBackgroundFrame()
+        }
+        document.documentHeight = canvasView.contentSize.height
+        store?.saveDocument(document)
+
+        loadImageEntry(newEntry)
+        updateVisibleImages()
+        showToastBanner(text: "Seite dupliziert", icon: "plus.rectangle.on.rectangle")
+    }
+
+    func confirmDeleteDocumentPage(id: UUID) {
+        let alert = UIAlertController(
+            title: "Seite löschen?",
+            message: "Möchtest du diese Dokumentseite wirklich aus dem Notizbuch entfernen? Zeichnungen und Notizen bleiben erhalten.",
+            preferredStyle: .actionSheet
+        )
+        alert.addAction(UIAlertAction(title: "Seite löschen", style: .destructive) { [weak self] _ in
+            self?.deleteInsertedElement(id: id)
+            self?.showToastBanner(text: "Dokumentseite gelöscht", icon: "trash")
+        })
+        alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
+
+        if let popover = alert.popoverPresentationController, let view = documentLiveTextViews[id] ?? imageViews[id] {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+        }
+        present(alert, animated: true)
+    }
+
+    func presentDocumentPageActionSheet(for id: UUID, at loc: CGPoint) {
+        guard document.insertedImages.contains(where: { $0.id == id }) else { return }
+        let alert = UIAlertController(
+            title: "Dokumentseite",
+            message: "A4-Dokumentseite verwalten oder in bearbeitbaren Text umwandeln",
+            preferredStyle: .actionSheet
+        )
+
+        alert.addAction(UIAlertAction(title: "✍️ In Notiztext umwandeln (Handschrift & Tastatur)", style: .default) { [weak self] _ in
+            self?.convertDocumentPageToEditableText(id: id)
+        })
+
+        alert.addAction(UIAlertAction(title: "📝 Text kopieren", style: .default) { [weak self] _ in
+            self?.copyTextFromElement(id: id)
+        })
+
+        alert.addAction(UIAlertAction(title: "🔍 Text anzeigen…", style: .default) { [weak self] _ in
+            self?.showExtractedTextViewer(for: id)
+        })
+
+        alert.addAction(UIAlertAction(title: "📄 Seite duplizieren", style: .default) { [weak self] _ in
+            self?.duplicateDocumentPage(id: id)
+        })
+
+        alert.addAction(UIAlertAction(title: "🗑️ Seite löschen", style: .destructive) { [weak self] _ in
+            self?.confirmDeleteDocumentPage(id: id)
+        })
+
+        alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
+
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = paperBackgroundView
+            popover.sourceRect = CGRect(origin: loc, size: CGSize(width: 1, height: 1))
+        }
+        present(alert, animated: true)
+    }
+
+    func convertDocumentPageToEditableText(id: UUID) {
+        guard let entry = document.insertedImages.first(where: { $0.id == id }) else { return }
+        let text = entry.textContent ?? entry.extractedText ?? ""
+        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            applyDocumentPageConversion(id: id, text: text, entry: entry)
+        } else {
+            guard let img = imageViews[id]?.image ?? UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) else { return }
+            showToastBanner(text: "Erkenne Text (OCR)…", icon: "text.viewfinder")
+            Task { @MainActor in
+                let recognized = (try? await OCRService.shared.recognizeText(in: img)) ?? ""
+                if recognized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.showToastBanner(text: "Kein lesbarer Text erkannt", icon: "doc.text")
+                } else {
+                    if let idx = self.document.insertedImages.firstIndex(where: { $0.id == id }) {
+                        self.document.insertedImages[idx].extractedText = recognized
+                        self.store?.saveDocument(self.document)
+                    }
+                    self.applyDocumentPageConversion(id: id, text: recognized, entry: entry)
+                }
+            }
+        }
+    }
+
+    private func applyDocumentPageConversion(id: UUID, text: String, entry: InsertedImage) {
+        let alert = UIAlertController(
+            title: "In Notiztext umwandeln",
+            message: "Möchtest du die Dokumentseite durch den bearbeitbaren Notiztext ersetzen oder den Text zusätzlich darunter einfügen?",
+            preferredStyle: .actionSheet
+        )
+        alert.addAction(UIAlertAction(title: "🔄 Seite durch Notiztext ersetzen", style: .default) { [weak self] _ in
+            guard let self else { return }
+            let y = entry.startY
+            self.deleteInsertedElement(id: id)
+            _ = self.insertTypedText(text: text, fontSize: 18, contentOrigin: CGPoint(x: 40, y: y))
+            self.showToastBanner(text: "In bearbeitbaren Notiztext umgewandelt", icon: "character.textbox")
+        })
+        alert.addAction(UIAlertAction(title: "➕ Text zusätzlich einfügen (Seite behalten)", style: .default) { [weak self] _ in
+            guard let self else { return }
+            let y = entry.startY + entry.height + 20
+            _ = self.insertTypedText(text: text, fontSize: 18, contentOrigin: CGPoint(x: 40, y: y))
+            self.showToastBanner(text: "Notiztext eingefügt", icon: "plus.bubble")
+        })
+        alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel))
+
+        if let popover = alert.popoverPresentationController, let view = documentLiveTextViews[id] ?? imageViews[id] {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+        }
+        present(alert, animated: true)
     }
 
     // MARK: - Layer helpers
@@ -1040,7 +1437,13 @@ extension InfiniteNotebookViewController {
     private func renderPDFPage(_ page: PDFPage, width: CGFloat, height: CGFloat) -> UIImage {
         let scale = max(UIScreen.main.scale, 2.0)
         let targetSize = CGSize(width: max(width, 100) * scale, height: max(height, 100) * scale)
-        return page.thumbnail(of: targetSize, for: .cropBox)
+        let thumb = page.thumbnail(of: targetSize, for: .cropBox)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: targetSize))
+            thumb.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
     }
 
     private func makeImageView(image: UIImage?, frame: CGRect) -> UIImageView {
@@ -1086,7 +1489,7 @@ extension InfiniteNotebookViewController {
     // MARK: - Universal Transform Box & Lasso Selection Tools (Markieren, Verschieben, Drehen, Vergrößern)
 
     func setCanvasToolType(_ tool: CanvasToolType) {
-        if tool != .pan && tool != .lasso {
+        if tool != .pan && tool != .lasso && tool != .textSelect {
             previousDrawingTool = tool
         }
         currentCanvasToolType = tool
@@ -1105,6 +1508,11 @@ extension InfiniteNotebookViewController {
                 NSNumber(value: UITouch.TouchType.pencil.rawValue)
             ]
             canvasView.panGestureRecognizer.minimumNumberOfTouches = 1
+        } else if tool == .textSelect {
+            // Text auswählen mode: disable PK drawing so Live Text selection handles touches
+            canvasView.drawingGestureRecognizer.isEnabled = false
+            pencilScrollPanGesture.isEnabled = false
+            applyDrawingPolicy()
         } else {
             pencilScrollPanGesture.isEnabled = false
             if tool != .lasso {
@@ -1347,6 +1755,9 @@ extension InfiniteNotebookViewController {
         box.targetElementView = targetView
         box.isTextElement = isText
         box.baseFontSize = entry.fontSize
+        box.onCopyText = { [weak self] in
+            self?.copyTextFromElement(id: id)
+        }
 
         imageHandles.values.forEach { $0.setSelected(false) }
         paperOverlayView.addSubview(box)
@@ -1536,6 +1947,13 @@ extension InfiniteNotebookViewController {
                 return
             }
 
+            // 3. Check if a document page is under the touch
+            if let docEntry = document.insertedImages.first(where: { isDocumentPage($0) && CGRect(x: $0.startX, y: $0.startY, width: $0.width, height: $0.height).contains(loc) }) {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                presentDocumentPageActionSheet(for: docEntry.id, at: loc)
+                return
+            }
+
         case .changed:
             guard isLongPressDragging,
                   let box = activeTransformBox,
@@ -1565,6 +1983,7 @@ extension InfiniteNotebookViewController {
 
     private func findElement(near point: CGPoint) -> UUID? {
         for entry in document.insertedImages.reversed() {
+            if isDocumentPage(entry) { continue }
             let rect = CGRect(x: entry.startX, y: entry.startY, width: entry.width, height: entry.height)
             if rect.insetBy(dx: -15, dy: -15).contains(point) {
                 return entry.id
@@ -2846,18 +3265,36 @@ extension InfiniteNotebookViewController {
     }
 
     func deleteInsertedElement(id: UUID, registerUndoAction: Bool = true) {
+        if let box = activeTransformBox {
+            box.targetElementView = nil
+            box.dismiss()
+            activeTransformBox = nil
+        }
+
         let existingEntry = document.insertedImages.first(where: { $0.id == id })
         let existingImage = imageViews[id]?.image ?? (existingEntry.flatMap { UIImage(contentsOfFile: store.imageURL(filename: $0.filename).path) })
 
+        if let handle = imageHandles.removeValue(forKey: id) {
+            handle.layer.removeAllAnimations()
+            handle.gestureRecognizers?.forEach { handle.removeGestureRecognizer($0) }
+            handle.interactions.forEach { handle.removeInteraction($0) }
+            handle.removeFromSuperview()
+        }
+
+        if let liveView = documentLiveTextViews.removeValue(forKey: id) {
+            liveView.layer.removeAllAnimations()
+            liveView.gestureRecognizers?.forEach { liveView.removeGestureRecognizer($0) }
+            liveView.interactions.forEach { liveView.removeInteraction($0) }
+            liveView.removeFromSuperview()
+        }
+
         if let imgView = imageViews.removeValue(forKey: id) {
-            UIView.animate(withDuration: 0.15, animations: {
-                imgView.alpha = 0
-            }) { _ in
-                imgView.removeFromSuperview()
-            }
+            imgView.layer.removeAllAnimations()
+            imgView.gestureRecognizers?.forEach { imgView.removeGestureRecognizer($0) }
+            imgView.interactions.forEach { imgView.removeInteraction($0) }
+            imgView.removeFromSuperview()
         }
         imageLayers.removeValue(forKey: id)?.removeFromSuperlayer()
-        imageHandles.removeValue(forKey: id)?.removeFromSuperview()
 
         if let idx = document.insertedImages.firstIndex(where: { $0.id == id }) {
             document.insertedImages.remove(at: idx)
@@ -2937,6 +3374,12 @@ extension InfiniteNotebookViewController {
                 self?.showToastBanner(text: "Text kopiert", icon: "doc.on.doc")
             })
         } else if let img = UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) {
+            alert.addAction(UIAlertAction(title: "📝 Text kopieren (OCR)", style: .default) { [weak self] _ in
+                self?.copyTextFromElement(id: id)
+            })
+            alert.addAction(UIAlertAction(title: "🔍 Text anzeigen…", style: .default) { [weak self] _ in
+                self?.showExtractedTextViewer(for: id)
+            })
             alert.addAction(UIAlertAction(title: "📋 Bild kopieren", style: .default) { [weak self] _ in
                 UIPasteboard.general.image = img
                 self?.showToastBanner(text: "Bild kopiert", icon: "doc.on.doc")
@@ -3106,6 +3549,149 @@ extension InfiniteNotebookViewController {
             }
         }
     }
+
+    func copyTextFromElement(id: UUID) {
+        guard let entry = document.insertedImages.first(where: { $0.id == id }) else { return }
+
+        // 0. If user has actively selected text via Live Text
+        if let liveView = documentLiveTextViews[id] {
+            let selText = liveView.interaction.selectedText
+            if !selText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                UIPasteboard.general.string = selText
+                let words = selText.split { $0.isWhitespace || $0.isNewline }.count
+                showToastBanner(text: "Ausgewählter Text kopiert (\(words) \(words == 1 ? "Wort" : "Wörter"))", icon: "doc.on.clipboard")
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                return
+            }
+        }
+
+        // 1. If it's a typed text element
+        if let text = entry.textContent, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            UIPasteboard.general.string = text
+            showToastBanner(text: "Text kopiert", icon: "doc.on.doc")
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            return
+        }
+
+        // 2. If it has extractedText already saved (from PDF import or prior OCR)
+        if let text = entry.extractedText, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            UIPasteboard.general.string = text
+            let words = text.split { $0.isWhitespace || $0.isNewline }.count
+            showToastBanner(text: "Text kopiert (\(words) \(words == 1 ? "Wort" : "Wörter"))", icon: "doc.on.clipboard")
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            return
+        }
+
+        // 3. Otherwise, perform live OCR on the element's image
+        guard let img = imageViews[id]?.image ?? UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) else {
+            showToastBanner(text: "Kein Bild oder Text vorhanden", icon: "exclamationmark.triangle")
+            return
+        }
+
+        showToastBanner(text: "Erkenne Text (OCR)…", icon: "text.viewfinder")
+        Task { @MainActor in
+            let text = (try? await OCRService.shared.recognizeText(in: img)) ?? ""
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                showToastBanner(text: "Kein lesbarer Text erkannt", icon: "doc.text")
+            } else {
+                if let idx = self.document.insertedImages.firstIndex(where: { $0.id == id }) {
+                    self.document.insertedImages[idx].extractedText = text
+                    self.store?.saveDocument(self.document)
+                }
+                UIPasteboard.general.string = text
+                let words = text.split { $0.isWhitespace || $0.isNewline }.count
+                showToastBanner(text: "Text kopiert (\(words) \(words == 1 ? "Wort" : "Wörter"))", icon: "doc.on.clipboard")
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
+        }
+    }
+
+    func showExtractedTextViewer(for id: UUID) {
+        guard let entry = document.insertedImages.first(where: { $0.id == id }) else { return }
+        let text = entry.textContent ?? entry.extractedText ?? ""
+
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            guard let img = imageViews[id]?.image ?? UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) else { return }
+            showToastBanner(text: "Erkenne Text (OCR)…", icon: "text.viewfinder")
+            Task { @MainActor in
+                let recognized = (try? await OCRService.shared.recognizeText(in: img)) ?? ""
+                if recognized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    showToastBanner(text: "Kein lesbarer Text erkannt", icon: "doc.text")
+                } else {
+                    if let idx = self.document.insertedImages.firstIndex(where: { $0.id == id }) {
+                        self.document.insertedImages[idx].extractedText = recognized
+                        self.store?.saveDocument(self.document)
+                    }
+                    self.presentTextModal(text: recognized, sourceElementId: id)
+                }
+            }
+        } else {
+            presentTextModal(text: text, sourceElementId: id)
+        }
+    }
+
+    private func presentTextModal(text: String, sourceElementId: UUID) {
+        let vc = UIViewController()
+        vc.title = "Erkannter Text"
+
+        let textView = UITextView()
+        textView.text = text
+        textView.font = .systemFont(ofSize: 16)
+        textView.textColor = .label
+        textView.backgroundColor = .systemBackground
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.dataDetectorTypes = [.all]
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        vc.view.addSubview(textView)
+
+        NSLayoutConstraint.activate([
+            textView.topAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            textView.leadingAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            textView.trailingAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            textView.bottomAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.bottomAnchor, constant: -12)
+        ])
+
+        let nav = UINavigationController(rootViewController: vc)
+        nav.modalPresentationStyle = .pageSheet
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
+
+        vc.navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Fertig", style: .done, target: self, action: #selector(dismissPresentedModal))
+
+        let copyBtn = UIBarButtonItem(title: "Kopieren", style: .plain, target: self, action: #selector(copyModalText))
+        objc_setAssociatedObject(copyBtn, "text", text, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
+        let insertBtn = UIBarButtonItem(title: "Als Textfeld", style: .plain, target: self, action: #selector(insertModalTextAsTextBox))
+        objc_setAssociatedObject(insertBtn, "text", text, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
+        vc.navigationItem.rightBarButtonItems = [copyBtn, insertBtn]
+        present(nav, animated: true)
+    }
+
+    @objc private func dismissPresentedModal() {
+        dismiss(animated: true)
+    }
+
+    @objc private func copyModalText(_ sender: UIBarButtonItem) {
+        if let text = objc_getAssociatedObject(sender, "text") as? String {
+            UIPasteboard.general.string = text
+            showToastBanner(text: "Text in Zwischenablage kopiert", icon: "doc.on.clipboard")
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+    }
+
+    @objc private func insertModalTextAsTextBox(_ sender: UIBarButtonItem) {
+        guard let text = objc_getAssociatedObject(sender, "text") as? String else { return }
+        dismiss(animated: true) { [weak self] in
+            guard let self else { return }
+            let center = CGPoint(x: 40, y: self.canvasView.contentOffset.y + 100)
+            self.insertTypedText(text: text, fontSize: 20, contentOrigin: center)
+            self.showToastBanner(text: "Textfeld eingefügt", icon: "character.textbox")
+        }
+    }
 }
 
 // MARK: - UIGestureRecognizerDelegate
@@ -3181,6 +3767,16 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
                 }
             }
         }
+
+        if touch.type == .direct {
+            let loc = touch.location(in: paperBackgroundView)
+            if isTouchInsideDocumentPage(loc) {
+                if gestureRecognizer === canvasTapToDeselect {
+                    return false
+                }
+            }
+        }
+
         return true
     }
 }
@@ -3261,5 +3857,111 @@ final class PaperOverlayContainerView: UIView {
             }
         }
         return nil
+    }
+}
+
+// MARK: - DocumentPageLiveTextView
+// Overlay view for imported document pages (PDF / converted DOCX).
+// Hosts Apple VisionKit Live Text (ImageAnalysisInteraction) for finger text selection,
+// drag handles, and copying, while passing Apple Pencil touches straight through to PKCanvasView
+// so handwriting and drawing notes remain seamless.
+final class DocumentPageLiveTextView: UIView, ImageAnalysisInteractionDelegate, UIContextMenuInteractionDelegate {
+    let pageId: UUID
+    let interaction = ImageAnalysisInteraction()
+    private weak var controller: InfiniteNotebookViewController?
+
+    var analysis: ImageAnalysis? {
+        didSet {
+            interaction.analysis = analysis
+        }
+    }
+
+    init(pageId: UUID, frame: CGRect, controller: InfiniteNotebookViewController) {
+        self.pageId = pageId
+        self.controller = controller
+        super.init(frame: frame)
+
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = true
+
+        interaction.preferredInteractionTypes = [.automatic, .textSelection]
+        interaction.delegate = self
+        addInteraction(interaction)
+
+        let contextMenu = UIContextMenuInteraction(delegate: self)
+        addInteraction(contextMenu)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // ONLY intercept touches when the user has explicitly selected the "Text" tool (.textSelect) in the toolbar.
+        // In all drawing modes (Pen, Marker, Pencil, Eraser, Lasso) or Pan mode, return nil immediately
+        // so PKCanvasView receives 100% of touches for drawing, writing notes, whiteout, and navigating.
+        guard controller?.currentCanvasToolType == .textSelect else {
+            return nil
+        }
+        guard bounds.contains(point) else { return nil }
+        return super.hitTest(point, with: event)
+    }
+
+    // MARK: - ImageAnalysisInteractionDelegate
+
+    func contentsRect(for interaction: ImageAnalysisInteraction) -> CGRect {
+        return CGRect(x: 0, y: 0, width: 1, height: 1)
+    }
+
+    func presentingViewController(for interaction: ImageAnalysisInteraction) -> UIViewController? {
+        return controller
+    }
+
+    // MARK: - UIContextMenuInteractionDelegate
+
+    func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+        guard let controller else { return nil }
+        let pid = self.pageId
+
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            let convertText = UIAction(
+                title: "✍️ In Notiztext umwandeln",
+                image: UIImage(systemName: "pencil.and.scribble")
+            ) { _ in
+                controller.convertDocumentPageToEditableText(id: pid)
+            }
+
+            let copyText = UIAction(
+                title: "📝 Text kopieren",
+                image: UIImage(systemName: "doc.on.clipboard")
+            ) { _ in
+                controller.copyTextFromElement(id: pid)
+            }
+
+            let viewText = UIAction(
+                title: "🔍 Text anzeigen…",
+                image: UIImage(systemName: "text.viewfinder")
+            ) { _ in
+                controller.showExtractedTextViewer(for: pid)
+            }
+
+            let duplicate = UIAction(
+                title: "📄 Seite duplizieren",
+                image: UIImage(systemName: "plus.rectangle.on.rectangle")
+            ) { _ in
+                controller.duplicateDocumentPage(id: pid)
+            }
+
+            let delete = UIAction(
+                title: "🗑️ Seite löschen",
+                image: UIImage(systemName: "trash"),
+                attributes: .destructive
+            ) { _ in
+                controller.confirmDeleteDocumentPage(id: pid)
+            }
+
+            return UIMenu(title: "Dokumentseite", children: [convertText, copyText, viewText, duplicate, delete])
+        }
     }
 }

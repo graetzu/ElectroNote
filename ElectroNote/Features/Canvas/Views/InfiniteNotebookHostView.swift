@@ -29,7 +29,7 @@ struct InfiniteNotebookHostView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Dedicated Pen, Tool, Shape, OCR & Math Top Bar
-            PenToolbarView(vm: vm)
+            PenToolbarView(vm: vm, onNextcloud: { showNextcloudSheet = true })
                 .frame(maxWidth: .infinity)
                 .background(Color(uiColor: .secondarySystemGroupedBackground))
 
@@ -42,7 +42,7 @@ struct InfiniteNotebookHostView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarItems }
         .sheet(isPresented: $vm.showPDFPicker) {
-            DocumentPicker(contentTypes: DocumentConverter.supportedTypes) { url in
+            DocumentPicker(contentTypes: DocumentConverter.supportedTypes + [.image]) { url in
                 vm.pendingPDFURL = url
             }
         }
@@ -114,6 +114,11 @@ struct InfiniteNotebookHostView: View {
         }
         .sheet(isPresented: $vm.showCircuitPicker) {
             CircuitSymbolPickerView(isDarkCanvas: vm.darkDrawingMode) { image in
+                vm.pendingImage = image
+            }
+        }
+        .sheet(isPresented: $vm.showElektroSim) {
+            ElektroSimWebSheetView { image in
                 vm.pendingImage = image
             }
         }
@@ -218,6 +223,55 @@ struct InfiniteNotebookHostView: View {
 
             // Live Cast Button (WLAN Übertragung)
             LiveCastBadgeButton()
+
+            // Direct Import & Insert Menu (Dateien-App, Nextcloud, Fotos, etc.)
+            Menu {
+                Section("Dateien & Cloud") {
+                    Button {
+                        vm.showPDFPicker = true
+                    } label: {
+                        Label("Dateien-App (PDF, Word, Bilder…)", systemImage: "folder.badge.plus")
+                    }
+                    Button {
+                        showNextcloudSheet = true
+                    } label: {
+                        Label("Aus Nextcloud importieren…", systemImage: "icloud.and.arrow.down")
+                    }
+                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                        Label("Foto aus Mediathek…", systemImage: "photo.badge.plus")
+                    }
+                }
+                Section("Inhalte") {
+                    Button { vm.triggerPaste = true } label: {
+                        Label("Aus Zwischenablage einfügen", systemImage: "doc.on.clipboard")
+                    }
+                    Button { vm.showElektroSim = true } label: {
+                        Label("⚡️ Elektro-Planer (Website)…", systemImage: "bolt.horizontal.circle")
+                    }
+                    Button { vm.showCircuitPicker = true } label: {
+                        Label("⚡️ Schaltsymbole & Stromkreise…", systemImage: "bolt.badge.clock")
+                    }
+                    Button { showClipArtPicker = true } label: {
+                        Label("Symbol / ClipArt…", systemImage: "star.square")
+                    }
+                    Button { vm.showPlotter = true } label: {
+                        Label("Funktionsplotter…", systemImage: "waveform.path.badge.plus")
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Einfügen")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Color.accentColor.opacity(0.12))
+                .foregroundColor(.accentColor)
+                .clipShape(Capsule())
+            }
+            .accessibilityLabel("Dateien und Inhalte importieren")
 
             // "Mehr" menu — consolidates less-used actions to keep toolbar compact in portrait
             Menu {
@@ -393,8 +447,10 @@ struct PenToolbarView: View {
     var onTextRecognition: (() -> Void)? = nil
     var onMathRecognition: (() -> Void)? = nil
     var onOpenCircuits: (() -> Void)? = nil
+    var onImportDocument: (() -> Void)? = nil
+    var onImportNextcloud: (() -> Void)? = nil
 
-    init(vm: InfiniteNotebookViewModel) {
+    init(vm: InfiniteNotebookViewModel, onNextcloud: (() -> Void)? = nil) {
         self._activeTool = Binding(get: { vm.activeTool }, set: { vm.activeTool = $0 })
         self._selectedColor = Binding(get: { vm.selectedColor }, set: { vm.selectedColor = $0 })
         self._selectedWidth = Binding(get: { vm.selectedWidth }, set: { vm.selectedWidth = $0 })
@@ -408,6 +464,8 @@ struct PenToolbarView: View {
         self.onTextRecognition = { [weak vm] in vm?.triggerHandwritingRecognition = true }
         self.onMathRecognition = { [weak vm] in vm?.triggerMathRecognition = true }
         self.onOpenCircuits = { [weak vm] in vm?.showCircuitPicker = true }
+        self.onImportDocument = { [weak vm] in vm?.showPDFPicker = true }
+        self.onImportNextcloud = onNextcloud
     }
 
     var body: some View {
@@ -541,6 +599,48 @@ struct PenToolbarView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Schaltsymbole und Stromkreise")
 
+                    // Dateien-App Import Button
+                    Button {
+                        onImportDocument?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "folder.badge.plus")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Dateien")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.teal)
+                        .foregroundColor(Color.white)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Datei aus Dateien-App importieren")
+
+                    // Nextcloud Import Button
+                    Button {
+                        onImportNextcloud?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "icloud.and.arrow.down")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Nextcloud")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.cyan)
+                        .foregroundColor(Color.white)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Datei aus Nextcloud importieren")
+
                     if activeTool == .lasso {
                         Button {
                             onPaste?()
@@ -565,7 +665,7 @@ struct PenToolbarView: View {
                 }
                 .fixedSize()
 
-                if activeTool != .eraser && activeTool != .lasso && activeTool != .pan {
+                if activeTool != .eraser && activeTool != .lasso && activeTool != .pan && activeTool != .textSelect {
                     Divider()
                         .frame(height: 22)
 

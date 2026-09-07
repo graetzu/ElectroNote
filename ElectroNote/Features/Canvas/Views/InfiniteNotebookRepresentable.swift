@@ -37,7 +37,7 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
             vc.canvasView.isRulerActive = vm.rulerActive
         }
 
-        if let url = vm.pendingPDFURL   { vm.pendingPDFURL = nil; vc.insertPDF(from: url) }
+        if let url = vm.pendingPDFURL   { vm.pendingPDFURL = nil; vc.insertFile(from: url) }
         if let img = vm.pendingImage    { vm.pendingImage  = nil; vc.insertImage(img) }
 
         if vm.triggerHandwritingRecognition { vm.triggerHandwritingRecognition = false; vc.recogniseHandwriting() }
@@ -52,13 +52,13 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
         }
         if let preset = vm.pendingInkPreset {
             vm.pendingInkPreset = nil
-            if vm.activeTool != .pan && vm.activeTool != .lasso {
+            if vm.activeTool != .pan && vm.activeTool != .lasso && vm.activeTool != .textSelect {
                 vc.canvasView.tool = preset.pkTool
             }
         }
         if let tool = vm.pendingPKTool {
             vm.pendingPKTool = nil
-            if vm.activeTool != .pan && vm.activeTool != .lasso {
+            if vm.activeTool != .pan && vm.activeTool != .lasso && vm.activeTool != .textSelect {
                 vc.canvasView.tool = tool
             }
         }

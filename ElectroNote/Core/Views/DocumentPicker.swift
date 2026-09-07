@@ -29,7 +29,7 @@ struct DocumentPicker: UIViewControllerRepresentable {
 
             // Copy to a safe local temporary URL if needed
             let tempDir = FileManager.default.temporaryDirectory
-            let targetURL = tempDir.appendingPathComponent(url.lastPathComponent)
+            let targetURL = tempDir.appendingPathComponent("\(UUID().uuidString.prefix(8))_\(url.lastPathComponent)")
             try? FileManager.default.removeItem(at: targetURL)
             do {
                 try FileManager.default.copyItem(at: url, to: targetURL)
