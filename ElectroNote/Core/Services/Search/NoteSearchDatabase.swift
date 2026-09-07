@@ -406,4 +406,46 @@ final class NoteSearchDatabase {
             }
         }
     }
+
+    func getIndexStats() async -> (docCount: Int, entryCount: Int) {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                guard let db = self.db else {
+                    continuation.resume(returning: (0, 0))
+                    return
+                }
+                var docCount = 0
+                var entryCount = 0
+                var stmt: OpaquePointer?
+                if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM indexed_documents;", -1, &stmt, nil) == SQLITE_OK {
+                    if sqlite3_step(stmt) == SQLITE_ROW {
+                        docCount = Int(sqlite3_column_int(stmt, 0))
+                    }
+                    sqlite3_finalize(stmt)
+                }
+                if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM search_index;", -1, &stmt, nil) == SQLITE_OK {
+                    if sqlite3_step(stmt) == SQLITE_ROW {
+                        entryCount = Int(sqlite3_column_int(stmt, 0))
+                    }
+                    sqlite3_finalize(stmt)
+                }
+                continuation.resume(returning: (docCount, entryCount))
+            }
+        }
+    }
+
+    func clearAllIndex() async {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                guard let db = self.db else {
+                    continuation.resume()
+                    return
+                }
+                self.execute(sql: "DELETE FROM search_index;")
+                self.execute(sql: "DELETE FROM chunk_hashes;")
+                self.execute(sql: "DELETE FROM indexed_documents;")
+                continuation.resume()
+            }
+        }
+    }
 }

@@ -9,6 +9,7 @@ struct InfiniteNotebookHostView: View {
     @StateObject private var vm: InfiniteNotebookViewModel
     @StateObject private var syncVM = SyncViewModel()
     @State private var showNextcloudSheet = false
+    @State private var showSettingsSheet = false
     @State private var showClipArtPicker  = false
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var selectedVideoItem: PhotosPickerItem? = nil
@@ -100,6 +101,12 @@ struct InfiniteNotebookHostView: View {
                     showNextcloudSheet = false
                     vm.pendingPDFURL = url
                 }
+            }
+        }
+        .sheet(isPresented: $showSettingsSheet) {
+            AppSettingsView { url in
+                showSettingsSheet = false
+                vm.pendingPDFURL = url
             }
         }
         .sheet(isPresented: $showClipArtPicker) {
@@ -204,6 +211,11 @@ struct InfiniteNotebookHostView: View {
                         }
                     }
                 }
+            }
+        }
+        .onDisappear {
+            if UnifiedSyncManager.shared.autoSyncOnSave {
+                UnifiedSyncManager.shared.syncActiveProvider()
             }
         }
     }
@@ -389,9 +401,14 @@ struct InfiniteNotebookHostView: View {
                         Label("Dateien-App (PDF, Word, Bilder…)", systemImage: "folder.badge.plus")
                     }
                     Button {
+                        showSettingsSheet = true
+                    } label: {
+                        Label("Cloud & Synchronisation…", systemImage: "arrow.triangle.2.circlepath.icloud")
+                    }
+                    Button {
                         showNextcloudSheet = true
                     } label: {
-                        Label("Aus Nextcloud importieren…", systemImage: "icloud.and.arrow.down")
+                        Label("Aus Nextcloud importieren…", systemImage: "externaldrive.connected.to.line.below")
                     }
                     PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                         Label("Foto aus Mediathek…", systemImage: "photo.badge.plus")
@@ -520,8 +537,11 @@ struct InfiniteNotebookHostView: View {
                     Button { vm.showPDFPicker = true } label: {
                         Label("Dokument einfügen (PDF, Word, Excel, PPT…)", systemImage: "doc.badge.plus")
                     }
+                    Button { showSettingsSheet = true } label: {
+                        Label("Einstellungen & Cloud…", systemImage: "gearshape")
+                    }
                     Button { showNextcloudSheet = true } label: {
-                        Label("Aus Nextcloud einfügen…", systemImage: "icloud.and.arrow.down")
+                        Label("Aus Nextcloud einfügen…", systemImage: "externaldrive.connected.to.line.below")
                     }
                     Button { vm.showPlotter = true } label: {
                         Label("Funktion einfügen", systemImage: "waveform.path.badge.plus")

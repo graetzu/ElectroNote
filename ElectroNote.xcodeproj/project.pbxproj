@@ -87,6 +87,15 @@
 		CFB00001000000000000001 /* CanvasFindBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFBREF010000000000000001 /* CanvasFindBarView.swift */; };
 		CSH00001000000000000001 /* CanvasSearchHighlightOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CSHREF010000000000000001 /* CanvasSearchHighlightOverlay.swift */; };
 		AIS00001000000000000001 /* AISidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AISREF010000000000000001 /* AISidebarView.swift */; };
+		SY01BLD00000000000000001 /* SyncProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = SY01REF00000000000000001 /* SyncProvider.swift */; };
+		GD01BLD00000000000000001 /* GoogleDriveCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = GD01REF00000000000000001 /* GoogleDriveCredentials.swift */; };
+		IC01BLD00000000000000001 /* ICloudSyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = IC01REF00000000000000001 /* ICloudSyncEngine.swift */; };
+		GD02BLD00000000000000002 /* GoogleDriveClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = GD02REF00000000000000002 /* GoogleDriveClient.swift */; };
+		GD03BLD00000000000000003 /* GoogleDriveSyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = GD03REF00000000000000003 /* GoogleDriveSyncEngine.swift */; };
+		GD04BLD00000000000000004 /* GoogleDriveFileBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = GD04REF00000000000000004 /* GoogleDriveFileBrowserView.swift */; };
+		US01BLD00000000000000001 /* UnifiedSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = US01REF00000000000000001 /* UnifiedSyncManager.swift */; };
+		ST01BLD00000000000000001 /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = ST01REF00000000000000001 /* SettingsViewModel.swift */; };
+		ST02BLD00000000000000002 /* AppSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ST02REF00000000000000002 /* AppSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -172,6 +181,15 @@
 		CFBREF010000000000000001 /* CanvasFindBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasFindBarView.swift; sourceTree = "<group>"; };
 		CSHREF010000000000000001 /* CanvasSearchHighlightOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSearchHighlightOverlay.swift; sourceTree = "<group>"; };
 		AISREF010000000000000001 /* AISidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISidebarView.swift; sourceTree = "<group>"; };
+		SY01REF00000000000000001 /* SyncProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncProvider.swift; sourceTree = "<group>"; };
+		GD01REF00000000000000001 /* GoogleDriveCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleDriveCredentials.swift; sourceTree = "<group>"; };
+		IC01REF00000000000000001 /* ICloudSyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ICloud/ICloudSyncEngine.swift; sourceTree = "<group>"; };
+		GD02REF00000000000000002 /* GoogleDriveClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleDrive/GoogleDriveClient.swift; sourceTree = "<group>"; };
+		GD03REF00000000000000003 /* GoogleDriveSyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleDrive/GoogleDriveSyncEngine.swift; sourceTree = "<group>"; };
+		GD04REF00000000000000004 /* GoogleDriveFileBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleDrive/Views/GoogleDriveFileBrowserView.swift; sourceTree = "<group>"; };
+		US01REF00000000000000001 /* UnifiedSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedSyncManager.swift; sourceTree = "<group>"; };
+		ST01REF00000000000000001 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/ViewModels/SettingsViewModel.swift; sourceTree = "<group>"; };
+		ST02REF00000000000000002 /* AppSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/Views/AppSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -344,6 +362,8 @@
 				BB99887766554433221100FF /* Whiteboard */,
 				CC99887766554433221100FF /* LiveCast */,
 				EE99887766554433221100FF /* Electrical */,
+				ST01REF00000000000000001 /* SettingsViewModel.swift */,
+				ST02REF00000000000000002 /* AppSettingsView.swift */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -479,6 +499,10 @@
 				NF03000000000000000000CC /* NextcloudLoginFlow.swift */,
 				NF04000000000000000000DD /* WebDAVClient.swift */,
 				NF05000000000000000000EE /* SyncEngine.swift */,
+				IC01REF00000000000000001 /* ICloudSyncEngine.swift */,
+				GD02REF00000000000000002 /* GoogleDriveClient.swift */,
+				GD03REF00000000000000003 /* GoogleDriveSyncEngine.swift */,
+				GD04REF00000000000000004 /* GoogleDriveFileBrowserView.swift */,
 			);
 			path = Sync;
 			sourceTree = "<group>";
@@ -487,6 +511,8 @@
 			isa = PBXGroup;
 			children = (
 				NF02000000000000000000BB /* NextcloudCredentials.swift */,
+				SY01REF00000000000000001 /* SyncProvider.swift */,
+				GD01REF00000000000000001 /* GoogleDriveCredentials.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -495,6 +521,7 @@
 			isa = PBXGroup;
 			children = (
 				NF06000000000000000000FF /* SyncViewModel.swift */,
+				US01REF00000000000000001 /* UnifiedSyncManager.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -708,6 +735,15 @@
 				CFB00001000000000000001 /* CanvasFindBarView.swift in Sources */,
 				CSH00001000000000000001 /* CanvasSearchHighlightOverlay.swift in Sources */,
 				AIS00001000000000000001 /* AISidebarView.swift in Sources */,
+				SY01BLD00000000000000001 /* SyncProvider.swift in Sources */,
+				GD01BLD00000000000000001 /* GoogleDriveCredentials.swift in Sources */,
+				IC01BLD00000000000000001 /* ICloudSyncEngine.swift in Sources */,
+				GD02BLD00000000000000002 /* GoogleDriveClient.swift in Sources */,
+				GD03BLD00000000000000003 /* GoogleDriveSyncEngine.swift in Sources */,
+				GD04BLD00000000000000004 /* GoogleDriveFileBrowserView.swift in Sources */,
+				US01BLD00000000000000001 /* UnifiedSyncManager.swift in Sources */,
+				ST01BLD00000000000000001 /* SettingsViewModel.swift in Sources */,
+				ST02BLD00000000000000002 /* AppSettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -11,6 +11,7 @@ struct BrowserSidebarView: View {
     @State private var pendingDocType: DocumentType? = nil
     @State private var showPDFPicker = false
     @State private var showNextcloud = false
+    @State private var showSettings = false
     @State private var itemToRename: DocumentItem?
     @State private var renameText = ""
     @State private var showTrash = false
@@ -73,6 +74,16 @@ struct BrowserSidebarView: View {
         }
         .sheet(isPresented: $showNextcloud) {
             SyncSettingsView(localRoot: viewModel.currentPath) { pdfURL in
+                if let item = viewModel.importPDF(from: pdfURL) {
+                    selectedItem = item
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        sidebarVisibility = .detailOnly
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showSettings) {
+            AppSettingsView { pdfURL in
                 if let item = viewModel.importPDF(from: pdfURL) {
                     selectedItem = item
                     withAnimation(.easeInOut(duration: 0.25)) {
@@ -347,8 +358,12 @@ struct BrowserSidebarView: View {
             .accessibilityLabel("Neu")
 
             Menu {
+                Button { showSettings = true } label: {
+                    Label("Einstellungen & Cloud", systemImage: "gearshape")
+                }
+                Divider()
                 Button { showNextcloud = true } label: {
-                    Label("Nextcloud", systemImage: "icloud")
+                    Label("Nextcloud Direktzugriff", systemImage: "externaldrive.connected.to.line.below")
                 }
                 Button { showTagBrowser = true } label: {
                     Label("Tags", systemImage: "tag")
@@ -360,6 +375,13 @@ struct BrowserSidebarView: View {
                 Image(systemName: "ellipsis.circle")
             }
             .accessibilityLabel("Optionen")
+
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .accessibilityLabel("Einstellungen")
         }
     }
 

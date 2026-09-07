@@ -296,10 +296,20 @@ struct AISidebarView: View {
                 return
             }
 
+            let focusRaw = UserDefaults.standard.string(forKey: "electroNote_aiDomainFocus") ?? AIDomainFocus.electrical.rawValue
+            let focus = AIDomainFocus(rawValue: focusRaw) ?? .electrical
+            let focusInstruction: String
+            if focus == .custom {
+                focusInstruction = UserDefaults.standard.string(forKey: "electroNote_aiCustomPrompt") ?? ""
+            } else {
+                focusInstruction = focus.promptPrefix
+            }
+            let instructionPrefix = focusInstruction.isEmpty ? "" : "[\(focusInstruction)]\n\n"
+
             let prompt: String
             if let q = customQuestion, !q.isEmpty {
                 prompt = """
-                Hier ist der Inhalt aus meinen Notizen / Dokumentseiten:
+                \(instructionPrefix)Hier ist der Inhalt aus meinen Notizen / Dokumentseiten:
                 ---
                 \(contextText)
                 ---
@@ -309,7 +319,7 @@ struct AISidebarView: View {
                 """
             } else {
                 prompt = """
-                Hier ist der Inhalt aus meinen Notizen / Dokumentseiten:
+                \(instructionPrefix)Hier ist der Inhalt aus meinen Notizen / Dokumentseiten:
                 ---
                 \(contextText)
                 ---
