@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import PencilKit
 import Vision
+import PDFKit
 
 final class NoteIndexingService {
     static let shared = NoteIndexingService()
@@ -72,7 +73,7 @@ final class NoteIndexingService {
             }
         }
 
-        // 3. Index Inserted Content (Typed Text Items, Scans, ClipArts)
+        // 3. Index Inserted Content (Typed Text Items, Converted Handwriting, Scans, ClipArts, Photos)
         for img in document.insertedImages {
             let chunkId = "img_\(img.id.uuidString)"
             activeChunkIds.insert(chunkId)
@@ -81,11 +82,26 @@ final class NoteIndexingService {
             var contentType: SearchContentType = .text
 
             if let typed = img.textContent?.trimmingCharacters(in: .whitespacesAndNewlines), !typed.isEmpty {
+                // Getippter Text oder umgewandelte Handschrift
                 textToIndex = typed
                 contentType = .text
             } else if let scanText = img.extractedText?.trimmingCharacters(in: .whitespacesAndNewlines), !scanText.isEmpty {
+                // Importierte Dokumentenseite / Scan mit vorhandenem OCR-Text
                 textToIndex = scanText
                 contentType = .scan
+            } else if img.mediaType == nil || img.isDocumentPage == true {
+                // Bild/Scan ohne vorheriges OCR: Text im Hintergrund extrahieren
+                let imgURL = store.imageURL(filename: img.filename)
+                if let data = try? Data(contentsOf: imgURL), let uiImg = UIImage(data: data) {
+                    let recognized = autoreleasepool {
+                        runVisionOCR(on: uiImg, tileRect: CGRect(x: img.startX, y: img.startY, width: img.width, height: img.height))
+                    }
+                    let combined = recognized.map(\.text).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !combined.isEmpty {
+                        textToIndex = combined
+                        contentType = .scan
+                    }
+                }
             }
 
             if let text = textToIndex {
@@ -210,6 +226,64 @@ final class NoteIndexingService {
         return activeHwChunks
     }
 
+    // MARK: - Standalone PDF Document Indexing
+
+    func indexStandalonePDF(url: URL) async {
+        guard let pdf = PDFDocument(url: url) else { return }
+        let docPath = url.path
+        let docName = url.deletingPathExtension().lastPathComponent
+        var activeChunkIds = Set<String>()
+
+        for pageIdx in 0..<pdf.pageCount {
+            guard let page = pdf.page(at: pageIdx) else { continue }
+            let chunkId = "pdf_page_\(pageIdx)"
+            activeChunkIds.insert(chunkId)
+
+            var pageText = page.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if pageText.isEmpty {
+                // Scanned PDF page fallback OCR
+                let b = page.bounds(for: .cropBox)
+                let renderer = UIGraphicsImageRenderer(size: b.size)
+                let pageImg = renderer.image { ctx in
+                    UIColor.white.setFill()
+                    ctx.fill(CGRect(origin: .zero, size: b.size))
+                    ctx.cgContext.translateBy(x: 0.0, y: b.size.height)
+                    ctx.cgContext.scaleBy(x: 1.0, y: -1.0)
+                    page.draw(with: .cropBox, to: ctx.cgContext)
+                }
+                let obs = autoreleasepool {
+                    runVisionOCR(on: pageImg, tileRect: b)
+                }
+                pageText = obs.map(\.text).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            if !pageText.isEmpty {
+                let hash = "\(pageText.hashValue)"
+                let storedHash = await db.getChunkHash(docPath: docPath, chunkId: chunkId)
+                if storedHash != hash {
+                    let entry = IndexEntry(
+                        contentType: .pdf,
+                        textContent: pageText,
+                        canvasRect: CGRect(x: 0, y: CGFloat(pageIdx * 842), width: 595, height: 842),
+                        pageIndex: pageIdx,
+                        chunkId: chunkId
+                    )
+                    await db.updateChunk(
+                        docPath: docPath,
+                        docName: docName,
+                        chunkId: chunkId,
+                        chunkHash: hash,
+                        entries: [entry]
+                    )
+                }
+            }
+            await Task.yield()
+        }
+
+        await db.removeMissingChunks(docPath: docPath, validChunkIds: activeChunkIds)
+        await db.setDocumentIndexed(docPath: docPath, docType: "pdf", lastModified: Date().timeIntervalSince1970)
+    }
+
     // MARK: - Tile Image Rendering (High Contrast Template)
 
     private func renderTileImage(from drawing: PKDrawing, tileRect: CGRect) -> UIImage? {
@@ -239,7 +313,6 @@ final class NoteIndexingService {
                 guard let candidate = obs.topCandidates(1).first?.string.trimmingCharacters(in: .whitespacesAndNewlines),
                       !candidate.isEmpty else { continue }
                 let box = obs.boundingBox
-                // Vision coordinates have origin at bottom-left; convert to Canvas coordinates (origin top-left)
                 let x = tileRect.origin.x + box.origin.x * tileRect.width
                 let y = tileRect.origin.y + (1.0 - box.origin.y - box.height) * tileRect.height
                 let w = box.width * tileRect.width
@@ -286,9 +359,9 @@ final class NoteIndexingService {
             guard let self = self else { return }
             let allDocs = fileService.listAllDocuments()
 
-            for item in allDocs where item.type == .note {
-                let noteURL = item.path
-                let docPath = noteURL.path
+            for item in allDocs {
+                let docURL = item.path
+                let docPath = docURL.path
 
                 let lastModifiedOnDisk: Double
                 if let attrs = try? FileManager.default.attributesOfItem(atPath: docPath),
@@ -300,12 +373,19 @@ final class NoteIndexingService {
 
                 let lastIndexed = await self.db.getDocumentLastIndexed(docPath: docPath) ?? 0
 
-                // If document was modified since last index or has never been indexed
-                if lastModifiedOnDisk > lastIndexed || lastIndexed == 0 {
-                    let store = NotebookDocumentStore(noteURL: noteURL)
-                    let drawing = store.loadDrawing()
-                    let document = store.loadDocument()
-                    await self.indexNotebook(store: store, url: noteURL, drawing: drawing, document: document)
+                if item.type == .note {
+                    // If note document was modified since last index or has never been indexed
+                    if lastModifiedOnDisk > lastIndexed || lastIndexed == 0 {
+                        let store = NotebookDocumentStore(noteURL: docURL)
+                        let drawing = store.loadDrawing()
+                        let document = store.loadDocument()
+                        await self.indexNotebook(store: store, url: docURL, drawing: drawing, document: document)
+                    }
+                } else if item.type == .pdf {
+                    // If standalone PDF was modified or never indexed
+                    if lastModifiedOnDisk > lastIndexed || lastIndexed == 0 {
+                        await self.indexStandalonePDF(url: docURL)
+                    }
                 }
 
                 await Task.yield()
