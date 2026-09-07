@@ -4,6 +4,8 @@ struct LiveCastSheetView: View {
     @ObservedObject private var liveCast = LiveCastServer.shared
     @Environment(\.dismiss) private var dismiss
     @State private var copiedURL = false
+    @State private var copiedIP = false
+    @State private var copiedPort = false
 
     var body: some View {
         NavigationStack {
@@ -37,6 +39,9 @@ struct LiveCastSheetView: View {
                     Button("Fertig") { dismiss() }
                         .bold()
                 }
+            }
+            .onAppear {
+                liveCast.refreshIP()
             }
         }
         .presentationDetents([.medium, .large])
@@ -78,11 +83,22 @@ struct LiveCastSheetView: View {
                         }
                     }
 
-                    Text(liveCast.isStreaming
-                         ? "Übertragung aktiv auf Port \(liveCast.port)"
-                         : "Übertrage die App live an jeden Browser im WLAN")
+                    if liveCast.isStreaming {
+                        HStack(spacing: 6) {
+                            Text("IP: \(liveCast.localIP)")
+                                .fontWeight(.semibold)
+                            Text("•")
+                                .foregroundColor(.secondary)
+                            Text("Port: \(liveCast.port)")
+                                .fontWeight(.semibold)
+                        }
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.primary)
+                    } else {
+                        Text("Übertrage die App live an jeden Browser im WLAN")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
                 }
 
                 Spacer()
@@ -134,43 +150,120 @@ struct LiveCastSheetView: View {
     // MARK: - URL Card
 
     var urlCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Web-Adresse für Browser:")
-                .font(.caption.bold())
-                .foregroundColor(.secondary)
-
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text(liveCast.serverURL)
-                    .font(.system(.body, design: .monospaced))
-                    .fontWeight(.semibold)
-                    .foregroundColor(.blue)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-
+                Text("Verbindungsdaten für Browser:")
+                    .font(.caption.bold())
+                    .foregroundColor(.secondary)
                 Spacer()
-
                 Button {
-                    UIPasteboard.general.string = liveCast.serverURL
-                    copiedURL = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                        copiedURL = false
-                    }
+                    liveCast.refreshIP()
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: copiedURL ? "checkmark" : "doc.on.doc")
-                        Text(copiedURL ? "Kopiert!" : "Kopieren")
+                        Image(systemName: "arrow.clockwise")
+                        Text("IP aktualisieren")
                     }
                     .font(.caption.bold())
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(copiedURL ? Color.green : Color.blue)
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
+                    .foregroundColor(.blue)
                 }
             }
-            .padding(12)
-            .background(Color(.tertiarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            // IP & Port Info Grid
+            HStack(spacing: 12) {
+                // IP Card
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("IP-ADRESSE")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                    HStack {
+                        Text(liveCast.localIP.isEmpty ? "127.0.0.1" : liveCast.localIP)
+                            .font(.system(.subheadline, design: .monospaced).bold())
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        Spacer()
+                        Button {
+                            UIPasteboard.general.string = liveCast.localIP
+                            copiedIP = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { copiedIP = false }
+                        } label: {
+                            Image(systemName: copiedIP ? "checkmark" : "doc.on.doc")
+                                .font(.caption.bold())
+                                .foregroundColor(copiedIP ? .green : .blue)
+                        }
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity)
+                .background(Color(.tertiarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                // Port Card
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("PORT")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                    HStack {
+                        Text("\(liveCast.port)")
+                            .font(.system(.subheadline, design: .monospaced).bold())
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Button {
+                            UIPasteboard.general.string = "\(liveCast.port)"
+                            copiedPort = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { copiedPort = false }
+                        } label: {
+                            Image(systemName: copiedPort ? "checkmark" : "doc.on.doc")
+                                .font(.caption.bold())
+                                .foregroundColor(copiedPort ? .green : .blue)
+                        }
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity)
+                .background(Color(.tertiarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+
+            // Full URL Box
+            VStack(alignment: .leading, spacing: 6) {
+                Text("VOLLSTÄNDIGE WEB-ADRESSE")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.secondary)
+
+                HStack {
+                    Text(liveCast.serverURL)
+                        .font(.system(.body, design: .monospaced))
+                        .fontWeight(.semibold)
+                        .foregroundColor(.blue)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+
+                    Spacer()
+
+                    Button {
+                        UIPasteboard.general.string = liveCast.serverURL
+                        copiedURL = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            copiedURL = false
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: copiedURL ? "checkmark" : "doc.on.doc")
+                            Text(copiedURL ? "Kopiert!" : "Kopieren")
+                        }
+                        .font(.caption.bold())
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(copiedURL ? Color.green : Color.blue)
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                    }
+                }
+                .padding(12)
+                .background(Color(.tertiarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
 
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -247,6 +340,16 @@ struct LiveCastSheetView: View {
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
 
+            HStack(spacing: 8) {
+                Image(systemName: "wifi")
+                    .foregroundColor(.blue)
+                    .font(.caption)
+                Text("IP: **\(liveCast.localIP.isEmpty ? "WLAN prüfen" : liveCast.localIP)** • Port: **\(liveCast.port)**")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.top, 4)
+
             Button {
                 liveCast.startStreaming()
             } label: {
@@ -261,7 +364,7 @@ struct LiveCastSheetView: View {
                 .background(Color.blue)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .padding(.top, 8)
+            .padding(.top, 4)
         }
         .padding(24)
         .background(Color(.secondarySystemGroupedBackground))

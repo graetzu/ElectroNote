@@ -37,6 +37,7 @@ final class LiveCastServer: ObservableObject {
             localIP = "127.0.0.1"
             serverURL = "http://127.0.0.1:\(port)"
         }
+        debugLog("[LiveCast] refreshIP: localIP=\(localIP), port=\(port), url=\(serverURL)")
     }
 
     // MARK: - Start / Stop
@@ -854,7 +855,8 @@ final class LiveCastServer: ObservableObject {
 // MARK: - Local IP Resolver
 
 func getLocalIPAddress() -> String? {
-    var address: String?
+    var wifiIP: String?
+    var otherIP: String?
     var ifaddr: UnsafeMutablePointer<ifaddrs>?
     guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return nil }
     defer { freeifaddrs(ifaddr) }
@@ -873,13 +875,18 @@ func getLocalIPAddress() -> String? {
                            &hostname, socklen_t(hostname.count),
                            nil, socklen_t(0), NI_NUMERICHOST) == 0 {
                 let ip = String(cString: hostname)
+                // Filter out loopback and link-local (169.254.x.x) auto-ip
+                guard !ip.hasPrefix("127."), !ip.hasPrefix("169.254.") else { continue }
+
                 if name == "en0" {
-                    return ip // Primary iOS Wi-Fi interface
-                } else if address == nil {
-                    address = ip
+                    wifiIP = ip
+                } else if name.hasPrefix("en") && wifiIP == nil {
+                    wifiIP = ip
+                } else if otherIP == nil {
+                    otherIP = ip
                 }
             }
         }
     }
-    return address
+    return wifiIP ?? otherIP
 }
