@@ -123,6 +123,12 @@ final class InfiniteNotebookViewModel: ObservableObject {
     @Published var showWhiteboard:                Bool = false
     @Published var showCircuitPicker:             Bool = false
     @Published var showElektroSim:                Bool = false
+    @Published var showCameraPhoto:               Bool = false
+    @Published var showDocumentScanner:           Bool = false
+    @Published var showCameraVideo:               Bool = false
+    @Published var showYouTubeEmbed:              Bool = false
+    @Published var pendingMediaInsertion:         MediaInsertion? = nil
+    @Published var activePlaybackMedia:           MediaPlaybackItem? = nil
     @Published var pendingInkPreset:              InkPreset? = nil
     @Published var showTextInsertion:             Bool = false
     @Published var pendingTextInsertion:          TypedTextInsertion? = nil

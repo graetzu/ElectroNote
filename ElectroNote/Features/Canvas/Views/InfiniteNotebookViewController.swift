@@ -89,6 +89,7 @@ final class InfiniteNotebookViewController: UIViewController {
     // MARK: - Callbacks
     var onDrawingChanged: (() -> Void)?
     var onToolChanged: ((CanvasToolType) -> Void)?
+    var onPlayMedia: ((MediaPlaybackItem) -> Void)?
     var previousDrawingTool: CanvasToolType = .pen
 
     // Dedicated pan gesture for smooth, high-precision Apple Pencil canvas scrolling
@@ -926,6 +927,113 @@ extension InfiniteNotebookViewController {
         }
     }
 
+    func insertMedia(_ media: MediaInsertion, at explicitOrigin: CGPoint? = nil, registerUndoAction: Bool = true) {
+        guard media.thumbnail.size.width > 0 && media.thumbnail.size.height > 0 else { return }
+        guard let filename = try? store.saveImage(media.thumbnail) else { return }
+
+        let sc = max(canvasView.zoomScale, 0.01)
+        let off = canvasView.contentOffset
+
+        let maxW = explicitOrigin != nil ? min(canvasView.contentSize.width * 0.7, media.thumbnail.size.width) : min(canvasView.contentSize.width * 0.85, max(media.thumbnail.size.width, 360))
+        let ratio = media.thumbnail.size.height / max(media.thumbnail.size.width, 1)
+        let w = min(maxW, canvasView.contentSize.width - 40)
+        let h = w * ratio
+
+        let startX: CGFloat = explicitOrigin?.x ?? max(20, (off.x + (canvasView.bounds.width - w * sc) / 2) / sc)
+        let startY: CGFloat = explicitOrigin?.y ?? max(20, (off.y + 40) / sc)
+
+        let id = UUID()
+        let contentFrame = CGRect(x: startX, y: startY, width: w, height: h)
+        let imgView = makeImageView(image: media.thumbnail, frame: contentFrame)
+        paperBackgroundView.addSubview(imgView)
+        imageViews[id] = imgView
+        imageLayers[id] = imgView.layer
+
+        let needed = startY + h + Self.initialHeight * 0.3
+        if needed > canvasView.contentSize.height {
+            canvasView.contentSize.height = needed
+            updateBackgroundFrame()
+        }
+
+        let entry = InsertedImage(
+            id: id,
+            filename: filename,
+            startX: startX,
+            startY: startY,
+            width: w,
+            height: h,
+            textContent: media.title,
+            mediaType: media.mediaType,
+            mediaURLString: media.mediaURLString
+        )
+        document.insertedImages.append(entry)
+        attachMediaPlayBadge(for: entry, on: imgView)
+        addImageHandle(for: imgView, at: contentFrame, id: id, isText: false)
+        document.documentHeight = canvasView.contentSize.height
+        store.saveDocument(document)
+
+        let toastText = (media.mediaType == "youtube") ? "YouTube-Video eingebettet" : "Video eingefügt"
+        let toastIcon = (media.mediaType == "youtube") ? "play.rectangle.fill" : "video.fill"
+        showToastBanner(text: toastText, icon: toastIcon)
+        presentTransformBox(forElementId: id)
+
+        if registerUndoAction {
+            registerCustomUndo(actionName: toastText) { [weak self] in
+                guard let self else { return }
+                self.deleteInsertedElement(id: id, registerUndoAction: false)
+                self.store.saveDocument(self.document)
+            }
+        }
+    }
+
+    private func attachMediaPlayBadge(for entry: InsertedImage, on imgView: UIImageView) {
+        imgView.isUserInteractionEnabled = true
+        // Remove existing badge if present
+        imgView.viewWithTag(8881)?.removeFromSuperview()
+
+        let badgeBtn = UIButton(type: .custom)
+        badgeBtn.tag = 8881
+        let isYouTube = (entry.mediaType == "youtube")
+
+        let config = UIImage.SymbolConfiguration(pointSize: 24, weight: .bold)
+        let playImg = UIImage(systemName: "play.fill", withConfiguration: config)?.withRenderingMode(.alwaysTemplate)
+        badgeBtn.setImage(playImg, for: .normal)
+        badgeBtn.tintColor = .white
+
+        let btnW: CGFloat = isYouTube ? 68 : 56
+        let btnH: CGFloat = isYouTube ? 48 : 56
+        badgeBtn.frame = CGRect(
+            x: (imgView.bounds.width - btnW) / 2,
+            y: (imgView.bounds.height - btnH) / 2,
+            width: btnW,
+            height: btnH
+        )
+        badgeBtn.autoresizingMask = [.flexibleLeftMargin, .flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
+
+        if isYouTube {
+            badgeBtn.backgroundColor = UIColor.systemRed.withAlphaComponent(0.95)
+            badgeBtn.layer.cornerRadius = 12
+        } else {
+            badgeBtn.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+            badgeBtn.layer.cornerRadius = btnH / 2
+        }
+
+        badgeBtn.layer.borderWidth = 1.5
+        badgeBtn.layer.borderColor = UIColor.white.withAlphaComponent(0.7).cgColor
+        badgeBtn.layer.shadowColor = UIColor.black.cgColor
+        badgeBtn.layer.shadowOpacity = 0.45
+        badgeBtn.layer.shadowOffset = CGSize(width: 0, height: 3)
+        badgeBtn.layer.shadowRadius = 6
+
+        badgeBtn.addAction(UIAction { [weak self] _ in
+            guard let self, let mType = entry.mediaType, let mURL = entry.mediaURLString else { return }
+            let item = MediaPlaybackItem(mediaType: mType, mediaURLString: mURL, title: entry.textContent)
+            self.onPlayMedia?(item)
+        }, for: .touchUpInside)
+
+        imgView.addSubview(badgeBtn)
+    }
+
     // MARK: - Clipboard Copy & Paste
 
     func pasteFromClipboard(at explicitOrigin: CGPoint? = nil) {
@@ -1139,11 +1247,15 @@ extension InfiniteNotebookViewController {
         imageViews[entry.id] = imgView
         imageLayers[entry.id] = imgView.layer
 
-        if entry.textContent != nil {
-            // For text elements, load text image immediately so it's always readable
+        if entry.textContent != nil || entry.mediaType != nil {
+            // For text or media elements, load thumbnail immediately
             if let img = UIImage(contentsOfFile: store.imageURL(filename: entry.filename).path) {
                 imgView.image = img
             }
+        }
+
+        if let mediaType = entry.mediaType, !mediaType.isEmpty {
+            attachMediaPlayBadge(for: entry, on: imgView)
         }
 
         if isDoc {
@@ -1166,7 +1278,7 @@ extension InfiniteNotebookViewController {
 
         for entry in document.insertedImages {
             guard let imgView = imageViews[entry.id] else { continue }
-            if entry.textContent != nil { continue }
+            if entry.textContent != nil || entry.mediaType != nil { continue }
 
             let entryMaxY = entry.startY + entry.height
             let isNearViewport = entryMaxY >= minVisibleY && entry.startY <= maxVisibleY

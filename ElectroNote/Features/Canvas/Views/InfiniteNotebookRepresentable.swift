@@ -18,6 +18,9 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
         vc.onToolChanged = { [weak vm] newTool in
             Task { @MainActor in vm?.activeTool = newTool }
         }
+        vc.onPlayMedia = { [weak vm] item in
+            Task { @MainActor in vm?.activePlaybackMedia = item }
+        }
         vm.attach(vc: vc)
         context.coordinator.vc = vc
         return vc
@@ -39,6 +42,7 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
 
         if let url = vm.pendingPDFURL   { vm.pendingPDFURL = nil; vc.insertFile(from: url) }
         if let img = vm.pendingImage    { vm.pendingImage  = nil; vc.insertImage(img) }
+        if let media = vm.pendingMediaInsertion { vm.pendingMediaInsertion = nil; vc.insertMedia(media) }
 
         if vm.triggerHandwritingRecognition { vm.triggerHandwritingRecognition = false; vc.recogniseHandwriting() }
         if vm.triggerMathRecognition        { vm.triggerMathRecognition = false;        vc.recogniseMathSelection() }

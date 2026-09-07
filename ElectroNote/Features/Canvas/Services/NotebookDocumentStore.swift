@@ -8,13 +8,15 @@ final class NotebookDocumentStore {
 
     private var documentURL: URL { noteURL.appendingPathComponent("document.json") }
     private var drawingURL:  URL { noteURL.appendingPathComponent("drawing.pkdrawing") }
-    private var pdfsFolder:  URL { noteURL.appendingPathComponent("pdfs") }
+    private var pdfsFolder:   URL { noteURL.appendingPathComponent("pdfs") }
     private var imagesFolder: URL { noteURL.appendingPathComponent("images") }
+    private var videosFolder: URL { noteURL.appendingPathComponent("videos") }
 
     init(noteURL: URL) {
         self.noteURL = noteURL
         try? FileManager.default.createDirectory(at: pdfsFolder,    withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: imagesFolder,  withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: videosFolder,  withIntermediateDirectories: true)
         if !FileManager.default.fileExists(atPath: drawingURL.path) {
             try? PKDrawing().dataRepresentation().write(to: drawingURL, options: .atomic)
         }
@@ -76,6 +78,27 @@ final class NotebookDocumentStore {
 
     func imageURL(filename: String) -> URL {
         imagesFolder.appendingPathComponent(filename)
+    }
+
+    // MARK: - Videos
+
+    func copyVideo(from url: URL) throws -> String {
+        let ext = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
+        let filename = UUID().uuidString + "." + ext
+        let dest = videosFolder.appendingPathComponent(filename)
+        try FileManager.default.copyItem(at: url, to: dest)
+        return filename
+    }
+
+    func saveVideoData(_ data: Data, fileExtension: String = "mp4") throws -> String {
+        let filename = UUID().uuidString + "." + fileExtension
+        let dest = videosFolder.appendingPathComponent(filename)
+        try data.write(to: dest, options: .atomic)
+        return filename
+    }
+
+    func videoURL(filename: String) -> URL {
+        videosFolder.appendingPathComponent(filename)
     }
 
     // MARK: - Appending Content from External Files

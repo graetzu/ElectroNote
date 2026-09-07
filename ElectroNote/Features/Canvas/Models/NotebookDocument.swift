@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 // MARK: - BackgroundStyle
 
@@ -120,19 +121,24 @@ struct InsertedImage: Identifiable, Codable {
     var rotation: CGFloat?
     var extractedText: String?
     var isDocumentPage: Bool?
+    var mediaType: String?
+    var mediaURLString: String?
 
     init(id: UUID = UUID(), filename: String, startX: CGFloat = 0,
          startY: CGFloat, width: CGFloat, height: CGFloat,
          textContent: String? = nil, fontSize: CGFloat? = nil,
          fontDesign: String? = nil, fontColorHex: String? = nil,
          rotation: CGFloat? = 0, extractedText: String? = nil,
-         isDocumentPage: Bool? = false) {
+         isDocumentPage: Bool? = false,
+         mediaType: String? = nil, mediaURLString: String? = nil) {
         self.id = id; self.filename = filename; self.startX = startX
         self.startY = startY; self.width = width; self.height = height
         self.textContent = textContent; self.fontSize = fontSize
         self.fontDesign = fontDesign; self.fontColorHex = fontColorHex
         self.rotation = rotation; self.extractedText = extractedText
         self.isDocumentPage = isDocumentPage
+        self.mediaType = mediaType
+        self.mediaURLString = mediaURLString
     }
 
     // Backward-compatible decoder: startX defaults to 0 for old documents, rotation defaults to 0
@@ -151,6 +157,24 @@ struct InsertedImage: Identifiable, Codable {
         rotation       = try c.decodeIfPresent(CGFloat.self, forKey: .rotation) ?? 0
         extractedText  = try c.decodeIfPresent(String.self, forKey: .extractedText)
         isDocumentPage = try c.decodeIfPresent(Bool.self, forKey: .isDocumentPage) ?? false
+        mediaType      = try c.decodeIfPresent(String.self, forKey: .mediaType)
+        mediaURLString = try c.decodeIfPresent(String.self, forKey: .mediaURLString)
     }
+}
+
+// MARK: - Media Support
+
+struct MediaInsertion {
+    let thumbnail: UIImage
+    let mediaType: String // "video" or "youtube"
+    let mediaURLString: String // filename for local video or YouTube URL / ID
+    let title: String?
+}
+
+struct MediaPlaybackItem: Identifiable {
+    let id = UUID()
+    let mediaType: String // "video" or "youtube"
+    let mediaURLString: String // filename or YouTube ID / URL
+    let title: String?
 }
 

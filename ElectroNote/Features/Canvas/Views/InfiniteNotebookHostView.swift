@@ -1,6 +1,7 @@
 import SwiftUI
 import PencilKit
 import PhotosUI
+import AVFoundation
 
 struct InfiniteNotebookHostView: View {
     let item: DocumentItem
@@ -10,6 +11,7 @@ struct InfiniteNotebookHostView: View {
     @State private var showNextcloudSheet = false
     @State private var showClipArtPicker  = false
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var selectedVideoItem: PhotosPickerItem? = nil
     private let store: NotebookDocumentStore
 
     init(item: DocumentItem) {
@@ -122,6 +124,95 @@ struct InfiniteNotebookHostView: View {
                 vm.pendingImage = image
             }
         }
+        .sheet(isPresented: $vm.showCameraPhoto) {
+            CameraPickerView(mode: .photo) { image in
+                vm.pendingImage = image
+            }
+        }
+        .sheet(isPresented: $vm.showDocumentScanner) {
+            DocumentScannerView { images in
+                for image in images {
+                    vm.pendingImage = image
+                }
+            }
+        }
+        .sheet(isPresented: $vm.showCameraVideo) {
+            CameraPickerView(mode: .video) { videoURL in
+                handleIncomingVideo(videoURL)
+            }
+        }
+        .sheet(isPresented: $vm.showYouTubeEmbed) {
+            YouTubeEmbedSheet { media in
+                vm.pendingMediaInsertion = media
+            }
+        }
+        .sheet(item: $vm.activePlaybackMedia) { mediaItem in
+            MediaPlaybackSheetView(item: mediaItem, noteURL: item.path)
+        }
+        .onChange(of: selectedVideoItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                if let movie = try? await newItem.loadTransferable(type: MovieTransferable.self) {
+                    handleIncomingVideo(movie.url)
+                    await MainActor.run { selectedVideoItem = nil }
+                } else if let data = try? await newItem.loadTransferable(type: Data.self) {
+                    if let filename = try? store.saveVideoData(data) {
+                        let storedURL = store.videoURL(filename: filename)
+                        let thumb = await generateVideoThumbnail(for: storedURL)
+                        await MainActor.run {
+                            vm.pendingMediaInsertion = MediaInsertion(
+                                thumbnail: thumb,
+                                mediaType: "video",
+                                mediaURLString: filename,
+                                title: "Video"
+                            )
+                            selectedVideoItem = nil
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func handleIncomingVideo(_ sourceURL: URL) {
+        Task {
+            do {
+                let filename = try store.copyVideo(from: sourceURL)
+                let storedURL = store.videoURL(filename: filename)
+                let thumb = await generateVideoThumbnail(for: storedURL)
+                await MainActor.run {
+                    vm.pendingMediaInsertion = MediaInsertion(
+                        thumbnail: thumb,
+                        mediaType: "video",
+                        mediaURLString: filename,
+                        title: "Video"
+                    )
+                }
+            } catch {
+                print("Error copying video: \(error)")
+            }
+        }
+    }
+
+    private func generateVideoThumbnail(for url: URL) async -> UIImage {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        let time = CMTime(seconds: 0.1, preferredTimescale: 600)
+        if let (cgImage, _) = try? await generator.image(at: time) {
+            return UIImage(cgImage: cgImage)
+        }
+        let size = CGSize(width: 480, height: 320)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            UIColor.darkGray.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            let config = UIImage.SymbolConfiguration(pointSize: 48, weight: .regular)
+            if let icon = UIImage(systemName: "video.fill", withConfiguration: config) {
+                icon.withTintColor(.white, renderingMode: .alwaysOriginal)
+                    .draw(at: CGPoint(x: (size.width - icon.size.width) / 2, y: (size.height - icon.size.height) / 2))
+            }
+        }
     }
 
     // MARK: - Toolbar
@@ -226,7 +317,7 @@ struct InfiniteNotebookHostView: View {
 
             // Direct Import & Insert Menu (Dateien-App, Nextcloud, Fotos, etc.)
             Menu {
-                Section("Dateien & Cloud") {
+                Section("Dateien & Fotos") {
                     Button {
                         vm.showPDFPicker = true
                     } label: {
@@ -239,6 +330,31 @@ struct InfiniteNotebookHostView: View {
                     }
                     PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                         Label("Foto aus Mediathek…", systemImage: "photo.badge.plus")
+                    }
+                    Button {
+                        vm.showCameraPhoto = true
+                    } label: {
+                        Label("Foto mit Kamera aufnehmen…", systemImage: "camera")
+                    }
+                    Button {
+                        vm.showDocumentScanner = true
+                    } label: {
+                        Label("Dokument / Tafel scannen…", systemImage: "doc.viewfinder")
+                    }
+                }
+                Section("Videos & YouTube") {
+                    PhotosPicker(selection: $selectedVideoItem, matching: .videos) {
+                        Label("Video aus Mediathek…", systemImage: "video.badge.plus")
+                    }
+                    Button {
+                        vm.showCameraVideo = true
+                    } label: {
+                        Label("Video mit Kamera aufnehmen…", systemImage: "video")
+                    }
+                    Button {
+                        vm.showYouTubeEmbed = true
+                    } label: {
+                        Label("YouTube-Video einbetten…", systemImage: "play.rectangle")
                     }
                 }
                 Section("Inhalte") {
@@ -760,5 +876,22 @@ struct PenToolbarView: View {
     private func notifyToolChange() {
         let tool = makePKTool(tool: activeTool, color: selectedColor, width: selectedWidth, eraserType: eraserType, darkDrawingMode: darkDrawingMode)
         onToolChanged?(tool)
+    }
+}
+
+// MARK: - MovieTransferable
+
+struct MovieTransferable: Transferable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .movie) { movie in
+            SentTransferredFile(movie.url)
+        } importing: { received in
+            let copy = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + (received.file.pathExtension.isEmpty ? "mp4" : received.file.pathExtension))
+            try? FileManager.default.removeItem(at: copy)
+            try FileManager.default.copyItem(at: received.file, to: copy)
+            return Self(url: copy)
+        }
     }
 }

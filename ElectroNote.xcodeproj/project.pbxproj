@@ -77,6 +77,10 @@
 		LC03000000000000000000CC /* LiveCastBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0300000000000000000CC /* LiveCastBadgeView.swift */; };
 		EFM00001 /* ExternalFileImportManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFMREF01 /* ExternalFileImportManager.swift */; };
 		IFI00001 /* IncomingFileImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = IFIREF01 /* IncomingFileImportSheet.swift */; };
+		CPV00001000000000000001 /* CameraPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CPVREF010000000000000001 /* CameraPickerView.swift */; };
+		DSV00001000000000000001 /* DocumentScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DSVREF010000000000000001 /* DocumentScannerView.swift */; };
+		YTE00001000000000000001 /* YouTubeEmbedSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = YTEREF010000000000000001 /* YouTubeEmbedSheet.swift */; };
+		MPS00001000000000000001 /* MediaPlaybackSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = MPSREF010000000000000001 /* MediaPlaybackSheetView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -152,6 +156,10 @@
 		ELEF000200000000000000BB /* CircuitSymbolRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CircuitSymbolRenderer.swift; sourceTree = "<group>"; };
 		ELEF000300000000000000CC /* CircuitSymbolPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/CircuitSymbolPickerView.swift; sourceTree = "<group>"; };
 		ELEF000400000000000000DD /* ElektroSimWebSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ElektroSimWebSheetView.swift; sourceTree = "<group>"; };
+		CPVREF010000000000000001 /* CameraPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPickerView.swift; sourceTree = "<group>"; };
+		DSVREF010000000000000001 /* DocumentScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentScannerView.swift; sourceTree = "<group>"; };
+		YTEREF010000000000000001 /* YouTubeEmbedSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeEmbedSheet.swift; sourceTree = "<group>"; };
+		MPSREF010000000000000001 /* MediaPlaybackSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPlaybackSheetView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -517,6 +525,10 @@
 				TISREF0000000000000AABB /* TextInsertionSheet.swift */,
 				TPOREF0000000000000AABB /* TextPositionOverlay.swift */,
 				8C2894B59718F39AE311147C /* PlotInserterView.swift */,
+				CPVREF010000000000000001 /* CameraPickerView.swift */,
+				DSVREF010000000000000001 /* DocumentScannerView.swift */,
+				YTEREF010000000000000001 /* YouTubeEmbedSheet.swift */,
+				MPSREF010000000000000001 /* MediaPlaybackSheetView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -668,6 +680,10 @@
 				ELEC000200000000000000BB /* CircuitSymbolRenderer.swift in Sources */,
 				ELEC000300000000000000CC /* CircuitSymbolPickerView.swift in Sources */,
 				ELEC000400000000000000DD /* ElektroSimWebSheetView.swift in Sources */,
+				CPV00001000000000000001 /* CameraPickerView.swift in Sources */,
+				DSV00001000000000000001 /* DocumentScannerView.swift in Sources */,
+				YTE00001000000000000001 /* YouTubeEmbedSheet.swift in Sources */,
+				MPS00001000000000000001 /* MediaPlaybackSheetView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
