@@ -9,6 +9,22 @@ extension Notification.Name {
     static let electroNoteReloadCurrentPDF = Notification.Name("ElectroNote.ReloadCurrentPDF")
 }
 
+func debugLog(_ msg: String) {
+    print("[ElectroNote] \(msg)")
+    guard let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+    let fileURL = docDir.appendingPathComponent("debug.log")
+    let line = "[\(Date())] \(msg)\n"
+    if let data = line.data(using: .utf8) {
+        if let handle = try? FileHandle(forWritingTo: fileURL) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            try? data.write(to: fileURL)
+        }
+    }
+}
+
 // MARK: - Main
 
 final class InfiniteNotebookViewController: UIViewController {
@@ -1197,6 +1213,7 @@ extension InfiniteNotebookViewController {
         canvasView.canCancelContentTouches = false
         box.attachCanvasGestureRequirements(canvasView, additionalPanGesture: pencilScrollPanGesture)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        debugLog("[presentTransformBox] presented for \(strokes.count) strokes at \(center)")
 
         box.onLiveUpdateStrokes = { [weak self, weak box] currentCenter, currentScale, currentRotation in
             guard let self = self, let box = box else { return }
@@ -1222,6 +1239,7 @@ extension InfiniteNotebookViewController {
                 )
             }
             self.canvasView.drawing = PKDrawing(strokes: allStrokes)
+            debugLog("[onLiveUpdateStrokes] center=\(currentCenter), updated \(box.strokeOriginalIndices.count) strokes")
         }
 
         box.onCommitStrokes = { [weak self] _, _, _ in
@@ -1243,7 +1261,9 @@ extension InfiniteNotebookViewController {
             var duplicatedStrokes: [PKStroke] = []
             var newIndices: [Int] = []
             let startIdx = allStrokes.count
-            for (i, s) in box.baseStrokes.enumerated() {
+            for originalIdx in box.strokeOriginalIndices {
+                guard originalIdx < allStrokes.count else { continue }
+                let s = allStrokes[originalIdx]
                 let clone = PKStroke(
                     ink: s.ink,
                     path: s.path,
@@ -1251,7 +1271,7 @@ extension InfiniteNotebookViewController {
                     mask: s.mask
                 )
                 duplicatedStrokes.append(clone)
-                newIndices.append(startIdx + i)
+                newIndices.append(startIdx + duplicatedStrokes.count - 1)
             }
             allStrokes.append(contentsOf: duplicatedStrokes)
             self.canvasView.drawing = PKDrawing(strokes: allStrokes)
@@ -3232,10 +3252,14 @@ final class PaperBackgroundContainerView: UIView {
 // Empty areas pass touches straight through to PKCanvasView for drawing and scrolling.
 final class PaperOverlayContainerView: UIView {
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let hit = super.hitTest(point, with: event)
-        if hit === self {
-            return nil
+        guard isUserInteractionEnabled, !isHidden, alpha > 0.01 else { return nil }
+        for subview in subviews.reversed() {
+            guard subview.isUserInteractionEnabled, !subview.isHidden, subview.alpha > 0.01 else { continue }
+            let subPoint = convert(point, to: subview)
+            if let hit = subview.hitTest(subPoint, with: event) {
+                return hit
+            }
         }
-        return hit
+        return nil
     }
 }
