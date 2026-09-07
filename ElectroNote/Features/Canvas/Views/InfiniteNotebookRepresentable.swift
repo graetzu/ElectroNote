@@ -83,6 +83,34 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
             vm.triggerExport = false
             vc.presentExport()
         }
+
+        // In-Canvas Find & Search
+        if vm.showSearch {
+            if !context.coordinator.isSearchActive || context.coordinator.lastSearchQuery != vm.searchQuery {
+                context.coordinator.isSearchActive = true
+                context.coordinator.lastSearchQuery = vm.searchQuery
+                vc.performSearch(query: vm.searchQuery) { count in
+                    Task { @MainActor in
+                        vm.searchMatchCount = count
+                        vm.currentSearchMatchIndex = count > 0 ? 0 : 0
+                    }
+                }
+            }
+            if vm.triggerNextSearchMatch {
+                vm.triggerNextSearchMatch = false
+                let newIdx = vc.navigateSearchMatch(forward: true)
+                vm.currentSearchMatchIndex = newIdx
+            }
+            if vm.triggerPreviousSearchMatch {
+                vm.triggerPreviousSearchMatch = false
+                let newIdx = vc.navigateSearchMatch(forward: false)
+                vm.currentSearchMatchIndex = newIdx
+            }
+        } else if context.coordinator.isSearchActive {
+            context.coordinator.isSearchActive = false
+            context.coordinator.lastSearchQuery = ""
+            vc.clearSearchHighlights()
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(vm: vm) }
@@ -90,6 +118,8 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
     final class Coordinator {
         let vm: InfiniteNotebookViewModel
         weak var vc: InfiniteNotebookViewController?
+        var lastSearchQuery: String = ""
+        var isSearchActive: Bool = false
         init(vm: InfiniteNotebookViewModel) { self.vm = vm }
     }
 }

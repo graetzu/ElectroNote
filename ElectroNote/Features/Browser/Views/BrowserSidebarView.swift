@@ -31,6 +31,7 @@ struct BrowserSidebarView: View {
         .navigationTitle(viewModel.currentFolderName)
         .navigationBarTitleDisplayMode(.large)
         .toolbar { toolbarContent }
+        .searchable(text: $viewModel.searchText, prompt: "Notizen, Handschrift & Dokumente…")
         .refreshable { viewModel.loadItems() }
         .sheet(isPresented: $showNewFolder) {
             NewItemSheet(title: "Neuer Ordner", placeholder: "Ordnername") {
@@ -124,27 +125,126 @@ struct BrowserSidebarView: View {
 
     private var itemList: some View {
         List {
-            // Favorites section – only at root
-            if viewModel.isAtRoot {
-                let favorites = viewModel.items.filter { viewModel.isFavorite($0) }
-                if !favorites.isEmpty {
-                    Section("Favoriten") {
-                        ForEach(favorites) { item in
+            if !viewModel.searchText.isEmpty {
+                // Section 1: Handschrift & Inhalte
+                if !viewModel.searchResults.isEmpty {
+                    Section("Handschrift & Inhalte (\(viewModel.searchResults.count))") {
+                        ForEach(viewModel.searchResults) { hit in
+                            searchResultRow(hit)
+                        }
+                    }
+                } else if !viewModel.isSearching {
+                    Section {
+                        Text("Keine Treffer in Inhalten für „\(viewModel.searchText)“")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                // Section 2: Dateien & Ordner mit passendem Namen
+                let matchingItems = viewModel.items.filter { $0.name.localizedCaseInsensitiveContains(viewModel.searchText) }
+                if !matchingItems.isEmpty {
+                    Section("Dateien & Ordner (\(matchingItems.count))") {
+                        ForEach(matchingItems) { item in
                             itemRow(item)
                         }
                     }
                 }
-            }
+            } else {
+                // Favorites section – only at root
+                if viewModel.isAtRoot {
+                    let favorites = viewModel.items.filter { viewModel.isFavorite($0) }
+                    if !favorites.isEmpty {
+                        Section("Favoriten") {
+                            ForEach(favorites) { item in
+                                itemRow(item)
+                            }
+                        }
+                    }
+                }
 
-            // All items section
-            Section(viewModel.isAtRoot ? "Alle Elemente" : "") {
-                ForEach(viewModel.items) { item in
-                    itemRow(item)
+                // All items section
+                Section(viewModel.isAtRoot ? "Alle Elemente" : "") {
+                    ForEach(viewModel.items) { item in
+                        itemRow(item)
+                    }
                 }
             }
         }
         .listStyle(.sidebar)
         .animation(.default, value: viewModel.items)
+    }
+
+    private func searchResultRow(_ hit: SearchResultItem) -> some View {
+        Button {
+            handleSearchResultTap(hit)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: hit.contentType.iconName)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(colorForContentType(hit.contentType))
+
+                    Text(hit.documentName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.primary)
+
+                    Spacer()
+
+                    Text(hit.contentType.localizedTitle)
+                        .font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(colorForContentType(hit.contentType).opacity(0.12))
+                        .foregroundColor(colorForContentType(hit.contentType))
+                        .clipShape(Capsule())
+                }
+
+                if !hit.snippet.isEmpty {
+                    Text(hit.snippet)
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func colorForContentType(_ type: SearchContentType) -> Color {
+        switch type {
+        case .handwriting: return .blue
+        case .text:        return .teal
+        case .stickyNote:  return .orange
+        case .scan:        return .indigo
+        case .pdf:         return .red
+        case .bookmark:    return .purple
+        }
+    }
+
+    private func handleSearchResultTap(_ hit: SearchResultItem) {
+        guard let doc = viewModel.findDocumentItem(for: hit.documentPath) else { return }
+        selectedItem = doc
+        withAnimation(.easeInOut(duration: 0.25)) {
+            sidebarVisibility = .detailOnly
+        }
+
+        // Post jump notification to open document at the exact match location
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            NotificationCenter.default.post(
+                name: .electroNoteJumpToSearchResult,
+                object: nil,
+                userInfo: [
+                    "docPath": hit.documentPath,
+                    "x": hit.canvasRect.origin.x,
+                    "y": hit.canvasRect.origin.y,
+                    "w": hit.canvasRect.width,
+                    "h": hit.canvasRect.height,
+                    "query": viewModel.searchText
+                ]
+            )
+        }
     }
 
     private func itemRow(_ item: DocumentItem) -> some View {

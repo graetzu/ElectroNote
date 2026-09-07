@@ -8,6 +8,7 @@ extension Notification.Name {
     static let electroNoteDrawingBegan = Notification.Name("ElectroNote.DrawingBegan")
     static let electroNoteInsertFileIntoOpenDocument = Notification.Name("ElectroNote.InsertFileIntoOpenDocument")
     static let electroNoteReloadCurrentPDF = Notification.Name("ElectroNote.ReloadCurrentPDF")
+    static let electroNoteJumpToSearchResult = Notification.Name("ElectroNote.JumpToSearchResult")
 }
 
 func debugLog(_ msg: String) {
@@ -65,6 +66,11 @@ final class InfiniteNotebookViewController: UIViewController {
     private var selectionOverlay: HandwritingSelectionOverlay?
     private var lastLassoPoints: [CGPoint] = []
     private let evaluator = MathEvaluator()
+
+    // MARK: - In-Canvas Search & Indexing
+    private let searchHighlightOverlay = CanvasSearchHighlightOverlay()
+    private var currentSearchResults: [SearchResultItem] = []
+    private var activeSearchIndex: Int = 0
 
     // MARK: - Transform & Selection Tools (Markieren, Verschieben, Drehen, Vergrößern)
     var currentCanvasToolType: CanvasToolType = .pen
@@ -343,6 +349,16 @@ final class InfiniteNotebookViewController: UIViewController {
         setupCanvasLongPress()
         setupCanvasTapToDeselect()
         setupExternalFileObserver()
+
+        searchHighlightOverlay.frame = CGRect(origin: .zero, size: canvasView.contentSize)
+        canvasView.addSubview(searchHighlightOverlay)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleJumpToSearchResult(_:)),
+            name: .electroNoteJumpToSearchResult,
+            object: nil
+        )
     }
 
     deinit {
@@ -539,6 +555,8 @@ final class InfiniteNotebookViewController: UIViewController {
         canvasView.bringSubviewToFront(paperOverlayView)
 
         lassoOverlay?.frame = CGRect(origin: .zero, size: canvasView.contentSize)
+        searchHighlightOverlay.frame = CGRect(origin: .zero, size: canvasView.contentSize)
+        canvasView.bringSubviewToFront(searchHighlightOverlay)
         updatePageBreakDividers()
         centerCanvasContent()
     }
@@ -667,6 +685,9 @@ final class InfiniteNotebookViewController: UIViewController {
         store?.saveDrawing(canvasView.drawing)
         document.documentHeight = canvasView.contentSize.height
         store?.saveDocument(document)
+        if let store = store {
+            NoteIndexingService.shared.scheduleDebouncedIndex(for: store, drawing: canvasView.drawing, document: document, delay: 0.5)
+        }
     }
 }
 
@@ -2877,6 +2898,10 @@ extension InfiniteNotebookViewController: PKCanvasViewDelegate {
         scheduleScan()
         NotificationCenter.default.post(name: .electroNoteDrawingBegan, object: nil)
         scheduleShapeSnap()
+
+        if let store = store {
+            NoteIndexingService.shared.scheduleDebouncedIndex(for: store, drawing: canvasView.drawing, document: document, delay: 2.5)
+        }
     }
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
@@ -4074,6 +4099,110 @@ final class DocumentPageLiveTextView: UIView, ImageAnalysisInteractionDelegate, 
             }
 
             return UIMenu(title: "Dokumentseite", children: [convertText, copyText, viewText, duplicate, delete])
+        }
+    }
+}
+
+// MARK: - In-Canvas Search & Find Interaction
+
+extension InfiniteNotebookViewController {
+
+    func performSearch(query: String, completion: ((Int) -> Void)? = nil) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let store = store else {
+            currentSearchResults = []
+            activeSearchIndex = 0
+            searchHighlightOverlay.clear()
+            completion?(0)
+            return
+        }
+
+        Task { [weak self] in
+            guard let self = self else { return }
+            var results = await NoteSearchDatabase.shared.search(query: trimmed, inDocument: store.noteURL.path)
+
+            // If empty, index this notebook directly (in case it wasn't indexed yet) and re-query
+            if results.isEmpty {
+                await NoteIndexingService.shared.indexNotebook(
+                    store: store,
+                    url: store.noteURL,
+                    drawing: self.canvasView.drawing,
+                    document: self.document
+                )
+                results = await NoteSearchDatabase.shared.search(query: trimmed, inDocument: store.noteURL.path)
+            }
+
+            await MainActor.run {
+                self.currentSearchResults = results
+                self.activeSearchIndex = 0
+                self.searchHighlightOverlay.updateHighlights(matches: results, activeIndex: 0)
+                if let first = results.first {
+                    self.scrollToSearchMatch(first)
+                }
+                completion?(results.count)
+            }
+        }
+    }
+
+    func navigateSearchMatch(forward: Bool) -> Int {
+        guard !currentSearchResults.isEmpty else { return 0 }
+        if forward {
+            activeSearchIndex = (activeSearchIndex + 1) % currentSearchResults.count
+        } else {
+            activeSearchIndex = (activeSearchIndex - 1 + currentSearchResults.count) % currentSearchResults.count
+        }
+        let match = currentSearchResults[activeSearchIndex]
+        searchHighlightOverlay.updateHighlights(matches: currentSearchResults, activeIndex: activeSearchIndex)
+        scrollToSearchMatch(match)
+        return activeSearchIndex
+    }
+
+    func scrollToSearchMatch(_ match: SearchResultItem) {
+        let zoom = max(canvasView.zoomScale, 0.01)
+        let padded = match.canvasRect.insetBy(dx: -80, dy: -100)
+        let screenRect = CGRect(
+            x: padded.origin.x * zoom,
+            y: padded.origin.y * zoom,
+            width: max(padded.width * zoom, 240),
+            height: max(padded.height * zoom, 240)
+        )
+        canvasView.scrollRectToVisible(screenRect, animated: true)
+    }
+
+    func clearSearchHighlights() {
+        currentSearchResults = []
+        activeSearchIndex = 0
+        searchHighlightOverlay.clear()
+    }
+
+    @objc func handleJumpToSearchResult(_ note: Notification) {
+        guard let userInfo = note.userInfo,
+              let targetPath = userInfo["docPath"] as? String,
+              let store = store,
+              targetPath == store.noteURL.path else { return }
+
+        if let x = userInfo["x"] as? CGFloat,
+           let y = userInfo["y"] as? CGFloat,
+           let w = userInfo["w"] as? CGFloat,
+           let h = userInfo["h"] as? CGFloat {
+            let rect = CGRect(x: x, y: y, width: w, height: h)
+            let query = userInfo["query"] as? String ?? ""
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self = self else { return }
+                let item = SearchResultItem(
+                    documentPath: targetPath,
+                    documentName: store.noteURL.deletingPathExtension().lastPathComponent,
+                    contentType: .handwriting,
+                    textContent: query,
+                    canvasRect: rect,
+                    pageIndex: 0,
+                    snippet: query
+                )
+                self.currentSearchResults = [item]
+                self.activeSearchIndex = 0
+                self.searchHighlightOverlay.updateHighlights(matches: [item], activeIndex: 0)
+                self.scrollToSearchMatch(item)
+            }
         }
     }
 }

@@ -81,6 +81,11 @@
 		DSV00001000000000000001 /* DocumentScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DSVREF010000000000000001 /* DocumentScannerView.swift */; };
 		YTE00001000000000000001 /* YouTubeEmbedSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = YTEREF010000000000000001 /* YouTubeEmbedSheet.swift */; };
 		MPS00001000000000000001 /* MediaPlaybackSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = MPSREF010000000000000001 /* MediaPlaybackSheetView.swift */; };
+		SRI00001000000000000001 /* SearchResultItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRIREF010000000000000001 /* SearchResultItem.swift */; };
+		NSD00001000000000000001 /* NoteSearchDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = NSDREF010000000000000001 /* NoteSearchDatabase.swift */; };
+		NIS00001000000000000001 /* NoteIndexingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = NISREF010000000000000001 /* NoteIndexingService.swift */; };
+		CFB00001000000000000001 /* CanvasFindBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFBREF010000000000000001 /* CanvasFindBarView.swift */; };
+		CSH00001000000000000001 /* CanvasSearchHighlightOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CSHREF010000000000000001 /* CanvasSearchHighlightOverlay.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -160,6 +165,11 @@
 		DSVREF010000000000000001 /* DocumentScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentScannerView.swift; sourceTree = "<group>"; };
 		YTEREF010000000000000001 /* YouTubeEmbedSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeEmbedSheet.swift; sourceTree = "<group>"; };
 		MPSREF010000000000000001 /* MediaPlaybackSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPlaybackSheetView.swift; sourceTree = "<group>"; };
+		SRIREF010000000000000001 /* SearchResultItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Search/SearchResultItem.swift; sourceTree = "<group>"; };
+		NSDREF010000000000000001 /* NoteSearchDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Search/NoteSearchDatabase.swift; sourceTree = "<group>"; };
+		NISREF010000000000000001 /* NoteIndexingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Search/NoteIndexingService.swift; sourceTree = "<group>"; };
+		CFBREF010000000000000001 /* CanvasFindBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasFindBarView.swift; sourceTree = "<group>"; };
+		CSHREF010000000000000001 /* CanvasSearchHighlightOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSearchHighlightOverlay.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -414,6 +424,9 @@
 				DOCREF01 /* DocumentConverter.swift */,
 				OCRREF01 /* OCRService.swift */,
 				EFMREF01 /* ExternalFileImportManager.swift */,
+				SRIREF010000000000000001 /* SearchResultItem.swift */,
+				NSDREF010000000000000001 /* NoteSearchDatabase.swift */,
+				NISREF010000000000000001 /* NoteIndexingService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -529,6 +542,8 @@
 				DSVREF010000000000000001 /* DocumentScannerView.swift */,
 				YTEREF010000000000000001 /* YouTubeEmbedSheet.swift */,
 				MPSREF010000000000000001 /* MediaPlaybackSheetView.swift */,
+				CFBREF010000000000000001 /* CanvasFindBarView.swift */,
+				CSHREF010000000000000001 /* CanvasSearchHighlightOverlay.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -684,6 +699,11 @@
 				DSV00001000000000000001 /* DocumentScannerView.swift in Sources */,
 				YTE00001000000000000001 /* YouTubeEmbedSheet.swift in Sources */,
 				MPS00001000000000000001 /* MediaPlaybackSheetView.swift in Sources */,
+				SRI00001000000000000001 /* SearchResultItem.swift in Sources */,
+				NSD00001000000000000001 /* NoteSearchDatabase.swift in Sources */,
+				NIS00001000000000000001 /* NoteIndexingService.swift in Sources */,
+				CFB00001000000000000001 /* CanvasFindBarView.swift in Sources */,
+				CSH00001000000000000001 /* CanvasSearchHighlightOverlay.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

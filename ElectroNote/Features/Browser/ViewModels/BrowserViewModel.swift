@@ -11,6 +11,45 @@ final class BrowserViewModel: ObservableObject {
 
     let metaStore = ItemMetadataStore.shared
 
+    // MARK: - Global Search Across All Documents & Handwriting
+    @Published var searchText: String = "" {
+        didSet {
+            performSearchDebounced()
+        }
+    }
+    @Published var searchResults: [SearchResultItem] = []
+    @Published var isSearching: Bool = false
+    private var searchTask: Task<Void, Never>?
+
+    func performSearchDebounced() {
+        searchTask?.cancel()
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else {
+            searchResults = []
+            isSearching = false
+            return
+        }
+
+        isSearching = true
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 200_000_000) // 200ms debounce
+            guard !Task.isCancelled else { return }
+
+            let results = await NoteSearchDatabase.shared.search(query: q)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                self.searchResults = results
+                self.isSearching = false
+            }
+        }
+    }
+
+    func findDocumentItem(for docPath: String) -> DocumentItem? {
+        let all = fileService.listAllDocuments()
+        return all.first { $0.path.path == docPath }
+    }
+
     var isAtRoot: Bool { currentPath == fileService.rootURL }
     var currentFolderName: String { isAtRoot ? "ElectroNote" : currentPath.lastPathComponent }
     var rootURL: URL { fileService.rootURL }

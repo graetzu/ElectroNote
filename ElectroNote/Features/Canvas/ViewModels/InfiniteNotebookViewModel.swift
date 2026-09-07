@@ -143,6 +143,22 @@ final class InfiniteNotebookViewModel: ObservableObject {
     // MARK: - Export
     @Published var triggerExport:  Bool = false
 
+    // MARK: - In-Canvas Find & Search
+    @Published var showSearch:                 Bool = false {
+        didSet {
+            if !showSearch {
+                searchQuery = ""
+                searchMatchCount = 0
+                currentSearchMatchIndex = 0
+            }
+        }
+    }
+    @Published var searchQuery:                String = ""
+    @Published var searchMatchCount:           Int = 0
+    @Published var currentSearchMatchIndex:    Int = 0
+    @Published var triggerNextSearchMatch:     Bool = false
+    @Published var triggerPreviousSearchMatch: Bool = false
+
 
 
     struct TypedTextInsertion {

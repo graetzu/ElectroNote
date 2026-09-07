@@ -37,8 +37,27 @@ struct InfiniteNotebookHostView: View {
 
             Divider()
 
-            InfiniteNotebookRepresentable(store: store, vm: vm)
-                .ignoresSafeArea(edges: .bottom)
+            ZStack(alignment: .top) {
+                InfiniteNotebookRepresentable(store: store, vm: vm)
+                    .ignoresSafeArea(edges: .bottom)
+
+                if vm.showSearch {
+                    CanvasFindBarView(
+                        query: $vm.searchQuery,
+                        matchCount: vm.searchMatchCount,
+                        currentIndex: vm.currentSearchMatchIndex,
+                        onPrevious: { vm.triggerPreviousSearchMatch = true },
+                        onNext: { vm.triggerNextSearchMatch = true },
+                        onClose: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                vm.showSearch = false
+                            }
+                        }
+                    )
+                    .padding(.top, 10)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
         }
         .navigationTitle(item.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -251,6 +270,18 @@ struct InfiniteNotebookHostView: View {
             .tint(vm.darkDrawingMode ? .indigo : .primary)
             .accessibilityLabel(vm.darkDrawingMode ? "Hellmodus aktivieren" : "Dunkelmodus aktivieren")
             .help("Dunkelmodus umschalten")
+
+            // In-Canvas Suche (Handschrift, Text & Notizen)
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    vm.showSearch.toggle()
+                }
+            } label: {
+                Image(systemName: "magnifyingglass")
+            }
+            .tint(vm.showSearch ? .accentColor : .primary)
+            .accessibilityLabel(vm.showSearch ? "Suche schließen" : "In Notiz suchen")
+            .help("In Notiz und Handschrift suchen")
 
             // Background template + line spacing
             Menu {
