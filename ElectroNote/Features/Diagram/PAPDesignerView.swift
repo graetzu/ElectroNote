@@ -35,7 +35,7 @@ enum PAPShapeType: String, CaseIterable, Identifiable {
         case .io:             return 160
         case .decision:       return 150
         case .subroutine:     return 160
-        case .comment:        return 210
+        case .comment:        return 220
         case .connector:      return 32
         }
     }
@@ -47,7 +47,7 @@ enum PAPShapeType: String, CaseIterable, Identifiable {
         case .io:             return 54
         case .decision:       return 70
         case .subroutine:     return 54
-        case .comment:        return 65
+        case .comment:        return 75
         case .connector:      return 32
         }
     }
@@ -1170,7 +1170,7 @@ struct PAPNodeCardView: View {
                         .padding(.leading, 14)
                         .padding(.trailing, 6)
                         .padding(.vertical, 4)
-                        .lineLimit(5)
+                        .lineLimit(6)
                         .minimumScaleFactor(0.8)
                 }
             } else {
