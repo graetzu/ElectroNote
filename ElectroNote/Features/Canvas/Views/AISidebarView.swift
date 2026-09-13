@@ -1,5 +1,5 @@
 import SwiftUI
-import WebKit
+import SafariServices
 
 // MARK: - AI Provider
 
@@ -35,6 +35,25 @@ enum AIProvider: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - AI Bookmark
+
+/// A saved link into one of the AI providers (e.g. a specific ongoing chat/project).
+/// SFSafariViewController never reveals which URL is currently displayed, so these can
+/// only be added manually (paste a link copied from Safari's own share sheet).
+struct AIBookmark: Identifiable, Codable, Equatable {
+    let id: UUID
+    var name: String
+    var urlString: String
+
+    var url: URL? { URL(string: urlString) }
+
+    init(id: UUID = UUID(), name: String, urlString: String) {
+        self.id = id
+        self.name = name
+        self.urlString = urlString
+    }
+}
+
 // MARK: - AISidebarView
 
 struct AISidebarView: View {
@@ -44,17 +63,22 @@ struct AISidebarView: View {
     @AppStorage("electroNote_lastAIProvider") private var selectedProviderRaw: String = AIProvider.chatGPT.rawValue
     @State private var selectedProvider: AIProvider = .chatGPT
 
-    @State private var isLoading = false
-    @State private var canGoBack = false
-    @State private var canGoForward = false
-    @State private var reloadTrigger = false
-    @State private var loadProgress: Double = 0.0
-
-    @State private var webViewCoordinator: AIWebViewCoordinator? = nil
     @State private var toastMessage: String? = nil
     @State private var isExtracting = false
     @State private var showCustomQuestionDialog = false
     @State private var customQuestionText = ""
+
+    @State private var bookmarks: [AIBookmark] = []
+    @State private var activeBookmarkURL: URL? = nil
+    @State private var showBookmarksSheet = false
+    @State private var isApplyingBookmark = false
+    private static let bookmarksDefaultsKey = "electroNote_aiBookmarks"
+
+    /// The URL actually shown in the browser: a picked bookmark overrides the
+    /// selected provider's default start page until a different provider tab is tapped.
+    private var currentURL: URL {
+        activeBookmarkURL ?? selectedProvider.url
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,24 +91,14 @@ struct AISidebarView: View {
             Divider()
 
             ZStack(alignment: .top) {
-                AIWebViewRepresentable(
-                    provider: selectedProvider,
-                    isLoading: $isLoading,
-                    canGoBack: $canGoBack,
-                    canGoForward: $canGoForward,
-                    loadProgress: $loadProgress,
-                    reloadTrigger: $reloadTrigger,
-                    onCoordinatorReady: { coord in
-                        self.webViewCoordinator = coord
-                    }
-                )
-
-                if isLoading {
-                    ProgressView(value: loadProgress, total: 1.0)
-                        .progressViewStyle(LinearProgressViewStyle(tint: selectedProvider.brandColor))
-                        .frame(height: 3)
-                        .zIndex(10)
-                }
+                // Google refuses to complete "Sign in with Google" inside an embedded
+                // WKWebView ("This browser or app may not be secure"). SFSafariViewController
+                // is a trusted, persistent-cookie browser context Google accepts, so login
+                // works normally here — including for accounts that only registered via Google.
+                // .id() forces a fresh SFSafariViewController whenever the provider changes,
+                // since its URL can't be changed after creation.
+                AISafariView(url: currentURL, onDismiss: onClose)
+                    .id(currentURL)
 
                 if let toast = toastMessage {
                     HStack(spacing: 8) {
@@ -119,13 +133,36 @@ struct AISidebarView: View {
             if let saved = AIProvider(rawValue: selectedProviderRaw) {
                 selectedProvider = saved
             }
+            loadBookmarks()
         }
         .onChange(of: selectedProvider) { _, newProvider in
             selectedProviderRaw = newProvider.rawValue
+            if isApplyingBookmark {
+                // This change came from picking a bookmark below, not from tapping a
+                // provider tab — don't clear the bookmark URL we just switched to.
+                isApplyingBookmark = false
+            } else {
+                activeBookmarkURL = nil
+            }
+        }
+        .onChange(of: bookmarks) { _, _ in
+            saveBookmarks()
+        }
+        .sheet(isPresented: $showBookmarksSheet) {
+            AIBookmarksSheet(bookmarks: $bookmarks) { bookmark in
+                guard let url = bookmark.url else { return }
+                if let matchingProvider = AIProvider.allCases.first(where: { url.host?.contains($0.url.host ?? "___") == true }),
+                   matchingProvider != selectedProvider {
+                    isApplyingBookmark = true
+                    selectedProviderRaw = matchingProvider.rawValue
+                    selectedProvider = matchingProvider
+                }
+                activeBookmarkURL = url
+            }
         }
         .alert("Frage an die KI stellen", isPresented: $showCustomQuestionDialog) {
             TextField("Deine Frage zum Dokument...", text: $customQuestionText)
-            Button("An \(selectedProvider.rawValue) senden") {
+            Button("Übernehmen") {
                 let q = customQuestionText.trimmingCharacters(in: .whitespacesAndNewlines)
                 customQuestionText = ""
                 if !q.isEmpty {
@@ -155,26 +192,13 @@ struct AISidebarView: View {
 
             Spacer()
 
-            // Navigation controls
+            // Bookmarks
             Button {
-                webViewCoordinator?.goBack()
+                showBookmarksSheet = true
             } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: activeBookmarkURL != nil ? "bookmark.fill" : "bookmark")
             }
-            .disabled(!canGoBack)
-
-            Button {
-                webViewCoordinator?.goForward()
-            } label: {
-                Image(systemName: "chevron.right")
-            }
-            .disabled(!canGoForward)
-
-            Button {
-                reloadTrigger.toggle()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
+            .accessibilityLabel("Lesezeichen")
 
             // Close button
             Button {
@@ -206,7 +230,7 @@ struct AISidebarView: View {
                     } else {
                         Image(systemName: "doc.text.viewfinder")
                     }
-                    Text("Seite übergeben")
+                    Text("Seite kopieren")
                         .font(.caption)
                         .fontWeight(.semibold)
                 }
@@ -217,6 +241,24 @@ struct AISidebarView: View {
                 .cornerRadius(8)
             }
             .disabled(isExtracting)
+
+            // Quick Action: Screenshot of the current page (no OCR/text extraction — lets
+            // the AI actually see diagrams/sketches that text extraction alone would miss).
+            Button {
+                copyScreenshotToClipboard()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "camera.viewfinder")
+                    Text("Screenshot")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(selectedProvider.brandColor.opacity(0.12))
+                .foregroundColor(selectedProvider.brandColor)
+                .cornerRadius(8)
+            }
 
             // Preset Questions Menu
             Menu {
@@ -254,7 +296,7 @@ struct AISidebarView: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "questionmark.bubble")
-                    Text("Frage stellen…")
+                    Text("Frage vorbereiten…")
                         .font(.caption)
                         .fontWeight(.medium)
                 }
@@ -266,15 +308,6 @@ struct AISidebarView: View {
             }
 
             Spacer()
-
-            // Account status hint
-            Text("Abo aktiv")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color(uiColor: .tertiarySystemFill))
-                .cornerRadius(4)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -283,6 +316,9 @@ struct AISidebarView: View {
 
     // MARK: - Context Transfer
 
+    /// SFSafariViewController doesn't expose a way to run JavaScript from outside, so the
+    /// prompt can no longer be auto-inserted into the chat's text field like with the old
+    /// WKWebView. It's copied to the clipboard instead — the user pastes it with one long-press.
     private func transferContextToAI(customQuestion: String?) {
         guard !isExtracting else { return }
         isExtracting = true
@@ -328,14 +364,22 @@ struct AISidebarView: View {
                 """
             }
 
-            // 1. Copy to system pasteboard for universal 1-tap paste
             UIPasteboard.general.string = prompt
 
-            // 2. Inject directly into the active Web Chat input field
-            webViewCoordinator?.injectPrompt(prompt)
-
-            showToast("Notizinhalt an \(selectedProvider.rawValue) übergeben!")
+            showToast("In Zwischenablage kopiert – im \(selectedProvider.rawValue)-Feld einfügen")
         }
+    }
+
+    /// Puts a screenshot of the currently visible notebook page (not the whole screen —
+    /// this sidebar is never included, see captureVisiblePageImage) on the clipboard, so
+    /// it can be pasted straight into the AI provider's chat as an image attachment.
+    private func copyScreenshotToClipboard() {
+        guard let image = vm.captureCurrentPageImageForAI() else {
+            showToast("Konnte keinen Screenshot erstellen")
+            return
+        }
+        UIPasteboard.general.image = image
+        showToast("Screenshot kopiert – im \(selectedProvider.rawValue)-Feld einfügen")
     }
 
     private func showToast(_ text: String) {
@@ -350,163 +394,174 @@ struct AISidebarView: View {
             }
         }
     }
-}
 
-// MARK: - WKWebView Representable
+    // MARK: - Bookmark Persistence
 
-struct AIWebViewRepresentable: UIViewRepresentable {
-    let provider: AIProvider
-    @Binding var isLoading: Bool
-    @Binding var canGoBack: Bool
-    @Binding var canGoForward: Bool
-    @Binding var loadProgress: Double
-    @Binding var reloadTrigger: Bool
-    let onCoordinatorReady: (AIWebViewCoordinator) -> Void
-
-    func makeCoordinator() -> AIWebViewCoordinator {
-        let coord = AIWebViewCoordinator(self)
-        onCoordinatorReady(coord)
-        return coord
+    private func loadBookmarks() {
+        guard let data = UserDefaults.standard.data(forKey: Self.bookmarksDefaultsKey),
+              let decoded = try? JSONDecoder().decode([AIBookmark].self, from: data) else { return }
+        bookmarks = decoded
     }
 
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-
-        // Persistent data store so user stays logged in across app launches
-        config.websiteDataStore = WKWebsiteDataStore.default()
-        config.allowsInlineMediaPlayback = true
-        config.preferences.javaScriptCanOpenWindowsAutomatically = true
-
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
-
-        // Custom modern iPad Safari User-Agent to ensure full desktop/tablet web UI
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
-
-        context.coordinator.webView = webView
-        context.coordinator.setupObservations(webView: webView)
-
-        let request = URLRequest(url: provider.url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 30)
-        webView.load(request)
-        context.coordinator.currentProvider = provider
-
-        return webView
-    }
-
-    func updateUIView(_ uiView: WKWebView, context: Context) {
-        if context.coordinator.currentProvider != provider {
-            context.coordinator.currentProvider = provider
-            let request = URLRequest(url: provider.url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 30)
-            uiView.load(request)
-        }
-
-        if context.coordinator.lastReloadTrigger != reloadTrigger {
-            context.coordinator.lastReloadTrigger = reloadTrigger
-            uiView.reload()
-        }
+    private func saveBookmarks() {
+        guard let data = try? JSONEncoder().encode(bookmarks) else { return }
+        UserDefaults.standard.set(data, forKey: Self.bookmarksDefaultsKey)
     }
 }
 
-// MARK: - Coordinator & Injection
+// MARK: - AI Bookmarks Sheet
 
-final class AIWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
-    let parent: AIWebViewRepresentable
-    weak var webView: WKWebView?
-    var currentProvider: AIProvider?
-    var lastReloadTrigger = false
-    private var progressObs: NSKeyValueObservation?
-    private var canGoBackObs: NSKeyValueObservation?
-    private var canGoForwardObs: NSKeyValueObservation?
+struct AIBookmarksSheet: View {
+    @Binding var bookmarks: [AIBookmark]
+    let onSelect: (AIBookmark) -> Void
 
-    init(_ parent: AIWebViewRepresentable) {
-        self.parent = parent
-        self.lastReloadTrigger = parent.reloadTrigger
-    }
+    @Environment(\.dismiss) private var dismiss
+    @State private var showAddSheet = false
 
-    func setupObservations(webView: WKWebView) {
-        progressObs = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] wv, _ in
-            DispatchQueue.main.async {
-                self?.parent.loadProgress = wv.estimatedProgress
-                self?.parent.isLoading = wv.isLoading
-            }
-        }
-        canGoBackObs = webView.observe(\.canGoBack, options: [.new]) { [weak self] wv, _ in
-            DispatchQueue.main.async {
-                self?.parent.canGoBack = wv.canGoBack
-            }
-        }
-        canGoForwardObs = webView.observe(\.canGoForward, options: [.new]) { [weak self] wv, _ in
-            DispatchQueue.main.async {
-                self?.parent.canGoForward = wv.canGoForward
-            }
-        }
-    }
-
-    func goBack() {
-        webView?.goBack()
-    }
-
-    func goForward() {
-        webView?.goForward()
-    }
-
-    func injectPrompt(_ prompt: String) {
-        guard let webView = webView else { return }
-
-        // Sanitize string for JS injection
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: [prompt], options: []),
-              let jsonString = String(data: jsonData, encoding: .utf8) else {
-            return
-        }
-
-        let js = """
-        (function() {
-            const promptText = \(jsonString)[0];
-
-            // 1. ChatGPT
-            let el = document.querySelector('#prompt-textarea') ||
-                     document.querySelector('div#prompt-textarea') ||
-                     document.querySelector('textarea[data-id="root"]') ||
-                     document.querySelector('textarea');
-
-            // 2. Claude (contenteditable paragraph)
-            if (!el) {
-                el = document.querySelector('div[contenteditable="true"] p') ||
-                     document.querySelector('div[contenteditable="true"]') ||
-                     document.querySelector('fieldset div[contenteditable]');
-            }
-
-            // 3. Gemini (rich-textarea or contenteditable)
-            if (!el) {
-                el = document.querySelector('rich-textarea div[contenteditable="true"]') ||
-                     document.querySelector('textarea.textarea');
-            }
-
-            if (el) {
-                el.focus();
-                if (el.tagName && el.tagName.toLowerCase() === 'textarea') {
-                    el.value = promptText;
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                } else if (el.isContentEditable) {
-                    el.innerText = promptText;
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
+    var body: some View {
+        NavigationStack {
+            List {
+                if bookmarks.isEmpty {
+                    ContentUnavailableView(
+                        "Keine Lesezeichen",
+                        systemImage: "bookmark",
+                        description: Text("Speichere häufig genutzte Chats oder Projekte für schnellen Zugriff.")
+                    )
+                } else {
+                    ForEach(bookmarks) { bookmark in
+                        Button {
+                            onSelect(bookmark)
+                            dismiss()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(bookmark.name)
+                                    .foregroundColor(.primary)
+                                Text(bookmark.urlString)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .onDelete { indexSet in
+                        bookmarks.remove(atOffsets: indexSet)
+                    }
                 }
-                return true;
             }
-            return false;
-        })();
-        """
+            .navigationTitle("Lesezeichen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Fertig") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showAddSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Lesezeichen hinzufügen")
+                }
+            }
+            .sheet(isPresented: $showAddSheet) {
+                AddAIBookmarkView { newBookmark in
+                    bookmarks.append(newBookmark)
+                }
+            }
+        }
+    }
+}
 
-        webView.evaluateJavaScript(js) { _, _ in }
+// MARK: - Add AI Bookmark
+
+struct AddAIBookmarkView: View {
+    let onSave: (AIBookmark) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String = ""
+    @State private var urlString: String = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Name") {
+                    TextField("z. B. Elektro-Ausbildung Projekt", text: $name)
+                }
+                Section("Link") {
+                    TextField("https://...", text: $urlString)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                    Button {
+                        if let clip = UIPasteboard.general.string {
+                            urlString = clip
+                        }
+                    } label: {
+                        Label("Aus Zwischenablage einfügen", systemImage: "doc.on.clipboard")
+                    }
+                }
+                Section {
+                    Text("Tipp: Öffne den gewünschten Chat in der KI-Sidebar, tippe unten in der Safari-Leiste auf Teilen → „Kopieren“, und füge den Link hier ein.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("Neues Lesezeichen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Speichern") {
+                        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let trimmedURL = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard URL(string: trimmedURL) != nil else { return }
+                        onSave(AIBookmark(name: trimmedName.isEmpty ? trimmedURL : trimmedName, urlString: trimmedURL))
+                        dismiss()
+                    }
+                    .disabled(urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Safari-based AI Browser
+
+/// Hosts a provider's chat website in Apple's Safari View Controller instead of a raw
+/// WKWebView. Unlike WKWebView, Google fully trusts this context for "Sign in with Google" —
+/// there's no separate window/cookie hand-off involved, so accounts that only ever
+/// registered via Google work here too. Session cookies persist across app launches
+/// the same way they do in Safari itself.
+struct AISafariView: UIViewControllerRepresentable {
+    let url: URL
+    let onDismiss: () -> Void
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let config = SFSafariViewController.Configuration()
+        config.entersReaderIfAvailable = false
+        let controller = SFSafariViewController(url: url, configuration: config)
+        controller.dismissButtonStyle = .close
+        controller.delegate = context.coordinator
+        return controller
     }
 
-    // Allow popup windows (for OAuth / Google Sign-In) to load in the same webview
-    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if navigationAction.targetFrame == nil {
-            webView.load(navigationAction.request)
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onDismiss: onDismiss)
+    }
+
+    final class Coordinator: NSObject, SFSafariViewControllerDelegate {
+        let onDismiss: () -> Void
+
+        init(onDismiss: @escaping () -> Void) {
+            self.onDismiss = onDismiss
         }
-        return nil
+
+        func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
+            onDismiss()
+        }
     }
 }

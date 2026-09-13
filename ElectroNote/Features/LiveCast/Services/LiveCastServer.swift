@@ -24,6 +24,7 @@ final class LiveCastServer: ObservableObject {
     @Published var targetFPS: Int = 20
     @Published var streamQuality: CGFloat = 0.70
     @Published var lastErrorMessage: String? = nil
+    @Published var isPausedInBackground: Bool = false
 
     private var listener: NWListener?
     private var webSocketConnections: [NWConnection] = []
@@ -40,6 +41,29 @@ final class LiveCastServer: ObservableObject {
             self.port = 8080
         }
         refreshIP()
+        observeAppLifecycle()
+    }
+
+    // MARK: - App Lifecycle (Bildschirm-Sperre & Hintergrund)
+
+    private func observeAppLifecycle() {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self, self.isStreaming else { return }
+                // iOS friert die App im Hintergrund praktisch sofort ein — der Server kann
+                // dann keine neuen Frames mehr rendern/senden. Klarer Status statt stillem Abbruch.
+                self.isPausedInBackground = true
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.isPausedInBackground = false
+            }
+        }
     }
 
     func refreshIP() {
@@ -121,6 +145,9 @@ final class LiveCastServer: ObservableObject {
 
             listener?.start(queue: queue)
             isStreaming = true
+            // Ohne das hier schaltet sich der Bildschirm nach der normalen Sperrzeit ab,
+            // die App geht in den Hintergrund und die Übertragung bricht ab.
+            UIApplication.shared.isIdleTimerDisabled = true
             startCaptureLoop()
             print("[LiveCast] Server gestartet auf \(serverURL)")
         } catch {
@@ -149,6 +176,7 @@ final class LiveCastServer: ObservableObject {
         listener?.cancel()
         listener = nil
         isStreaming = false
+        UIApplication.shared.isIdleTimerDisabled = false
         print("[LiveCast] Server gestoppt.")
     }
 

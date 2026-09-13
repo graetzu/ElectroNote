@@ -38,7 +38,10 @@ func makePKTool(tool: CanvasToolType, color: Color, width: CGFloat, eraserType: 
     case .pen, .textSelect, .pan:
         return PKInkingTool(.pen, color: uiColor, width: width)
     case .marker:
-        return PKInkingTool(.marker, color: uiColor, width: max(width * 3.0, 10))
+        // PencilKit's eigene Marker-Transluzenz reicht bei breiten/überlappenden Strichen
+        // nicht aus, um Text darunter lesbar zu halten — Alpha hier explizit selbst setzen.
+        let markerColor = uiColor.withAlphaComponent(0.35)
+        return PKInkingTool(.marker, color: markerColor, width: max(width * 2.5, 10))
     case .pencil:
         return PKInkingTool(.pencil, color: uiColor, width: max(width * 1.5, 2))
     case .eraser:
@@ -160,10 +163,17 @@ final class InfiniteNotebookViewModel: ObservableObject {
     @Published var triggerPreviousSearchMatch: Bool = false
     // MARK: - AI Assistant Sidebar
     @Published var showAISidebar: Bool = false
+    // MARK: - Web Clipper & Screenshot
+    @Published var showWebClipper: Bool = false
+    @Published var pendingStickyNoteText: String? = nil
 
     func collectContextTextForAI() async -> String {
         guard let vc = vcRef else { return "" }
         return await vc.collectContextText()
+    }
+
+    func captureCurrentPageImageForAI() -> UIImage? {
+        vcRef?.captureVisiblePageImage()
     }
     struct TypedTextInsertion {
         let text: String

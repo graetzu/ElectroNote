@@ -2839,13 +2839,13 @@ extension InfiniteNotebookViewController {
 
 extension InfiniteNotebookViewController {
 
-    func addStickyNote() {
+    func addStickyNote(text: String = "") {
         let scale  = canvasView.zoomScale
         let offset = canvasView.contentOffset
         // Place at center of visible canvas content
         let cx = (offset.x + canvasView.bounds.width  / 2) / scale - StickyNoteView.noteSize.width / 2
         let cy = (offset.y + canvasView.bounds.height / 2) / scale - StickyNoteView.noteSize.height / 2
-        let note = StickyNote(id: UUID(), text: "",
+        let note = StickyNote(id: UUID(), text: text,
                               x: max(10, cx), y: max(10, cy),
                               colorIndex: document.stickyNotes.count % 4)
         document.stickyNotes.append(note)
@@ -3883,6 +3883,22 @@ extension InfiniteNotebookViewController {
     }
 
     // MARK: - AI Context Extraction
+
+    /// Renders exactly what's currently on screen in the notebook (background pattern,
+    /// inserted images/PDFs, ink, sticky notes) into a single image — canvasView is the
+    /// container all of that lives in (see the addSubview calls above), and its `bounds`
+    /// is already the visible viewport in screen space, so this naturally excludes the AI
+    /// sidebar, which is a sibling SwiftUI view outside this view controller's hierarchy.
+    func captureVisiblePageImage() -> UIImage? {
+        let bounds = canvasView.bounds
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: format)
+        return renderer.image { _ in
+            canvasView.drawHierarchy(in: bounds, afterScreenUpdates: true)
+        }
+    }
 
     func collectContextText() async -> String {
         let zoom = max(canvasView.zoomScale, 0.01)

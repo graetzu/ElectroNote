@@ -109,6 +109,19 @@ struct InfiniteNotebookHostView: View {
                 vm.pendingPDFURL = url
             }
         }
+        .sheet(isPresented: $vm.showWebClipper) {
+            WebClipperView { action in
+                switch action {
+                case .insertImage(let img, _):
+                    vm.pendingImage = img
+                case .insertImageAndStickyNote(let img, let text):
+                    vm.pendingImage = img
+                    vm.pendingStickyNoteText = text
+                case .insertTextOnly(let text):
+                    vm.pendingTextInsertion = InfiniteNotebookViewModel.TypedTextInsertion(text: text, fontSize: 16)
+                }
+            }
+        }
         .sheet(isPresented: $showClipArtPicker) {
             ClipArtPickerView { entry in
                 let config = UIImage.SymbolConfiguration(pointSize: 120, weight: .regular)
@@ -330,15 +343,8 @@ struct InfiniteNotebookHostView: View {
             .help("KI-Seitenleiste (ChatGPT, Claude, Gemini)")
 
             // Background template + line spacing
+            // (Dunkelmodus lebt nur noch im direkten Mond-Button oben — nicht hier duplizieren)
             Menu {
-                Section("Papierfarbe") {
-                    Toggle(isOn: $vm.darkDrawingMode) {
-                        Label(
-                            vm.darkDrawingMode ? "Dunkles Papier (Aktiv)" : "Dunkles Papier",
-                            systemImage: vm.darkDrawingMode ? "moon.fill" : "moon"
-                        )
-                    }
-                }
                 Section("Vorlage") {
                     ForEach(BackgroundStyle.allCases) { style in
                         Button { vm.background = style } label: {
@@ -392,39 +398,21 @@ struct InfiniteNotebookHostView: View {
             // Live Cast Button (WLAN Übertragung)
             LiveCastBadgeButton()
 
-            // Direct Import & Insert Menu (Dateien-App, Nextcloud, Fotos, etc.)
+            // Direct Import & Insert Menu (Fotos, Videos & sonstige Inhalte —
+            // Dateien/Nextcloud/Schaltplan/KI sind bereits als Schnellzugriffe
+            // in der Werkzeugleiste unten, hier nicht nochmal duplizieren)
             Menu {
                 Section("Dateien & Fotos") {
-                    Button {
-                        vm.showPDFPicker = true
-                    } label: {
-                        Label("Dateien-App (PDF, Word, Bilder…)", systemImage: "folder.badge.plus")
-                    }
                     Button {
                         showSettingsSheet = true
                     } label: {
                         Label("Cloud & Synchronisation…", systemImage: "arrow.triangle.2.circlepath.icloud")
                     }
-                    Button {
-                        showNextcloudSheet = true
-                    } label: {
-                        Label("Aus Nextcloud importieren…", systemImage: "externaldrive.connected.to.line.below")
-                    }
                     PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                         Label("Foto aus Mediathek…", systemImage: "photo.badge.plus")
                     }
-                    Button {
-                        vm.showCameraPhoto = true
-                    } label: {
-                        Label("Foto mit Kamera aufnehmen…", systemImage: "camera")
-                    }
-                    Button {
-                        vm.showDocumentScanner = true
-                    } label: {
-                        Label("Dokument / Tafel scannen…", systemImage: "doc.viewfinder")
-                    }
                 }
-                Section("Videos & YouTube") {
+                Section("Videos") {
                     PhotosPicker(selection: $selectedVideoItem, matching: .videos) {
                         Label("Video aus Mediathek…", systemImage: "video.badge.plus")
                     }
@@ -433,27 +421,39 @@ struct InfiniteNotebookHostView: View {
                     } label: {
                         Label("Video mit Kamera aufnehmen…", systemImage: "video")
                     }
-                    Button {
-                        vm.showYouTubeEmbed = true
-                    } label: {
-                        Label("YouTube-Video einbetten…", systemImage: "play.rectangle")
-                    }
                 }
                 Section("Inhalte") {
                     Button { vm.triggerPaste = true } label: {
                         Label("Aus Zwischenablage einfügen", systemImage: "doc.on.clipboard")
                     }
+                    Button { vm.triggerHandwritingRecognition = true } label: {
+                        Label("Handschrift erkennen", systemImage: "text.viewfinder")
+                    }
                     Button { vm.showElektroSim = true } label: {
                         Label("⚡️ Elektro-Planer (Website)…", systemImage: "bolt.horizontal.circle")
-                    }
-                    Button { vm.showCircuitPicker = true } label: {
-                        Label("⚡️ Schaltsymbole & Stromkreise…", systemImage: "bolt.badge.clock")
                     }
                     Button { showClipArtPicker = true } label: {
                         Label("Symbol / ClipArt…", systemImage: "star.square")
                     }
                     Button { vm.showPlotter = true } label: {
                         Label("Funktionsplotter…", systemImage: "waveform.path.badge.plus")
+                    }
+                    Button { vm.showTextInsertion = true } label: {
+                        Label("Text einfügen", systemImage: "text.cursor")
+                    }
+                    Button { vm.triggerAddStickyNote = true } label: {
+                        Label("Haftzettel", systemImage: "note.text.badge.plus")
+                    }
+                }
+                Section("Diagramme") {
+                    Button { vm.showPAP       = true } label: {
+                        Label("Programmablaufplan", systemImage: "arrow.triangle.branch")
+                    }
+                    Button { vm.showMindMap   = true } label: {
+                        Label("MindMap", systemImage: "brain")
+                    }
+                    Button { vm.showWhiteboard = true } label: {
+                        Label("Whiteboard", systemImage: "rectangle.and.pencil.and.ellipsis")
                     }
                 }
             } label: {
@@ -471,7 +471,10 @@ struct InfiniteNotebookHostView: View {
             }
             .accessibilityLabel("Dateien und Inhalte importieren")
 
-            // "Mehr" menu — consolidates less-used actions to keep toolbar compact in portrait
+            // "Mehr" menu — consolidates less-used actions to keep toolbar compact in portrait.
+            // Alles, was schon als Schnellzugriff existiert (Lineal, Formen, Dunkelmodus,
+            // Handschrift, Mathe, Dateien, Nextcloud, Schaltplan, KI, Einfügen-Inhalte…),
+            // steht hier bewusst NICHT nochmal — nur echte Einstellungen & Zusatzfunktionen.
             Menu {
                 Section("Ansicht") {
                     Toggle(isOn: $vm.pencilOnly) {
@@ -482,85 +485,10 @@ struct InfiniteNotebookHostView: View {
                     }
                     .tint(.blue)
 
-                    Toggle(isOn: $vm.rulerActive) {
-                        Label("Lineal", systemImage: "ruler")
-                    }
-                    .tint(.brown)
-
-                    Toggle(isOn: $vm.shapeSnapEnabled) {
-                        Label(
-                            vm.shapeSnapEnabled ? "Formkorrektur aktiv" : "Formkorrektur",
-                            systemImage: vm.shapeSnapEnabled ? "skew" : "scribble"
-                        )
-                    }
-                    .tint(.orange)
-
-                    Toggle(isOn: $vm.darkDrawingMode) {
-                        Label(
-                            vm.darkDrawingMode ? "Hellmodus" : "Dunkelmodus",
-                            systemImage: vm.darkDrawingMode ? "moon.fill" : "moon"
-                        )
-                    }
-                    .tint(.indigo)
-
                     Toggle(isOn: $vm.mathEnabled) {
-                        Label("Mathe-Erkennung", systemImage: "function")
+                        Label("Mathe-Erkennung (automatisch)", systemImage: "function")
                     }
                     .tint(.purple)
-                }
-
-                Section("Einfügen") {
-                    Button { vm.triggerPaste = true } label: {
-                        Label("Aus Zwischenablage einfügen (Bild/Text)", systemImage: "doc.on.clipboard")
-                    }
-                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                        Label("Bild / Foto einfügen (Mediathek)", systemImage: "photo.badge.plus")
-                    }
-                    Button { showClipArtPicker = true } label: {
-                        Label("Symbol / ClipArt einfügen", systemImage: "star.square")
-                    }
-                    Button { vm.showCircuitPicker = true } label: {
-                        Label("⚡️ Schaltsymbole & Stromkreise…", systemImage: "bolt.badge.clock")
-                    }
-                    Button { vm.showTextInsertion = true } label: {
-                        Label("Text einfügen", systemImage: "text.cursor")
-                    }
-                    Button { vm.triggerAddStickyNote = true } label: {
-                        Label("Haftzettel", systemImage: "note.text.badge.plus")
-                    }
-                    Button { vm.triggerHandwritingRecognition = true } label: {
-                        Label("Handschrift erkennen", systemImage: "text.viewfinder")
-                    }
-                    Button { vm.triggerMathRecognition = true } label: {
-                        Label("Mathe / Formel berechnen", systemImage: "function")
-                    }
-                    Button { vm.showPDFPicker = true } label: {
-                        Label("Dokument einfügen (PDF, Word, Excel, PPT…)", systemImage: "doc.badge.plus")
-                    }
-                    Button { showSettingsSheet = true } label: {
-                        Label("Einstellungen & Cloud…", systemImage: "gearshape")
-                    }
-                    Button { showNextcloudSheet = true } label: {
-                        Label("Aus Nextcloud einfügen…", systemImage: "externaldrive.connected.to.line.below")
-                    }
-                    Button { vm.showPlotter = true } label: {
-                        Label("Funktion einfügen", systemImage: "waveform.path.badge.plus")
-                    }
-
-                    // Diagrams submenu
-                    Menu {
-                        Button { vm.showPAP       = true } label: {
-                            Label("Programmablaufplan", systemImage: "arrow.triangle.branch")
-                        }
-                        Button { vm.showMindMap   = true } label: {
-                            Label("MindMap", systemImage: "brain")
-                        }
-                        Button { vm.showWhiteboard = true } label: {
-                            Label("Whiteboard", systemImage: "rectangle.and.pencil.and.ellipsis")
-                        }
-                    } label: {
-                        Label("Diagramm einfügen", systemImage: "plus.rectangle.on.rectangle")
-                    }
                 }
 
                 Section("Lesezeichen") {
@@ -617,6 +545,21 @@ struct PenToolbarView: View {
         .purple
     ]
 
+    // Schwarz/Weiß ergeben bei einem Textmarker keinen Sinn — eigene Palette
+    // mit den üblichen Leuchtfarben stattdessen.
+    private let highlighterColors: [Color] = [
+        .yellow,
+        .green,
+        .pink,
+        .orange,
+        .cyan,
+        .purple
+    ]
+
+    private var colorsForActiveTool: [Color] {
+        activeTool == .marker ? highlighterColors : quickColors
+    }
+
     private let strokeWidths: [(label: String, width: CGFloat, dotSize: CGFloat)] = [
         ("Fein", 1.5, 4),
         ("Normal", 3.0, 7),
@@ -651,6 +594,10 @@ struct PenToolbarView: View {
     var onImportDocument: (() -> Void)? = nil
     var onImportNextcloud: (() -> Void)? = nil
     var onToggleAI: (() -> Void)? = nil
+    var onCamera: (() -> Void)? = nil
+    var onScanDocument: (() -> Void)? = nil
+    var onYouTube: (() -> Void)? = nil
+    var onWebClipper: (() -> Void)? = nil
 
     init(vm: InfiniteNotebookViewModel, onNextcloud: (() -> Void)? = nil) {
         self._activeTool = Binding(get: { vm.activeTool }, set: { vm.activeTool = $0 })
@@ -673,202 +620,160 @@ struct PenToolbarView: View {
                 vm?.showAISidebar.toggle()
             }
         }
+        self.onCamera = { [weak vm] in vm?.showCameraPhoto = true }
+        self.onScanDocument = { [weak vm] in vm?.showDocumentScanner = true }
+        self.onYouTube = { [weak vm] in vm?.showYouTubeEmbed = true }
+        self.onWebClipper = { [weak vm] in vm?.showWebClipper = true }
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                // Tool selector
-                HStack(spacing: 3) {
-                    ForEach(CanvasToolType.allCases.filter { $0 != .pan }) { tool in
-                        Button {
-                            if activeTool == tool && tool == .eraser {
-                                eraserType = eraserType == .vector ? .bitmap : .vector
-                            } else {
-                                activeTool = tool
-                            }
-                            notifyToolChange()
-                        } label: {
-                            VStack(spacing: 1) {
-                                Image(systemName: tool.iconName)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .frame(width: 34, height: 26)
-                                    .background(
-                                        activeTool == tool ?
-                                        Color.accentColor : Color(uiColor: .tertiarySystemFill)
-                                    )
-                                    .foregroundColor(
-                                        activeTool == tool ?
-                                        Color.white : Color.primary
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-
+        VStack(spacing: 0) {
+            // Row 1: Werkzeug, Farbe, Strichstärke & Lineal — alles, was das
+            // aktuelle Zeichenwerkzeug betrifft.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    // Tool selector
+                    HStack(spacing: 3) {
+                        ForEach(CanvasToolType.allCases.filter { $0 != .pan }) { tool in
+                            Button {
                                 if activeTool == tool && tool == .eraser {
-                                    Text(eraserType == .vector ? "Strich" : "Pixel")
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundColor(.secondary)
+                                    eraserType = eraserType == .vector ? .bitmap : .vector
+                                } else {
+                                    activeTool = tool
+                                    // Schwarz/Weiß ergeben bei einem Textmarker keinen Sinn —
+                                    // beim Umschalten auf eine sinnvolle Leuchtfarbe springen.
+                                    if tool == .marker && (selectedColor == .black || selectedColor == .white) {
+                                        selectedColor = .yellow
+                                    }
                                 }
+                                notifyToolChange()
+                            } label: {
+                                VStack(spacing: 1) {
+                                    Image(systemName: tool.iconName)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .frame(width: 34, height: 26)
+                                        .background(
+                                            activeTool == tool ?
+                                            Color.accentColor : Color(uiColor: .tertiarySystemFill)
+                                        )
+                                        .foregroundColor(
+                                            activeTool == tool ?
+                                            Color.white : Color.primary
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                                    if activeTool == tool && tool == .eraser {
+                                        Text(eraserType == .vector ? "Strich" : "Pixel")
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                .frame(width: 34, height: 32)
                             }
-                            .frame(width: 34, height: 32)
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(tool.rawValue)
+                        }
+                    }
+                    .fixedSize()
+
+                    if activeTool != .eraser && activeTool != .lasso && activeTool != .pan && activeTool != .textSelect {
+                        Divider()
+                            .frame(height: 22)
+
+                        // Quick Color palette
+                        HStack(spacing: 5) {
+                            ForEach(colorsForActiveTool, id: \.self) { color in
+                                Button {
+                                    selectedColor = color
+                                    notifyToolChange()
+                                } label: {
+                                    ZStack {
+                                        Circle()
+                                            .fill(color)
+                                            .frame(width: 20, height: 20)
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(Color.primary.opacity(0.35), lineWidth: 1)
+                                            )
+
+                                        if selectedColor == color {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundColor(color == .white || color == .yellow ? .black : .white)
+                                        }
+                                    }
+                                    .frame(width: 24, height: 24)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Farbe")
+                            }
+
+                            // Native ColorPicker for unlimited color options
+                            ColorPicker("", selection: Binding(get: { selectedColor }, set: { selectedColor = $0; notifyToolChange() }))
+                                .labelsHidden()
+                                .scaleEffect(0.8)
+                                .frame(width: 24, height: 24)
+                        }
+                        .fixedSize()
+
+                        Divider()
+                            .frame(height: 22)
+
+                        // Stroke width buttons
+                        HStack(spacing: 6) {
+                            ForEach(strokeWidths, id: \.width) { item in
+                                Button {
+                                    selectedWidth = item.width
+                                    notifyToolChange()
+                                } label: {
+                                    Circle()
+                                        .fill(selectedWidth == item.width ? Color.accentColor : Color.primary.opacity(0.45))
+                                        .frame(width: item.dotSize, height: item.dotSize)
+                                        .frame(width: 24, height: 24)
+                                        .background(
+                                            selectedWidth == item.width ?
+                                            Color.accentColor.opacity(0.2) : Color.clear
+                                        )
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(item.label)
+                            }
+                        }
+                        .fixedSize()
+                    }
+
+                    if showRuler {
+                        Divider()
+                            .frame(height: 22)
+
+                        // Lineal (Ruler) Toggle
+                        Button {
+                            rulerActive.toggle()
+                        } label: {
+                            Image(systemName: "ruler")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(width: 30, height: 28)
+                                .background(rulerActive ? Color.brown : Color(uiColor: .tertiarySystemFill))
+                                .foregroundColor(rulerActive ? Color.white : Color.primary)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(tool.rawValue)
+                        .accessibilityLabel("Lineal")
                     }
                 }
-                .fixedSize()
+                .padding(.horizontal, 14)
+                .padding(.vertical, 4)
+            }
+            .frame(height: 40)
 
-                Divider()
-                    .frame(height: 22)
+            Divider()
 
-                // Direct Smart Features (Formen, Handschrift & Mathe)
+            // Row 2: Erkennung (Formen/Mathe) & Import (Schaltplan/Dateien/
+            // Nextcloud/Kamera/Scannen/YouTube/WebView) — smarte Aktionen,
+            // unabhängig vom aktuell gewählten Zeichenwerkzeug.
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    // Formen Toggle
-                    Button {
-                        shapeSnapEnabled.toggle()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: shapeSnapEnabled ? "square.and.circle.fill" : "square.and.circle")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Formen")
-                                .font(.system(size: 12, weight: .bold))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .frame(height: 28)
-                        .background(shapeSnapEnabled ? Color.orange : Color(uiColor: .tertiarySystemFill))
-                        .foregroundColor(shapeSnapEnabled ? Color.white : Color.primary)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Formen-Korrektur")
-
-                    // Handschrift (OCR) Button
-                    Button {
-                        onTextRecognition?()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "text.viewfinder")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Handschrift")
-                                .font(.system(size: 12, weight: .bold))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .frame(height: 28)
-                        .background(Color.blue)
-                        .foregroundColor(Color.white)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Handschrift erkennen")
-
-                    // Mathe Rechner Button
-                    Button {
-                        onMathRecognition?()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "function")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Mathe")
-                                .font(.system(size: 12, weight: .bold))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .frame(height: 28)
-                        .background(Color.purple)
-                        .foregroundColor(Color.white)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Mathe berechnen")
-
-                    // Elektrotechnik (Schaltsymbole & Stromkreise)
-                    Button {
-                        onOpenCircuits?()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "bolt.badge.clock")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Schaltplan")
-                                .font(.system(size: 12, weight: .bold))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .frame(height: 28)
-                        .background(Color.yellow.opacity(0.95))
-                        .foregroundColor(Color.black)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Schaltsymbole und Stromkreise")
-
-                    // Dateien-App Import Button
-                    Button {
-                        onImportDocument?()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "folder.badge.plus")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Dateien")
-                                .font(.system(size: 12, weight: .bold))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .frame(height: 28)
-                        .background(Color.teal)
-                        .foregroundColor(Color.white)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Datei aus Dateien-App importieren")
-
-                    // Nextcloud Import Button
-                    Button {
-                        onImportNextcloud?()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "icloud.and.arrow.down")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Nextcloud")
-                                .font(.system(size: 12, weight: .bold))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .frame(height: 28)
-                        .background(Color.cyan)
-                        .foregroundColor(Color.white)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Datei aus Nextcloud importieren")
-
-                    // KI-Assistent Button (ChatGPT, Claude, Gemini)
-                    Button {
-                        onToggleAI?()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("KI")
-                                .font(.system(size: 12, weight: .bold))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .frame(height: 28)
-                        .background(Color.purple)
-                        .foregroundColor(Color.white)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("KI-Assistent Seitenleiste")
-
                     if activeTool == .lasso {
                         Button {
                             onPaste?()
@@ -889,100 +794,203 @@ struct PenToolbarView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Einfügen")
+
+                        Divider()
+                            .frame(height: 20)
                     }
-                }
-                .fixedSize()
 
-                if activeTool != .eraser && activeTool != .lasso && activeTool != .pan && activeTool != .textSelect {
-                    Divider()
-                        .frame(height: 22)
-
-                    // Quick Color palette
-                    HStack(spacing: 5) {
-                        ForEach(quickColors, id: \.self) { color in
-                            Button {
-                                selectedColor = color
-                                notifyToolChange()
-                            } label: {
-                                ZStack {
-                                    Circle()
-                                        .fill(color)
-                                        .frame(width: 20, height: 20)
-                                        .overlay(
-                                            Circle()
-                                                .stroke(Color.primary.opacity(0.35), lineWidth: 1)
-                                        )
-
-                                    if selectedColor == color {
-                                        Image(systemName: "checkmark")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundColor(color == .white || color == .yellow ? .black : .white)
-                                    }
-                                }
-                                .frame(width: 24, height: 24)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Farbe")
-                        }
-
-                        // Native ColorPicker for unlimited color options
-                        ColorPicker("", selection: Binding(get: { selectedColor }, set: { selectedColor = $0; notifyToolChange() }))
-                            .labelsHidden()
-                            .scaleEffect(0.8)
-                            .frame(width: 24, height: 24)
-                    }
-                    .fixedSize()
-
-                    Divider()
-                        .frame(height: 22)
-
-                    // Stroke width buttons
-                    HStack(spacing: 6) {
-                        ForEach(strokeWidths, id: \.width) { item in
-                            Button {
-                                selectedWidth = item.width
-                                notifyToolChange()
-                            } label: {
-                                Circle()
-                                    .fill(selectedWidth == item.width ? Color.accentColor : Color.primary.opacity(0.45))
-                                    .frame(width: item.dotSize, height: item.dotSize)
-                                    .frame(width: 24, height: 24)
-                                    .background(
-                                        selectedWidth == item.width ?
-                                        Color.accentColor.opacity(0.2) : Color.clear
-                                    )
-                                    .clipShape(Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(item.label)
-                        }
-                    }
-                    .fixedSize()
-                }
-
-                if showRuler {
-                    Divider()
-                        .frame(height: 22)
-
-                    // Lineal (Ruler) Toggle
+                    // Erkennung: Formen, Mathe
                     Button {
-                        rulerActive.toggle()
+                        shapeSnapEnabled.toggle()
                     } label: {
-                        Image(systemName: "ruler")
-                            .font(.system(size: 15, weight: .semibold))
-                            .frame(width: 30, height: 28)
-                            .background(rulerActive ? Color.brown : Color(uiColor: .tertiarySystemFill))
-                            .foregroundColor(rulerActive ? Color.white : Color.primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        HStack(spacing: 3) {
+                            Image(systemName: shapeSnapEnabled ? "square.and.circle.fill" : "square.and.circle")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Formen")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(shapeSnapEnabled ? Color.orange : Color(uiColor: .tertiarySystemFill))
+                        .foregroundColor(shapeSnapEnabled ? Color.white : Color.primary)
+                        .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Lineal")
+                    .accessibilityLabel("Formen-Korrektur")
+
+                    Button {
+                        onMathRecognition?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "function")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Mathe")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.purple)
+                        .foregroundColor(Color.white)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Mathe berechnen")
+
+                    Divider()
+                        .frame(height: 20)
+
+                    // Import: Schaltplan, Dateien, Nextcloud
+                    Button {
+                        onOpenCircuits?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "bolt.badge.clock")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Schaltplan")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.yellow.opacity(0.95))
+                        .foregroundColor(Color.black)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Schaltsymbole und Stromkreise")
+
+                    Button {
+                        onImportDocument?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "folder.badge.plus")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Dateien")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.teal)
+                        .foregroundColor(Color.white)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Datei aus Dateien-App importieren")
+
+                    Button {
+                        onImportNextcloud?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "icloud.and.arrow.down")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Nextcloud")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.cyan)
+                        .foregroundColor(Color.white)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Datei aus Nextcloud importieren")
+
+                    Button {
+                        onCamera?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "camera")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Kamera")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.pink)
+                        .foregroundColor(Color.white)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Foto mit Kamera aufnehmen")
+
+                    Button {
+                        onScanDocument?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "doc.viewfinder")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Scannen")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.indigo)
+                        .foregroundColor(Color.white)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dokument oder Tafel scannen")
+
+                    Button {
+                        onYouTube?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "play.rectangle")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("YouTube")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.red)
+                        .foregroundColor(Color.white)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("YouTube-Video einbetten")
+
+                    Button {
+                        onWebClipper?()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "globe.badge.chevron.backward")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("WebView")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.mint)
+                        .foregroundColor(Color.white)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Webseite & Screenshot mit OCR")
+                    // KI-Assistent ist bewusst nicht hier — der Toggle lebt oben in der
+                    // Navigationsleiste bei den anderen Modus-Schaltern (Suche, Dunkelmodus).
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 4)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 4)
+            .frame(height: 36)
         }
-        .frame(height: 40)
     }
 
     private func notifyToolChange() {

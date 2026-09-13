@@ -16,6 +16,10 @@ struct LiveCastSheetView: View {
                         errorCard(errorMsg)
                     }
 
+                    if liveCast.isPausedInBackground {
+                        pausedCard
+                    }
+
                     // Header Status Card
                     statusCard
 
@@ -83,6 +87,25 @@ struct LiveCastSheetView: View {
         }
         .padding(14)
         .background(Color.red.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - Paused (Background) Card
+
+    private var pausedCard: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "moon.zzz.fill")
+                .foregroundColor(.orange)
+                .font(.title3)
+
+            Text("Übertragung pausiert — die App ist im Hintergrund (z. B. Bildschirm manuell gesperrt). Läuft automatisch weiter, sobald die App wieder im Vordergrund ist.")
+                .font(.caption)
+                .foregroundColor(.primary)
+
+            Spacer()
+        }
+        .padding(14)
+        .background(Color.orange.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 

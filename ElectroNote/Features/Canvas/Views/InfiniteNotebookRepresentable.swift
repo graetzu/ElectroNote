@@ -48,6 +48,7 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
         if vm.triggerMathRecognition        { vm.triggerMathRecognition = false;        vc.recogniseMathSelection() }
         if vm.triggerPaste                  { vm.triggerPaste = false;                  vc.pasteFromClipboard() }
         if vm.triggerAddStickyNote          { vm.triggerAddStickyNote = false;          vc.addStickyNote() }
+        if let text = vm.pendingStickyNoteText { vm.pendingStickyNoteText = nil; vc.addStickyNote(text: text) }
         if vm.triggerAddBookmark            { vm.triggerAddBookmark   = false;          vc.addBookmark() }
         if vm.triggerShowBookmarks          { vm.triggerShowBookmarks = false;          vc.showBookmarkList() }
 

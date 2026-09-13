@@ -104,11 +104,32 @@ final class HandwritingSelectionOverlay: UIView {
                     return
                 }
             }
+            // Vorher: stilles Verwerfen ohne jede Rückmeldung, wenn die Auswahl zu
+            // klein war — sah für den Nutzer so aus, als würde nach dem Umkreisen
+            // einfach gar nichts passieren.
+            if !lassoPoints.isEmpty {
+                flashHint("Auswahl zu klein — bitte großzügiger umkreisen")
+            }
             lassoPoints.removeAll()
             setNeedsDisplay()
         default:
+            if !lassoPoints.isEmpty {
+                flashHint("Auswahl abgebrochen — bitte erneut umkreisen")
+            }
             lassoPoints.removeAll()
             setNeedsDisplay()
+        }
+    }
+
+    private func flashHint(_ message: String) {
+        let originalText = hintLabel.text
+        let originalColor = hintLabel.backgroundColor
+        hintLabel.text = message
+        hintLabel.backgroundColor = UIColor.systemRed.withAlphaComponent(0.92)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            guard let self = self else { return }
+            self.hintLabel.text = originalText
+            self.hintLabel.backgroundColor = originalColor
         }
     }
 
