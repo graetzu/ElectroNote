@@ -1272,21 +1272,25 @@ struct PAPNodeCardView: View {
     let isConnectSource: Bool
     var isConnectTarget: Bool = false
 
+    private var selectionColor: Color {
+        Color(red: 0.114, green: 0.357, blue: 0.710) // #1D5BB5 (Android matching)
+    }
+
     var body: some View {
         Group {
             if node.type == .comment {
                 ZStack(alignment: .leading) {
-                    CommentBracketShape()
+                    CommentBracketShape(hookWidth: 8)
                         .stroke(
-                            isConnectSource ? Color.purple : (isConnectTarget ? Color.blue : (isSelected ? Color.blue : node.type.strokeColor)),
-                            style: StrokeStyle(lineWidth: (isSelected || isConnectSource || isConnectTarget) ? 2.8 : 1.8)
+                            isConnectSource ? Color.purple : (isConnectTarget ? Color.blue : (isSelected ? selectionColor : node.type.strokeColor)),
+                            style: StrokeStyle(lineWidth: (isSelected || isConnectSource || isConnectTarget) ? 2.5 : 1.8)
                         )
 
                     Text(node.label)
                         .font(.system(size: 11, weight: .regular))
                         .multilineTextAlignment(.leading)
                         .foregroundColor(Color(red: 0.0, green: 0.0, blue: 0.545))
-                        .padding(.leading, 14)
+                        .padding(.leading, 12)
                         .padding(.trailing, 6)
                         .padding(.vertical, 4)
                         .lineLimit(6)
@@ -1301,9 +1305,23 @@ struct PAPNodeCardView: View {
                     // Crisp border
                     nodeShape
                         .stroke(
-                            isConnectSource ? Color.purple : (isConnectTarget ? Color.blue : (isSelected ? Color.blue : node.type.strokeColor)),
-                            style: StrokeStyle(lineWidth: (isSelected || isConnectSource || isConnectTarget) ? 3 : 1.8, dash: isConnectTarget ? [5, 3] : [])
+                            isConnectSource ? Color.purple : (isConnectTarget ? Color.blue : (isSelected ? selectionColor : node.type.strokeColor)),
+                            style: StrokeStyle(lineWidth: (isSelected || isConnectSource || isConnectTarget) ? 2.5 : 1.4, dash: isConnectTarget ? [5, 3] : [])
                         )
+
+                    // Subroutine double vertical stripes (DIN 66001 / PapDesigner)
+                    if node.type == .subroutine {
+                        HStack {
+                            Rectangle()
+                                .fill(node.type.strokeColor)
+                                .frame(width: 1.8)
+                            Spacer()
+                            Rectangle()
+                                .fill(node.type.strokeColor)
+                                .frame(width: 1.8)
+                        }
+                        .padding(.horizontal, 10)
+                    }
 
                     // IO Tag badge (E for Input, A for Output) in PapDesigner italic style
                     if node.type == .io && !node.tag.isEmpty {
@@ -1311,10 +1329,10 @@ struct PAPNodeCardView: View {
                             Spacer()
                             HStack {
                                 Text(node.tag)
-                                    .font(.system(size: 11, weight: .black, design: .default).italic())
+                                    .font(.system(size: 10, weight: .heavy, design: .default).italic())
                                     .foregroundColor(node.type.strokeColor)
-                                    .padding(.leading, 16)
-                                    .padding(.bottom, 3)
+                                    .padding(.leading, 14)
+                                    .padding(.bottom, 2)
                                 Spacer()
                             }
                         }
@@ -1322,10 +1340,10 @@ struct PAPNodeCardView: View {
 
                     // Node Text
                     Text(node.label)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .font(.system(size: 12.5, weight: .medium))
                         .multilineTextAlignment(.center)
                         .foregroundColor(Color(white: 0.12))
-                        .padding(.horizontal, node.type == .io ? 24 : (node.type == .decision ? 18 : 10))
+                        .padding(.horizontal, node.type == .io ? 22 : (node.type == .decision ? 16 : 8))
                         .padding(.vertical, 4)
                         .lineLimit(3)
                         .minimumScaleFactor(0.8)
@@ -1357,7 +1375,7 @@ struct PAPNodeCardView: View {
                 .offset(x: 8, y: -10)
             }
         }
-        .shadow(color: isConnectSource ? Color.purple.opacity(0.4) : (isSelected ? Color.blue.opacity(0.35) : Color.black.opacity(0.08)), radius: (isSelected || isConnectSource) ? 6 : 2, x: 0, y: 2)
+        .shadow(color: isConnectSource ? Color.purple.opacity(0.4) : (isSelected ? selectionColor.opacity(0.35) : Color.black.opacity(0.06)), radius: (isSelected || isConnectSource) ? 5 : 2, x: 0, y: 1)
     }
 
     var nodeShape: AnyShape {
@@ -1557,6 +1575,100 @@ struct PAPDrawingCanvasView: UIViewRepresentable {
     }
 }
 
+// MARK: - Mini Shape Palette Preview (Android-Style)
+
+struct PAPMiniShapeView: View {
+    let type: PAPShapeType
+
+    var body: some View {
+        ZStack {
+            miniShape
+                .fill(type.fillColor)
+            miniShape
+                .stroke(type.strokeColor, lineWidth: 1.2)
+
+            if type == .subroutine {
+                HStack {
+                    Rectangle().fill(type.strokeColor).frame(width: 1.5)
+                    Spacer()
+                    Rectangle().fill(type.strokeColor).frame(width: 1.5)
+                }
+                .padding(.horizontal, 5)
+            } else if type == .io {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Text("E")
+                            .font(.system(size: 8, weight: .bold).italic())
+                            .foregroundColor(type.strokeColor)
+                            .padding(.leading, 5)
+                            .padding(.bottom, 1)
+                        Spacer()
+                    }
+                }
+            }
+        }
+        .frame(width: 52, height: 26)
+    }
+
+    var miniShape: AnyShape {
+        switch type {
+        case .start, .end:    return AnyShape(Capsule())
+        case .process:        return AnyShape(RoundedRectangle(cornerRadius: 3))
+        case .io:             return AnyShape(ParallelogramShape())
+        case .decision:       return AnyShape(DiamondShape())
+        case .subroutine:     return AnyShape(RoundedRectangle(cornerRadius: 3))
+        case .comment:        return AnyShape(CommentBracketShape(hookWidth: 6))
+        case .connector:      return AnyShape(Circle())
+        }
+    }
+}
+
+// MARK: - Template Picker Dialog (PapDesigner Tutorial 1)
+
+struct PAPTemplatePickerView: View {
+    var onSelect: (PAPTemplate) -> Void
+    var onDismiss: () -> Void
+
+    let templates: [(template: PAPTemplate, title: String, subtitle: String)] = [
+        (.tutorial1, "Ablaufplan - Was ist das?", "Tutorial 1 (Seite 1): Grundelemente & Erklärungen"),
+        (.tutorial2, "Ablaufplan - Beispiel 1", "Tutorial 1 (Seite 2): EVA-Prinzip mit Mittelwert"),
+        (.tutorial3, "Ablaufplan - Beispiel 2", "Tutorial 1 (Seite 3): Installationsablauf mit Verzweigungen & Abbruchbus"),
+        (.empty, "Leerer Ablaufplan", "Neuer Startblock mit DIN-Schriftfeld")
+    ]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(templates, id: \.template.id) { item in
+                    Button {
+                        onSelect(item.template)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title)
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            Text(item.subtitle)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("PapDesigner Vorlagen (Tutorial 1)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Schließen") { onDismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
 // MARK: - Main Designer View
 
 struct PAPDesignerView: View {
@@ -1584,27 +1696,40 @@ struct PAPDesignerView: View {
     @State private var editText: String = ""
     @State private var selectedEdgePort: PAPBranchPort = .bottom
     @State private var showTextEditor: Bool = false
+    @State private var showTemplatePicker: Bool = false
     @State private var selectedTag: String = "E"
     @State private var showDistanceSettings: Bool = false
 
     var body: some View {
         NavigationStack {
             HStack(spacing: 0) {
-                // Left Toolbar / Shape & Template Palette
+                // Left Toolbar / Shape Palette (Kompakt 76pt wie auf Android)
                 leftPalette
-                    .frame(width: 130)
-                    .background(Color(.systemGroupedBackground))
+                    .frame(width: 76)
+                    .background(Color(.secondarySystemBackground))
 
                 Divider()
 
                 // Interactive Canvas
                 mainCanvas
             }
-            .navigationTitle("PAP-Designer (DIN 66001)")
+            .navigationTitle(vm.diagramName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .sheet(isPresented: $showTextEditor) {
                 textEditorSheet
+            }
+            .sheet(isPresented: $showTemplatePicker) {
+                PAPTemplatePickerView(
+                    onSelect: { template in
+                        vm.loadTemplate(template)
+                        vm.save()
+                        showTemplatePicker = false
+                    },
+                    onDismiss: {
+                        showTemplatePicker = false
+                    }
+                )
             }
         }
         .onAppear {
@@ -1617,74 +1742,11 @@ struct PAPDesignerView: View {
         }
     }
 
-    // MARK: - Left Palette
+    // MARK: - Left Palette (Schlanke Formenleiste wie auf Android)
 
     var leftPalette: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 12) {
-                // Vorlagen
-                Menu {
-                    ForEach(PAPTemplate.allCases) { t in
-                        Button {
-                            vm.loadTemplate(t)
-                        } label: {
-                            Label(t.rawValue, systemImage: t.icon)
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "square.grid.2x2")
-                        Text("Vorlagen")
-                            .font(.caption.bold())
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.blue)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .padding(.horizontal, 8)
-                .padding(.top, 10)
-
-                Divider().padding(.horizontal, 4)
-
-                // Verbindungen & Sprünge ohne Baustein
-                Text("Verbindungen")
-                    .font(.caption2.bold())
-                    .foregroundColor(.secondary)
-
-                Button {
-                    vm.connectMode.toggle()
-                    if !vm.connectMode {
-                        vm.connectFromId = nil
-                    }
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: vm.connectMode ? "link.circle.fill" : "link")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(vm.connectMode ? .white : .purple)
-                        Text(vm.connectMode ? "Verbinden aktiv" : "Linie verbinden")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(vm.connectMode ? .white : .primary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .background(vm.connectMode ? Color.purple : Color.purple.opacity(0.12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.purple.opacity(0.4), lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 8)
-
-                Divider().padding(.horizontal, 4)
-
-                Text("Formen einfügen")
-                    .font(.caption2.bold())
-                    .foregroundColor(.secondary)
-
+            VStack(spacing: 6) {
                 ForEach(PAPShapeType.allCases) { type in
                     Button {
                         if let selected = vm.selectedNode {
@@ -1693,48 +1755,25 @@ struct PAPDesignerView: View {
                             vm.addNode(type: type)
                         }
                     } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: type.icon)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(type.strokeColor)
+                        VStack(spacing: 3) {
+                            PAPMiniShapeView(type: type)
                             Text(type.title)
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: 9.5, weight: .medium))
                                 .foregroundColor(.primary)
-                                .multilineTextAlignment(.center)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 7)
-                        .background(type.fillColor.opacity(0.55))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(type.strokeColor.opacity(0.4), lineWidth: 1)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 3)
+                        .background(Color.clear)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .padding(.horizontal, 8)
                 }
-
-                Divider().padding(.horizontal, 4)
-
-                // Grid Guides Toggle
-                Button {
-                    vm.showGridGuides.toggle()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: vm.showGridGuides ? "grid" : "grid.circle")
-                        Text(vm.showGridGuides ? "Spalten: An" : "Spalten: Aus")
-                            .font(.caption2)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-                    .background(Color(.systemFill))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 8)
             }
-            .padding(.bottom, 20)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 4)
         }
     }
 
@@ -1754,7 +1793,7 @@ struct PAPDesignerView: View {
     }
 
     var mainCanvas: some View {
-        ZStack(alignment: .top) {
+        ZStack(alignment: .bottom) {
             ScrollView([.horizontal, .vertical], showsIndicators: true) {
                 ZStack(alignment: .topLeading) {
                     // Grid & Column Background
@@ -1787,11 +1826,6 @@ struct PAPDesignerView: View {
                         diagramName: vm.diagramName
                     )
                     .position(x: titleBlockX, y: titleBlockY)
-
-                    // Quick Action HUD on Selected Node
-                    if let selected = vm.selectedNode, !isDrawingMode {
-                        quickActionHUD(for: selected)
-                    }
                 }
                 .frame(width: 1600, height: 2600)
                 .contentShape(Rectangle())
@@ -1802,50 +1836,15 @@ struct PAPDesignerView: View {
                 }
             }
 
-            // Connect Mode Banner
-            if vm.connectMode {
-                HStack(spacing: 8) {
-                    Image(systemName: "link")
-                        .font(.system(size: 14, weight: .bold))
-
-                    if let fromId = vm.connectFromId, let fromNode = vm.nodes.first(where: { $0.id == fromId }) {
-                        Text("Start: „\(fromNode.label)“ ➔ Zielblock antippen")
-                            .font(.subheadline.bold())
-
-                        Button("Start ändern") {
-                            vm.connectFromId = nil
-                        }
-                        .font(.caption.bold())
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.white.opacity(0.25))
-                        .clipShape(Capsule())
-                    } else {
-                        Text("1. Start-Block antippen (Verbindung / Sprung ohne Baustein)")
-                            .font(.subheadline.bold())
-                    }
-
-                    Button("Abbrechen") {
-                        vm.connectMode = false
-                        vm.connectFromId = nil
-                    }
-                    .font(.caption.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.25))
-                    .clipShape(Capsule())
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.purple)
-                .foregroundColor(.white)
-                .clipShape(Capsule())
-                .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
-                .padding(.top, 12)
-            }
-
             // Transparent Drawing Layer
             PAPDrawingCanvasView(canvasViewRef: $canvasView, isDrawingMode: isDrawingMode)
+
+            // Connect Mode Banner (At top)
+            if vm.connectMode {
+                connectModeBanner
+                    .padding(.top, 12)
+                    .frame(maxHeight: .infinity, alignment: .top)
+            }
 
             // Pen Toolbar (when drawing mode is active)
             if isDrawingMode {
@@ -1861,8 +1860,56 @@ struct PAPDesignerView: View {
                     canvasView?.tool = newTool
                 }
                 .padding(.top, 8)
+                .frame(maxHeight: .infinity, alignment: .top)
+            }
+
+            // Floating Action Bar on Selected Node (Unten fixiert wie auf Android!)
+            if let selected = vm.selectedNode, !isDrawingMode && !vm.connectMode {
+                selectedNodeActionBar(for: selected)
+                    .padding(.bottom, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+    }
+
+    var connectModeBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "link")
+                .font(.system(size: 14, weight: .bold))
+
+            if let fromId = vm.connectFromId, let fromNode = vm.nodes.first(where: { $0.id == fromId }) {
+                Text("Start: „\(fromNode.label)“ ➔ Zielblock antippen")
+                    .font(.subheadline.bold())
+
+                Button("Start ändern") {
+                    vm.connectFromId = nil
+                }
+                .font(.caption.bold())
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.white.opacity(0.25))
+                .clipShape(Capsule())
+            } else {
+                Text("1. Start-Block antippen (Verbindung / Sprung ohne Baustein)")
+                    .font(.subheadline.bold())
+            }
+
+            Button("Abbrechen") {
+                vm.connectMode = false
+                vm.connectFromId = nil
+            }
+            .font(.caption.bold())
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.white.opacity(0.25))
+            .clipShape(Capsule())
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.purple)
+        .foregroundColor(.white)
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
     }
 
     // MARK: - Grid Background with Column Guides
@@ -1980,253 +2027,116 @@ struct PAPDesignerView: View {
             )
     }
 
-    // MARK: - Quick Action HUD (Bedienung wie PAP Designer)
+    // MARK: - Floating Action Bar on Selected Node (Ergonomie & Design wie auf Android)
 
-    func quickActionHUD(for node: PAPNode) -> some View {
-        let pos = CGPoint(x: node.cx, y: node.cy + node.type.defaultHeight / 2 + 30)
+    func selectedNodeActionBar(for node: PAPNode) -> some View {
+        HStack(spacing: 8) {
+            Text(node.label.isEmpty ? node.type.title : node.label)
+                .font(.system(size: 13, weight: .bold))
+                .lineLimit(1)
+                .padding(.leading, 8)
+                .padding(.trailing, 4)
 
-        return HStack(spacing: 6) {
-            if node.type == .decision {
-                // 1. Straight Down (Ja)
-                Button {
-                    vm.insertBelow(fromNode: node, type: .process, label: "Ja-Zweig")
-                } label: {
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.down")
-                        Text("Ja")
-                    }
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.green)
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-                }
-
-                // 2. Rechts (Menü für nach unten & nach oben)
-                Menu {
-                    Button {
-                        vm.branchRight(fromDecision: node, type: .process, label: "Nein-Zweig", edgeLabel: "nein", goUp: false)
-                    } label: {
-                        Label("Rechts nach unten (↓)", systemImage: "arrow.down.right")
-                    }
-
-                    Button {
-                        vm.branchRight(fromDecision: node, type: .process, label: "Schleife", edgeLabel: "nein", goUp: true)
-                    } label: {
-                        Label("Rechts nach oben (↑ Schleife)", systemImage: "arrow.up.right")
-                    }
-
-                    Divider()
-
-                    Button {
-                        vm.connectMode = true
-                        vm.connectFromId = node.id
-                    } label: {
-                        Label("Rechts zu bestehendem Block verbinden…", systemImage: "arrow.turn.up.right")
-                    }
-                } label: {
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.right")
-                        Text("Rechts")
-                    }
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.orange)
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-                }
-
-                // 3. Links (Menü für nach unten & nach oben)
-                Menu {
-                    Button {
-                        vm.branchLeft(fromDecision: node, type: .process, label: "Nein-Zweig", edgeLabel: "nein", goUp: false)
-                    } label: {
-                        Label("Links nach unten (↓)", systemImage: "arrow.down.left")
-                    }
-
-                    Button {
-                        vm.branchLeft(fromDecision: node, type: .process, label: "Schleife", edgeLabel: "nein", goUp: true)
-                    } label: {
-                        Label("Links nach oben (↑ Schleife)", systemImage: "arrow.up.left")
-                    }
-
-                    Divider()
-
-                    Button {
-                        vm.connectMode = true
-                        vm.connectFromId = node.id
-                    } label: {
-                        Label("Links zu bestehendem Block verbinden…", systemImage: "arrow.turn.up.left")
-                    }
-                } label: {
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.left")
-                        Text("Links")
-                    }
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.orange.opacity(0.95))
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-                }
-
-                // 4. Schnelltasten für Schleife nach oben
-                Button {
-                    vm.branchRight(fromDecision: node, type: .process, label: "Schleife", edgeLabel: "nein", goUp: true)
-                } label: {
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.up.right")
-                        Text("↗")
-                    }
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 5)
-                    .background(Color.purple)
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-                }
-                .accessibilityLabel("Rechts nach oben abzweigen")
-
-                Button {
-                    vm.branchLeft(fromDecision: node, type: .process, label: "Schleife", edgeLabel: "nein", goUp: true)
-                } label: {
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.up.left")
-                        Text("↖")
-                    }
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 5)
-                    .background(Color.purple)
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-                }
-                .accessibilityLabel("Links nach oben abzweigen")
-            } else {
-                // Standard block: Insert menu (below and above)
-                Menu {
-                    Section("Darunter einfügen (↓)") {
-                        Button { vm.insertBelow(fromNode: node, type: .process, label: "Anweisung") } label: {
-                            Label("Prozess (Anweisung)", systemImage: "rectangle")
-                        }
-                        Button { vm.insertBelow(fromNode: node, type: .io, label: "Eingabe", tag: "E") } label: {
-                            Label("Eingabe (E)", systemImage: "arrow.down.right.and.arrow.up.left")
-                        }
-                        Button { vm.insertBelow(fromNode: node, type: .io, label: "Ausgabe", tag: "A") } label: {
-                            Label("Ausgabe (A)", systemImage: "arrow.up.right.and.arrow.down.left")
-                        }
-                        Button { vm.insertBelow(fromNode: node, type: .decision, label: "Bedingung?") } label: {
-                            Label("Verzweigung (Raute)", systemImage: "diamond")
-                        }
-                        Button { vm.insertBelow(fromNode: node, type: .subroutine, label: "Unterprogramm()") } label: {
-                            Label("Unterprogramm", systemImage: "rectangle.split.3x1")
-                        }
-                        Button { vm.insertBelow(fromNode: node, type: .end, label: "Ende") } label: {
-                            Label("Ende / Stopp", systemImage: "oval")
-                        }
-                    }
-
-                    Section("Darüber einfügen (↑)") {
-                        Button { vm.insertAbove(fromNode: node, type: .process, label: "Anweisung") } label: {
-                            Label("Prozess darüber", systemImage: "rectangle")
-                        }
-                        Button { vm.insertAbove(fromNode: node, type: .io, label: "Eingabe", tag: "E") } label: {
-                            Label("Eingabe darüber", systemImage: "arrow.down.right.and.arrow.up.left")
-                        }
-                        Button { vm.insertAbove(fromNode: node, type: .decision, label: "Bedingung?") } label: {
-                            Label("Verzweigung darüber", systemImage: "diamond")
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "plus.circle.fill")
-                        Text("Einfügen")
-                    }
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-                }
-            }
-
-            // Verbinden / Überspringen Menü (Ohne neuen Baustein)
-            Menu {
-                Section("Verbindungs-Modus") {
-                    Button {
-                        vm.connectMode = true
-                        vm.connectFromId = node.id
-                    } label: {
-                        Label("Frei mit Zielblock verbinden…", systemImage: "link")
-                    }
-                }
-
-                let otherNodes = vm.nodes.filter { $0.id != node.id }
-                if !otherNodes.isEmpty {
-                    Section("Direktsprung zu Block (ohne Baustein)") {
-                        ForEach(otherNodes) { target in
-                            Button {
-                                vm.connect(fromId: node.id, toId: target.id)
-                            } label: {
-                                let dirHint: String = {
-                                    if target.row > node.row { return "↓ Schritt überspringen nach Zeile \(target.row + 1)" }
-                                    else if target.row < node.row { return "↑ Rücksprung nach Zeile \(target.row + 1)" }
-                                    else { return "→ Quersprung Spalte \(target.col)" }
-                                }()
-                                Label("\(target.label.isEmpty ? target.type.title : target.label) (\(dirHint))", systemImage: target.type.icon)
-                            }
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 2) {
-                    Image(systemName: "link")
-                    Text("Verbinden")
-                }
-                .font(.caption2.bold())
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(Color.purple)
-                .foregroundColor(.white)
-                .clipShape(Capsule())
-            }
-
-            // Edit
             Button {
                 openTextEditor(for: node)
             } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "pencil")
-                    Text("Text")
-                }
-                .font(.caption2.bold())
-                .padding(.horizontal, 7)
-                .padding(.vertical, 5)
-                .background(Color(.systemGray5))
-                .clipShape(Capsule())
+                Text("Text")
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
             }
 
-            // Delete
+            if node.type == .decision {
+                Button {
+                    vm.branchRight(fromDecision: node, type: .process, label: "Anweisung", edgeLabel: "nein", goUp: false)
+                } label: {
+                    Text("+ Nein (Rechts)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.orange)
+                        .foregroundColor(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+
+                Button {
+                    vm.insertBelow(fromNode: node, type: .process, label: "Anweisung")
+                } label: {
+                    Text("+ Ja (Unten)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.green)
+                        .foregroundColor(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+            } else {
+                Button {
+                    vm.insertBelow(fromNode: node, type: .process, label: "Anweisung")
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.down")
+                        Text("Unten")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.green)
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+            }
+
+            Button {
+                vm.connectMode = true
+                vm.connectFromId = node.id
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "link")
+                    Text("Verbinden")
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.purple.opacity(0.15))
+                .foregroundColor(.purple)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
             Button(role: .destructive) {
                 vm.deleteSelected()
             } label: {
-                Image(systemName: "trash")
-                    .font(.caption2.bold())
+                Text("Löschen")
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.red.opacity(0.12))
                     .foregroundColor(.red)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+            Button {
+                vm.selectedId = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.secondary)
                     .padding(6)
-                    .background(Color.red.opacity(0.15))
+                    .background(Color(.systemGray5))
                     .clipShape(Circle())
             }
+            .padding(.trailing, 4)
         }
-        .padding(4)
-        .background(Color(.systemBackground).opacity(0.95))
-        .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
-        .position(pos)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color(.systemBackground))
+                .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+        )
     }
 
     // MARK: - Edge View
@@ -2270,7 +2180,15 @@ struct PAPDesignerView: View {
     @ToolbarContentBuilder
     var toolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .navigationBarLeading) {
-            Button("Abbrechen") { dismiss() }
+            Button {
+                vm.save()
+                dismiss()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                    Text("Zurück")
+                }
+            }
 
             Button {
                 if let cv = canvasView, cv.undoManager?.canUndo == true {
@@ -2299,15 +2217,40 @@ struct PAPDesignerView: View {
 
         ToolbarItemGroup(placement: .navigationBarTrailing) {
             Button {
+                showTemplatePicker = true
+            } label: {
+                Image(systemName: "sparkles")
+            }
+            .accessibilityLabel("Vorlagen")
+
+            Button {
+                vm.connectMode.toggle()
+                if !vm.connectMode {
+                    vm.connectFromId = nil
+                }
+            } label: {
+                Image(systemName: vm.connectMode ? "link.circle.fill" : "link")
+                    .foregroundColor(vm.connectMode ? .purple : .primary)
+            }
+            .accessibilityLabel("Verbindungs-Modus")
+
+            Button {
                 showDistanceSettings.toggle()
             } label: {
                 Image(systemName: "slider.horizontal.3")
             }
             .popover(isPresented: $showDistanceSettings) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Verbindungsabstand")
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Einstellungen")
                         .font(.headline)
-                    Text("Wie weit Verbindungen von Bausteinen ausweichen, bevor sie abbiegen. Größerer Abstand vermeidet Überschneidungen bei dicht stehenden Bausteinen.")
+
+                    Toggle("Spaltenlinien anzeigen", isOn: $vm.showGridGuides)
+
+                    Divider()
+
+                    Text("Verbindungsabstand")
+                        .font(.subheadline.bold())
+                    Text("Abstand für rechtwinklige Linien vor dem Abbiegen:")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     HStack {
@@ -2318,26 +2261,34 @@ struct PAPDesignerView: View {
                     Slider(value: $vm.bypassDistance, in: 16...80, step: 2)
                 }
                 .padding()
-                .frame(width: 300)
+                .frame(width: 290)
             }
-            .accessibilityLabel("Verbindungsabstand einstellen")
+            .accessibilityLabel("Einstellungen")
 
             Button {
                 isDrawingMode.toggle()
             } label: {
-                Label(isDrawingMode ? "Notizen aktiv" : "Notizen",
-                      systemImage: isDrawingMode ? "pencil.and.scribble" : "pencil")
+                Image(systemName: isDrawingMode ? "pencil.and.scribble" : "pencil")
             }
             .tint(isDrawingMode ? .blue : .primary)
+            .accessibilityLabel("Notizen / Freihand")
 
-            Button("Einfügen") {
-                if let img = vm.renderToImage(drawing: canvasView?.drawing) {
-                    onInsert?(img)
+            if let onInsert = onInsert {
+                Button("Einfügen") {
+                    if let img = vm.renderToImage(drawing: canvasView?.drawing) {
+                        onInsert(img)
+                        dismiss()
+                    }
+                }
+                .bold()
+                .disabled(vm.nodes.isEmpty)
+            } else {
+                Button("Fertig") {
+                    vm.save()
                     dismiss()
                 }
+                .bold()
             }
-            .bold()
-            .disabled(vm.nodes.isEmpty)
         }
     }
 
@@ -2363,17 +2314,25 @@ struct PAPDesignerView: View {
         NavigationStack {
             Form {
                 if let node = editingNode {
-                    Section("Block-Beschriftung") {
-                        TextField("Text eingeben", text: $editText)
+                    Section("Text & Eigenschaften") {
+                        TextField("Text eingeben", text: $editText, axis: .vertical)
+                            .lineLimit(2...6)
                             .font(.body)
 
                         if node.type == .io {
-                            Picker("Typ", selection: $selectedTag) {
-                                Text("Eingabe (E)").tag("E")
-                                Text("Ausgabe (A)").tag("A")
+                            Picker("Kennzeichnung", selection: $selectedTag) {
+                                Text("✓ Eingabe (E)").tag("E")
+                                Text("✓ Ausgabe (A)").tag("A")
                                 Text("Ohne Kennzeichnung").tag("")
                             }
                             .pickerStyle(.segmented)
+                        }
+                    }
+
+                    Section {
+                        Button("Block löschen", role: .destructive) {
+                            vm.deleteSelected()
+                            showTextEditor = false
                         }
                     }
                 } else if let _ = editingEdge {
@@ -2410,7 +2369,7 @@ struct PAPDesignerView: View {
                     }
                 }
             }
-            .navigationTitle(editingNode != nil ? "Block bearbeiten" : "Verbindung bearbeiten")
+            .navigationTitle(editingNode != nil ? "Text & Eigenschaften bearbeiten" : "Verbindung bearbeiten")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -2422,11 +2381,14 @@ struct PAPDesignerView: View {
                             vm.pushUndo()
                             vm.nodes[idx].label = editText
                             if n.type == .io { vm.nodes[idx].tag = selectedTag }
+                            vm.save()
                         } else if let e = editingEdge {
                             vm.updateEdge(id: e.id, label: editText, port: selectedEdgePort)
+                            vm.save()
                         }
                         showTextEditor = false
                     }
+                    .bold()
                 }
             }
         }
