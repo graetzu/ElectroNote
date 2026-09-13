@@ -16,6 +16,58 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
 
     private var stickyNoteViews: [UUID: StickyNoteView] = [:]
 
+    var folderURL: URL? = nil {
+        didSet {
+            loadSavedDrawing()
+        }
+    }
+
+    private var saveTask: Task<Void, Never>?
+
+    private func loadSavedDrawing() {
+        guard let folderURL = folderURL else { return }
+        let pkURL = folderURL.appendingPathComponent("drawing.pkdrawing")
+        let jsonURL = folderURL.appendingPathComponent("drawing.json")
+
+        let pkExists = FileManager.default.fileExists(atPath: pkURL.path)
+        let jsonExists = FileManager.default.fileExists(atPath: jsonURL.path)
+
+        if jsonExists {
+            let jsonDate = (try? jsonURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+            let pkDate = (try? pkURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+
+            if !pkExists || jsonDate > pkDate.addingTimeInterval(1.0) {
+                if let drawing = PencilKitBridge.loadDrawing(from: jsonURL) {
+                    canvasView.drawing = drawing
+                    try? drawing.dataRepresentation().write(to: pkURL, options: .atomic)
+                    return
+                }
+            }
+        }
+
+        if let data = try? Data(contentsOf: pkURL), let drawing = try? PKDrawing(data: data) {
+            canvasView.drawing = drawing
+        }
+    }
+
+    func saveDrawing() {
+        guard let folderURL = folderURL else { return }
+        try? FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        let pkURL = folderURL.appendingPathComponent("drawing.pkdrawing")
+        let jsonURL = folderURL.appendingPathComponent("drawing.json")
+        try? canvasView.drawing.dataRepresentation().write(to: pkURL, options: .atomic)
+        PencilKitBridge.saveDrawing(canvasView.drawing, to: jsonURL)
+    }
+
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled, let self = self else { return }
+            await MainActor.run { self.saveDrawing() }
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         let style: UIUserInterfaceStyle = darkDrawingMode ? .dark : .light
@@ -23,6 +75,7 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
         view.overrideUserInterfaceStyle = style
         view.backgroundColor = darkDrawingMode ? UIColor(white: 0.12, alpha: 1) : .white
         setupCanvas()
+        loadSavedDrawing()
     }
 
     override func viewDidLayoutSubviews() {
@@ -65,6 +118,7 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
     // MARK: - Shape Snapping
 
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+        scheduleSave()
         guard shapeSnapEnabled, !isSnappingShape else { return }
         scheduleShapeSnap()
     }
@@ -269,6 +323,7 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
 
 struct WhiteboardRepresentable: UIViewControllerRepresentable {
     @Binding var vcRef: WhiteboardViewController?
+    var folderURL: URL? = nil
     let background: BackgroundStyle
     let darkDrawingMode: Bool
     let rulerActive: Bool
@@ -276,6 +331,7 @@ struct WhiteboardRepresentable: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> WhiteboardViewController {
         let vc = WhiteboardViewController()
+        vc.folderURL = folderURL
         vc.shapeSnapEnabled = shapeSnapEnabled
         vc.refreshBackground(style: background, dark: darkDrawingMode)
         let initialColor: Color = darkDrawingMode ? .white : .black
@@ -286,6 +342,9 @@ struct WhiteboardRepresentable: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ vc: WhiteboardViewController, context: Context) {
+        if vc.folderURL != folderURL {
+            vc.folderURL = folderURL
+        }
         vc.refreshBackground(style: background, dark: darkDrawingMode)
         if vc.canvasView.isRulerActive != rulerActive {
             vc.canvasView.isRulerActive = rulerActive
@@ -299,7 +358,8 @@ struct WhiteboardRepresentable: UIViewControllerRepresentable {
 // MARK: - Whiteboard SwiftUI View
 
 struct WhiteboardView: View {
-    let onInsert: (UIImage) -> Void
+    var item: DocumentItem? = nil
+    var onInsert: ((UIImage) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
     @State private var activeTool: CanvasToolType = .pen
@@ -336,6 +396,7 @@ struct WhiteboardView: View {
 
                 WhiteboardRepresentable(
                     vcRef: $vc,
+                    folderURL: item?.path,
                     background: background,
                     darkDrawingMode: darkDrawingMode,
                     rulerActive: rulerActive,
@@ -403,7 +464,7 @@ struct WhiteboardView: View {
 
                     Button {
                         if let img = vc?.exportImage(withBackground: background != .blank || darkDrawingMode) {
-                            onInsert(img)
+                            onInsert?(img)
                             dismiss()
                         }
                     } label: {
@@ -414,6 +475,9 @@ struct WhiteboardView: View {
                         .font(.system(size: 14, weight: .bold))
                     }
                 }
+            }
+            .onDisappear {
+                vc?.saveDrawing()
             }
             .onChange(of: darkDrawingMode) { newDark in
                 if newDark && selectedColor == .black {

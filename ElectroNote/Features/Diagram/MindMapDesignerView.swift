@@ -38,6 +38,25 @@ enum BubbleShape: String, CaseIterable, Identifiable {
         case .diamond:   return 110
         }
     }
+
+    var shapeKind: String {
+        switch self {
+        case .circle:    return "CIRCLE"
+        case .oval:      return "OVAL"
+        case .rectangle: return "RECTANGLE"
+        case .diamond:   return "DIAMOND"
+        }
+    }
+
+    static func fromShapeKind(_ kind: String) -> BubbleShape {
+        switch kind.uppercased() {
+        case "CIRCLE":    return .circle
+        case "OVAL":      return .oval
+        case "RECTANGLE": return .rectangle
+        case "DIAMOND":   return .diamond
+        default:          return .circle
+        }
+    }
 }
 
 // MARK: - MindMap Models
@@ -87,12 +106,89 @@ final class MindMapDesignerViewModel: ObservableObject {
     private var undoStack: [([MindMapNode], [MindMapEdge])] = []
     private var redoStack: [([MindMapNode], [MindMapEdge])] = []
 
+    private var store: DiagramDocumentStore? = nil
+    private var diagramId: String = UUID().uuidString
+    @Published var diagramName: String = "MindMap"
+    private var createdAt: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
+
+    func configure(folderURL: URL) {
+        let store = DiagramDocumentStore(folderURL: folderURL)
+        self.store = store
+
+        if let doc = store.load() {
+            self.diagramId = doc.id
+            self.diagramName = doc.name
+            self.createdAt = doc.createdAt
+            self.nodes = doc.nodes.compactMap { dto in
+                let shape = BubbleShape.fromShapeKind(dto.shape)
+                let id = UUID(uuidString: dto.id) ?? UUID()
+                let color = dto.color != nil ? Color(uiColor: UIColor(argbInt: dto.color!)) : .blue
+                let cx = CGFloat(dto.x) + shape.defaultWidth / 2
+                let cy = CGFloat(dto.y) + shape.defaultHeight / 2
+                return MindMapNode(id: id, shape: shape, label: dto.text, color: color, cx: cx, cy: cy)
+            }
+            self.edges = doc.connections.compactMap { dto in
+                guard let fromId = UUID(uuidString: dto.fromNodeId),
+                      let toId = UUID(uuidString: dto.toNodeId) else { return nil }
+                let id = UUID(uuidString: dto.id) ?? UUID()
+                return MindMapEdge(id: id, fromId: fromId, toId: toId, label: dto.label)
+            }
+            undoStack.removeAll()
+            redoStack.removeAll()
+        } else {
+            let folderName = folderURL.deletingPathExtension().lastPathComponent
+            if !folderName.isEmpty {
+                self.diagramName = folderName
+            }
+            save()
+        }
+    }
+
+    func save() {
+        guard let store = self.store else { return }
+        let nodeDTOs = nodes.map { n in
+            let uiColor = UIColor(n.color)
+            return DiagramNodeDTO(
+                id: n.id.uuidString,
+                x: Double(n.cx - n.shape.defaultWidth / 2),
+                y: Double(n.cy - n.shape.defaultHeight / 2),
+                shape: n.shape.shapeKind,
+                text: n.label,
+                color: uiColor.argbInt64,
+                col: nil,
+                row: nil,
+                tag: nil
+            )
+        }
+        let edgeDTOs = edges.map { e in
+            DiagramConnectionDTO(
+                id: e.id.uuidString,
+                fromNodeId: e.fromId.uuidString,
+                toNodeId: e.toId.uuidString,
+                label: e.label,
+                fromPort: "BOTTOM"
+            )
+        }
+        let doc = DiagramDocumentDTO(
+            id: diagramId,
+            name: diagramName,
+            type: "mindmap",
+            createdAt: createdAt,
+            updatedAt: Int64(Date().timeIntervalSince1970 * 1000),
+            nodes: nodeDTOs,
+            connections: edgeDTOs,
+            bypassDistancePx: nil
+        )
+        store.save(doc)
+    }
 
     func pushUndo() {
         undoStack.append((nodes, edges))
         redoStack.removeAll()
+        save()
     }
 
     func undo() {
@@ -102,6 +198,7 @@ final class MindMapDesignerViewModel: ObservableObject {
         edges = prev.1
         selectedId = nil
         connectFromId = nil
+        save()
     }
 
     func redo() {
@@ -109,6 +206,7 @@ final class MindMapDesignerViewModel: ObservableObject {
         undoStack.append((nodes, edges))
         nodes = next.0
         edges = next.1
+        save()
     }
 
     func addNode(_ shape: BubbleShape, color: Color, near anchor: CGPoint) {
@@ -345,8 +443,9 @@ struct MindMapDrawingCanvasRepresentable: UIViewRepresentable {
 // MARK: - Main MindMap Designer View
 
 struct MindMapDesignerView: View {
+    var item: DocumentItem? = nil
+    var onInsert: ((UIImage) -> Void)? = nil
     @StateObject private var vm = MindMapDesignerViewModel()
-    let onInsert: (UIImage) -> Void
     @Environment(\.dismiss) private var dismiss
 
     @State private var canvasView: MindMapCanvasView?
@@ -385,6 +484,14 @@ struct MindMapDesignerView: View {
                 Button("OK") { applyLabelEdit() }
                 Button("Abbrechen", role: .cancel) {}
             }
+        }
+        .onAppear {
+            if let item = item {
+                vm.configure(folderURL: item.path)
+            }
+        }
+        .onDisappear {
+            vm.save()
         }
     }
 
@@ -634,7 +741,7 @@ struct MindMapDesignerView: View {
 
             Button("Einfügen") {
                 if let img = vm.renderToImage(drawing: canvasView?.drawing) {
-                    onInsert(img)
+                    onInsert?(img)
                     dismiss()
                 }
             }

@@ -18,18 +18,18 @@ struct ContentView: View {
                     InfiniteNotebookHostView(item: item)
                         .id(item.id)
                 case .pap:
-                    PAPDesignerView { image in
+                    PAPDesignerView(item: item) { image in
                         // PAP used as standalone full-screen document; image export goes to photo library
                         UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
                     }
                     .id(item.id)
                 case .whiteboard:
-                    WhiteboardView { image in
+                    WhiteboardView(item: item) { image in
                         UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
                     }
                     .id(item.id)
                 case .mindmap:
-                    MindMapDesignerView { image in
+                    MindMapDesignerView(item: item) { image in
                         UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
                     }
                     .id(item.id)

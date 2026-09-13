@@ -28,6 +28,33 @@ enum PAPShapeType: String, CaseIterable, Identifiable {
         }
     }
 
+    var shapeKind: String {
+        switch self {
+        case .start:        return "START"
+        case .end:          return "END"
+        case .process:      return "PROCESS"
+        case .io:           return "IO"
+        case .decision:     return "DECISION"
+        case .subroutine:   return "SUBROUTINE"
+        case .comment:      return "COMMENT"
+        case .connector:    return "CONNECTOR"
+        }
+    }
+
+    static func fromShapeKind(_ kind: String) -> PAPShapeType? {
+        switch kind.uppercased() {
+        case "START":       return .start
+        case "END":         return .end
+        case "PROCESS":     return .process
+        case "IO":          return .io
+        case "DECISION":    return .decision
+        case "SUBROUTINE":  return .subroutine
+        case "COMMENT":     return .comment
+        case "CONNECTOR":   return .connector
+        default:            return .process
+        }
+    }
+
     var defaultWidth: CGFloat {
         switch self {
         case .start, .end:    return 150
@@ -138,6 +165,20 @@ enum PAPBranchPort: String, CaseIterable, Codable, Identifiable {
         case .right:  return "Rechts (→)"
         case .left:   return "Links (←)"
         case .top:    return "Oben (↑)"
+        }
+    }
+
+    var portString: String {
+        rawValue.uppercased()
+    }
+
+    static func fromPortString(_ s: String) -> PAPBranchPort {
+        switch s.uppercased() {
+        case "TOP":    return .top
+        case "BOTTOM": return .bottom
+        case "LEFT":   return .left
+        case "RIGHT":  return .right
+        default:       return .bottom
         }
     }
 }
@@ -593,9 +634,85 @@ final class PAPDesignerViewModel: ObservableObject {
         loadTemplate(.tutorial1)
     }
 
+    private var store: DiagramDocumentStore? = nil
+    private var diagramId: String = UUID().uuidString
+    private var createdAt: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+
+    func configure(folderURL: URL) {
+        let store = DiagramDocumentStore(folderURL: folderURL)
+        self.store = store
+
+        if let doc = store.load() {
+            self.diagramId = doc.id
+            self.diagramName = doc.name
+            self.createdAt = doc.createdAt
+            self.bypassDistance = CGFloat(doc.bypassDistancePx ?? 28.0)
+            self.nodes = doc.nodes.compactMap { dto in
+                guard let type = PAPShapeType.fromShapeKind(dto.shape) else { return nil }
+                let id = UUID(uuidString: dto.id) ?? UUID()
+                let col = dto.col ?? PAPGrid.nearestGrid(from: CGPoint(x: dto.x + type.defaultWidth / 2, y: dto.y + type.defaultHeight / 2)).col
+                let row = dto.row ?? PAPGrid.nearestGrid(from: CGPoint(x: dto.x + type.defaultWidth / 2, y: dto.y + type.defaultHeight / 2)).row
+                return PAPNode(id: id, type: type, label: dto.text, col: col, row: row, tag: dto.tag ?? "")
+            }
+            self.edges = doc.connections.compactMap { dto in
+                guard let fromId = UUID(uuidString: dto.fromNodeId),
+                      let toId = UUID(uuidString: dto.toNodeId) else { return nil }
+                let id = UUID(uuidString: dto.id) ?? UUID()
+                let port = PAPBranchPort.fromPortString(dto.fromPort)
+                return PAPEdge(id: id, fromId: fromId, toId: toId, label: dto.label, fromPort: port)
+            }
+            undoStack.removeAll()
+            redoStack.removeAll()
+        } else {
+            let folderName = folderURL.deletingPathExtension().lastPathComponent
+            if !folderName.isEmpty {
+                self.diagramName = folderName
+            }
+            save()
+        }
+    }
+
+    func save() {
+        guard let store = self.store else { return }
+        let nodeDTOs = nodes.map { n in
+            DiagramNodeDTO(
+                id: n.id.uuidString,
+                x: Double(n.cx - n.type.defaultWidth / 2),
+                y: Double(n.cy - n.type.defaultHeight / 2),
+                shape: n.type.shapeKind,
+                text: n.label,
+                color: nil,
+                col: n.col,
+                row: n.row,
+                tag: n.tag.isEmpty ? nil : n.tag
+            )
+        }
+        let edgeDTOs = edges.map { e in
+            DiagramConnectionDTO(
+                id: e.id.uuidString,
+                fromNodeId: e.fromId.uuidString,
+                toNodeId: e.toId.uuidString,
+                label: e.label,
+                fromPort: e.fromPort.portString
+            )
+        }
+        let doc = DiagramDocumentDTO(
+            id: diagramId,
+            name: diagramName,
+            type: "pap",
+            createdAt: createdAt,
+            updatedAt: Int64(Date().timeIntervalSince1970 * 1000),
+            nodes: nodeDTOs,
+            connections: edgeDTOs,
+            bypassDistancePx: Double(bypassDistance)
+        )
+        store.save(doc)
+    }
+
     func pushUndo() {
         undoStack.append((nodes, edges))
         redoStack.removeAll()
+        save()
     }
 
     func undo() {
@@ -605,6 +722,7 @@ final class PAPDesignerViewModel: ObservableObject {
         edges = prev.1
         selectedId = nil
         connectFromId = nil
+        save()
     }
 
     func redo() {
@@ -614,6 +732,7 @@ final class PAPDesignerViewModel: ObservableObject {
         edges = next.1
         selectedId = nil
         connectFromId = nil
+        save()
     }
 
     // MARK: Step-by-Step Construction (Bedienung wie PAP Designer)
@@ -1441,8 +1560,9 @@ struct PAPDrawingCanvasView: UIViewRepresentable {
 // MARK: - Main Designer View
 
 struct PAPDesignerView: View {
+    var item: DocumentItem? = nil
+    var onInsert: ((UIImage) -> Void)? = nil
     @StateObject private var vm = PAPDesignerViewModel()
-    let onInsert: (UIImage) -> Void
     @Environment(\.dismiss) private var dismiss
 
     @State private var canvasView: PAPCanvasView?
@@ -1486,6 +1606,14 @@ struct PAPDesignerView: View {
             .sheet(isPresented: $showTextEditor) {
                 textEditorSheet
             }
+        }
+        .onAppear {
+            if let item = item {
+                vm.configure(folderURL: item.path)
+            }
+        }
+        .onDisappear {
+            vm.save()
         }
     }
 
@@ -2204,7 +2332,7 @@ struct PAPDesignerView: View {
 
             Button("Einfügen") {
                 if let img = vm.renderToImage(drawing: canvasView?.drawing) {
-                    onInsert(img)
+                    onInsert?(img)
                     dismiss()
                 }
             }

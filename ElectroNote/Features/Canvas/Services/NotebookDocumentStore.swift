@@ -8,6 +8,7 @@ final class NotebookDocumentStore {
 
     private var documentURL: URL { noteURL.appendingPathComponent("document.json") }
     private var drawingURL:  URL { noteURL.appendingPathComponent("drawing.pkdrawing") }
+    private var drawingJsonURL: URL { noteURL.appendingPathComponent("drawing.json") }
     private var pdfsFolder:   URL { noteURL.appendingPathComponent("pdfs") }
     private var imagesFolder: URL { noteURL.appendingPathComponent("images") }
     private var videosFolder: URL { noteURL.appendingPathComponent("videos") }
@@ -17,7 +18,7 @@ final class NotebookDocumentStore {
         try? FileManager.default.createDirectory(at: pdfsFolder,    withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: imagesFolder,  withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: videosFolder,  withIntermediateDirectories: true)
-        if !FileManager.default.fileExists(atPath: drawingURL.path) {
+        if !FileManager.default.fileExists(atPath: drawingURL.path) && !FileManager.default.fileExists(atPath: drawingJsonURL.path) {
             try? PKDrawing().dataRepresentation().write(to: drawingURL, options: .atomic)
         }
         if !FileManager.default.fileExists(atPath: documentURL.path) {
@@ -43,8 +44,23 @@ final class NotebookDocumentStore {
     }
 
     // MARK: - Drawing
-
+ 
     func loadDrawing() -> PKDrawing {
+        let pkExists = FileManager.default.fileExists(atPath: drawingURL.path)
+        let jsonExists = FileManager.default.fileExists(atPath: drawingJsonURL.path)
+
+        if jsonExists {
+            let jsonDate = (try? drawingJsonURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+            let pkDate = (try? drawingURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+
+            if !pkExists || jsonDate > pkDate.addingTimeInterval(1.0) {
+                if let imported = PencilKitBridge.loadDrawing(from: drawingJsonURL) {
+                    try? imported.dataRepresentation().write(to: drawingURL, options: .atomic)
+                    return imported
+                }
+            }
+        }
+
         guard let data    = try? Data(contentsOf: drawingURL),
               let drawing = try? PKDrawing(data: data)
         else { return PKDrawing() }
@@ -52,7 +68,10 @@ final class NotebookDocumentStore {
     }
 
     func saveDrawing(_ drawing: PKDrawing) {
+        // 1. Save Apple binary cache
         try? drawing.dataRepresentation().write(to: drawingURL, options: .atomic)
+        // 2. Export portable JSON for Android
+        PencilKitBridge.saveDrawing(drawing, to: drawingJsonURL)
     }
 
     // MARK: - PDF

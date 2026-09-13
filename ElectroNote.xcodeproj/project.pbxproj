@@ -41,6 +41,8 @@
 		769D333349739661C285906D /* ClipArtViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7EFC8F475EEF3D3EA5C982 /* ClipArtViewModel.swift */; };
 		78B83EA7B19FBC8674C93E7C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71675B192ED20A8660D1CFD /* ContentView.swift */; };
 		7D8EE72D0298983BE7B03384 /* NotebookDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80CDC982EBACCEE15FAE4926 /* NotebookDocumentStore.swift */; };
+		EE556677889900112233DDEE /* DiagramDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF556677889900112233DDEE /* DiagramDocumentStore.swift */; };
+		EE667788990011223344EEFF /* PencilKitBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF667788990011223344EEFF /* PencilKitBridge.swift */; };
 		8B2159FFAC3BBBE3AF869E0D /* PDFAnnotationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29E46F818AC5129049142822 /* PDFAnnotationViewController.swift */; };
 		96BC9A9E72085C048BF30B4C /* MathPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDA264B812880EE3ABB0D8AF /* MathPanelView.swift */; };
 		9F68FAEEA6FFFCC8554C4BA6 /* NotebookDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9BCFF51AB3E1FB43D3AD37A /* NotebookDocument.swift */; };
@@ -96,6 +98,7 @@
 		US01BLD00000000000000001 /* UnifiedSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = US01REF00000000000000001 /* UnifiedSyncManager.swift */; };
 		ST01BLD00000000000000001 /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = ST01REF00000000000000001 /* SettingsViewModel.swift */; };
 		ST02BLD00000000000000002 /* AppSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ST02REF00000000000000002 /* AppSettingsView.swift */; };
+		WCV00001000000000000001 /* WebClipperView.swift in Sources */ = {isa = PBXBuildFile; fileRef = WCVREF010000000000000001 /* WebClipperView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -135,6 +138,8 @@
 		FF223344556677889900AABB /* MindMapDesignerView.swift */= {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MindMapDesignerView.swift;sourceTree = "<group>"; };
 		FF334455667788990011BBCC /* WhiteboardView.swift */     = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhiteboardView.swift;     sourceTree = "<group>"; };
 		FF445566778899001122CCDD /* InkPreset.swift */          = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkPreset.swift;          sourceTree = "<group>"; };
+		FF556677889900112233DDEE /* DiagramDocumentStore.swift */= {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagramDocumentStore.swift;sourceTree = "<group>"; };
+		FF667788990011223344EEFF /* PencilKitBridge.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PencilKitBridge.swift;    sourceTree = "<group>"; };
 		62D31F1D9F3A88209557A8FA /* StringExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringExtensions.swift; sourceTree = "<group>"; };
 		6C28BF3980DEC9B21ED04A44 /* PDFRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFRepresentable.swift; sourceTree = "<group>"; };
 		80CDC982EBACCEE15FAE4926 /* NotebookDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookDocumentStore.swift; sourceTree = "<group>"; };
@@ -190,6 +195,7 @@
 		US01REF00000000000000001 /* UnifiedSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedSyncManager.swift; sourceTree = "<group>"; };
 		ST01REF00000000000000001 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/ViewModels/SettingsViewModel.swift; sourceTree = "<group>"; };
 		ST02REF00000000000000002 /* AppSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/Views/AppSettingsView.swift; sourceTree = "<group>"; };
+		WCVREF010000000000000001 /* WebClipperView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebClipperView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -394,6 +400,7 @@
 			children = (
 				FF11223344556677889900AA /* PAPDesignerView.swift */,
 				FF223344556677889900AABB /* MindMapDesignerView.swift */,
+				FF556677889900112233DDEE /* DiagramDocumentStore.swift */,
 			);
 			path = Diagram;
 			sourceTree = "<group>";
@@ -430,6 +437,7 @@
 			isa = PBXGroup;
 			children = (
 				80CDC982EBACCEE15FAE4926 /* NotebookDocumentStore.swift */,
+				FF667788990011223344EEFF /* PencilKitBridge.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -574,6 +582,7 @@
 				CFBREF010000000000000001 /* CanvasFindBarView.swift */,
 				CSHREF010000000000000001 /* CanvasSearchHighlightOverlay.swift */,
 				AISREF010000000000000001 /* AISidebarView.swift */,
+				WCVREF010000000000000001 /* WebClipperView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -696,6 +705,8 @@
 				B7816E0DA26C5D00B978C436 /* WelcomeView.swift in Sources */,
 				EE11223344556677889900AA /* PAPDesignerView.swift in Sources */,
 				EE223344556677889900AABB /* MindMapDesignerView.swift in Sources */,
+				EE556677889900112233DDEE /* DiagramDocumentStore.swift in Sources */,
+				EE667788990011223344EEFF /* PencilKitBridge.swift in Sources */,
 				EE334455667788990011BBCC /* WhiteboardView.swift in Sources */,
 				EE445566778899001122CCDD /* InkPreset.swift in Sources */,
 				HSEL0000000000000000AABB /* HandwritingSelectionOverlay.swift in Sources */,
@@ -744,6 +755,7 @@
 				US01BLD00000000000000001 /* UnifiedSyncManager.swift in Sources */,
 				ST01BLD00000000000000001 /* SettingsViewModel.swift in Sources */,
 				ST02BLD00000000000000002 /* AppSettingsView.swift in Sources */,
+				WCV00001000000000000001 /* WebClipperView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -189,6 +189,17 @@ final class FileService: FileServiceProtocol {
         let metadata = NoteMetadata(title: name, createdAt: Date())
         let data = try JSONEncoder().encode(metadata)
         try data.write(to: dest.appendingPathComponent("metadata.json"))
+
+        if type == .pap {
+            let initialDoc = DiagramDocumentDTO(name: name, type: "pap")
+            let store = DiagramDocumentStore(folderURL: dest)
+            store.save(initialDoc)
+        } else if type == .mindmap {
+            let initialDoc = DiagramDocumentDTO(name: name, type: "mindmap")
+            let store = DiagramDocumentStore(folderURL: dest)
+            store.save(initialDoc)
+        }
+
         return makeItem(at: dest, name: name, type: type.itemType)
     }
 
