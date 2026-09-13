@@ -150,7 +150,7 @@ enum ArrowDirection {
 }
 
 struct OrthogonalRoutingEngine {
-    static func route(from: PAPNode, to: PAPNode, fromPort: PAPBranchPort) -> (points: [CGPoint], arrowDir: ArrowDirection, labelPos: CGPoint) {
+    static func route(from: PAPNode, to: PAPNode, fromPort: PAPBranchPort, bypassDistance: CGFloat = 28) -> (points: [CGPoint], arrowDir: ArrowDirection, labelPos: CGPoint) {
         let p1 = CGPoint(x: from.cx, y: from.cy)
         let p2 = CGPoint(x: to.cx, y: to.cy)
         let w1 = from.type.defaultWidth / 2
@@ -160,6 +160,7 @@ struct OrthogonalRoutingEngine {
 
         let c1 = from.col, r1 = from.row
         let c2 = to.col,   r2 = to.row
+        let innerBypass = max(8, bypassDistance - 8)
 
         // ==========================================
         // 1. SAME COLUMN (c1 == c2)
@@ -176,7 +177,7 @@ struct OrthogonalRoutingEngine {
             // B) Skipping steps downwards in the same column (r2 > r1) or side exit
             if r2 > r1 {
                 if fromPort == .left {
-                    let bypassX = p1.x - w1 - 28
+                    let bypassX = p1.x - w1 - bypassDistance
                     let start = CGPoint(x: p1.x - w1, y: p1.y)
                     let corner1 = CGPoint(x: bypassX, y: p1.y)
                     let corner2 = CGPoint(x: bypassX, y: p2.y)
@@ -184,7 +185,7 @@ struct OrthogonalRoutingEngine {
                     let label = CGPoint(x: bypassX - 16, y: (p1.y + p2.y) / 2)
                     return ([start, corner1, corner2, end], .right, label)
                 } else if fromPort == .right {
-                    let bypassX = p1.x + w1 + 28
+                    let bypassX = p1.x + w1 + bypassDistance
                     let start = CGPoint(x: p1.x + w1, y: p1.y)
                     let corner1 = CGPoint(x: bypassX, y: p1.y)
                     let corner2 = CGPoint(x: bypassX, y: p2.y)
@@ -193,7 +194,7 @@ struct OrthogonalRoutingEngine {
                     return ([start, corner1, corner2, end], .left, label)
                 } else {
                     // fromPort == .bottom, but r2 > r1 + 1 (Bypass around intermediate blocks)
-                    let bypassX = p1.x + w1 + 28
+                    let bypassX = p1.x + w1 + bypassDistance
                     let start = CGPoint(x: p1.x, y: p1.y + h1)
                     let stepY = p1.y + h1 + 14
                     let corner0 = CGPoint(x: p1.x, y: stepY)
@@ -208,7 +209,7 @@ struct OrthogonalRoutingEngine {
             // C) Loopback upwards in same column (r2 <= r1)
             if r2 <= r1 {
                 if fromPort == .right {
-                    let bypassX = p1.x + w1 + 28
+                    let bypassX = p1.x + w1 + bypassDistance
                     let start = CGPoint(x: p1.x + w1, y: p1.y)
                     let corner1 = CGPoint(x: bypassX, y: p1.y)
                     let corner2 = CGPoint(x: bypassX, y: p2.y)
@@ -216,7 +217,7 @@ struct OrthogonalRoutingEngine {
                     let label = CGPoint(x: bypassX + 16, y: (p1.y + p2.y) / 2)
                     return ([start, corner1, corner2, end], .left, label)
                 } else if fromPort == .top {
-                    let bypassX = p1.x - w1 - 28
+                    let bypassX = p1.x - w1 - bypassDistance
                     let start = CGPoint(x: p1.x, y: p1.y - h1)
                     let stepY = max(0, p1.y - h1 - 14)
                     let corner0 = CGPoint(x: p1.x, y: stepY)
@@ -227,7 +228,7 @@ struct OrthogonalRoutingEngine {
                     return ([start, corner0, corner1, corner2, end], .right, label)
                 } else {
                     // Default loopback (left bypass)
-                    let bypassX = p1.x - w1 - 28
+                    let bypassX = p1.x - w1 - bypassDistance
                     let start = (fromPort == .bottom) ? CGPoint(x: p1.x, y: p1.y + h1) : CGPoint(x: p1.x - w1, y: p1.y)
                     if fromPort == .bottom {
                         let stepY = p1.y + h1 + 14
@@ -277,7 +278,7 @@ struct OrthogonalRoutingEngine {
                     let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
                     return ([start, corner1, end], .down, label)
                 } else {
-                    let bypassX = p1.x + w1 + 20
+                    let bypassX = p1.x + w1 + innerBypass
                     let start = CGPoint(x: p1.x + w1, y: p1.y)
                     let corner1 = CGPoint(x: bypassX, y: p1.y)
                     let corner2 = CGPoint(x: bypassX, y: p2.y)
@@ -293,7 +294,7 @@ struct OrthogonalRoutingEngine {
                     let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
                     return ([start, corner1, end], .down, label)
                 } else {
-                    let bypassX = p1.x - w1 - 20
+                    let bypassX = p1.x - w1 - innerBypass
                     let start = CGPoint(x: p1.x - w1, y: p1.y)
                     let corner1 = CGPoint(x: bypassX, y: p1.y)
                     let corner2 = CGPoint(x: bypassX, y: p2.y)
@@ -315,7 +316,7 @@ struct OrthogonalRoutingEngine {
         // C) Target is Upwards in another column (r2 < r1)
         if r2 < r1 {
             if fromPort == .right || c2 > c1 {
-                let rightColX = max(p1.x + PAPGrid.colWidth, p2.x + w2 + 20)
+                let rightColX = max(p1.x + PAPGrid.colWidth, p2.x + w2 + innerBypass)
                 let start = CGPoint(x: p1.x + w1, y: p1.y)
                 let corner1 = CGPoint(x: rightColX, y: p1.y)
                 let corner2 = CGPoint(x: rightColX, y: p2.y)
@@ -323,7 +324,7 @@ struct OrthogonalRoutingEngine {
                 let label = CGPoint(x: (start.x + corner1.x) / 2, y: p1.y - 12)
                 return ([start, corner1, corner2, end], .left, label)
             } else if fromPort == .left || c2 < c1 {
-                let leftColX = min(p1.x - PAPGrid.colWidth, p2.x - w2 - 20)
+                let leftColX = min(p1.x - PAPGrid.colWidth, p2.x - w2 - innerBypass)
                 let start = CGPoint(x: p1.x - w1, y: p1.y)
                 let corner1 = CGPoint(x: leftColX, y: p1.y)
                 let corner2 = CGPoint(x: leftColX, y: p2.y)
@@ -389,18 +390,115 @@ struct SubroutineShape: Shape {
     }
 }
 
+// MARK: - Crossing Jumps (Schematic-style line hops where two unrelated connections cross)
+
+private let crossingEpsilon: CGFloat = 2.0
+
+private func isHorizontalSegment(_ a: CGPoint, _ b: CGPoint) -> Bool {
+    abs(a.y - b.y) < 0.5
+}
+
+private func isVerticalSegment(_ a: CGPoint, _ b: CGPoint) -> Bool {
+    abs(a.x - b.x) < 0.5
+}
+
+private func segmentCrossing(h: (CGPoint, CGPoint), v: (CGPoint, CGPoint)) -> CGPoint? {
+    let hy = h.0.y
+    let hx1 = min(h.0.x, h.1.x)
+    let hx2 = max(h.0.x, h.1.x)
+    let vx = v.0.x
+    let vy1 = min(v.0.y, v.1.y)
+    let vy2 = max(v.0.y, v.1.y)
+    if vx > hx1 + crossingEpsilon && vx < hx2 - crossingEpsilon &&
+       hy > vy1 + crossingEpsilon && hy < vy2 - crossingEpsilon {
+        return CGPoint(x: vx, y: hy)
+    }
+    return nil
+}
+
+func buildPathWithCrossingJumps(points: [CGPoint], priorPolylines: [[CGPoint]], jumpRadius: CGFloat = 7.0) -> Path {
+    var path = Path()
+    guard points.count >= 2 else {
+        if let first = points.first { path.move(to: first) }
+        return path
+    }
+    path.move(to: points[0])
+
+    guard !priorPolylines.isEmpty else {
+        for pt in points.dropFirst() {
+            path.addLine(to: pt)
+        }
+        return path
+    }
+
+    var otherSegments: [(CGPoint, CGPoint)] = []
+    for poly in priorPolylines {
+        guard poly.count >= 2 else { continue }
+        for j in 0..<(poly.count - 1) {
+            otherSegments.append((poly[j], poly[j + 1]))
+        }
+    }
+
+    for i in 0..<(points.count - 1) {
+        let a = points[i]
+        let b = points[i + 1]
+        let horizontal = isHorizontalSegment(a, b)
+        let vertical = isVerticalSegment(a, b)
+
+        if !horizontal && !vertical {
+            path.addLine(to: b)
+            continue
+        }
+
+        var crossings: [CGPoint] = []
+        for (oa, ob) in otherSegments {
+            let oHorizontal = isHorizontalSegment(oa, ob)
+            let oVertical = isVerticalSegment(oa, ob)
+            if horizontal && oVertical {
+                if let pt = segmentCrossing(h: (a, b), v: (oa, ob)) {
+                    crossings.append(pt)
+                }
+            } else if vertical && oHorizontal {
+                if let pt = segmentCrossing(h: (oa, ob), v: (a, b)) {
+                    crossings.append(pt)
+                }
+            }
+        }
+
+        let forward = horizontal ? (b.x > a.x) : (b.y > a.y)
+        let sorted = crossings.sorted { p1, p2 in
+            horizontal ? (p1.x < p2.x) : (p1.y < p2.y)
+        }
+        let orderedCrossings = forward ? sorted : sorted.reversed()
+
+        for c in orderedCrossings {
+            if horizontal {
+                let preX = forward ? (c.x - jumpRadius) : (c.x + jumpRadius)
+                let postX = forward ? (c.x + jumpRadius) : (c.x - jumpRadius)
+                path.addLine(to: CGPoint(x: preX, y: a.y))
+                path.addQuadCurve(to: CGPoint(x: postX, y: a.y), control: CGPoint(x: c.x, y: a.y - jumpRadius * 1.5))
+            } else {
+                let preY = forward ? (c.y - jumpRadius) : (c.y + jumpRadius)
+                let postY = forward ? (c.y + jumpRadius) : (c.y - jumpRadius)
+                path.addLine(to: CGPoint(x: a.x, y: preY))
+                path.addQuadCurve(to: CGPoint(x: a.x, y: postY), control: CGPoint(x: a.x + jumpRadius * 1.5, y: c.y))
+            }
+        }
+        path.addLine(to: b)
+    }
+
+    return path
+}
+
 struct OrthogonalEdgeShape: Shape {
     let points: [CGPoint]
     let arrowDir: ArrowDirection
+    var priorPolylines: [[CGPoint]] = []
     let arrowSize: CGFloat = 9
 
     func path(in rect: CGRect) -> Path {
         guard points.count >= 2 else { return Path() }
-        var p = Path()
-        p.move(to: points[0])
-        for pt in points.dropFirst() {
-            p.addLine(to: pt)
-        }
+        var p = buildPathWithCrossingJumps(points: points, priorPolylines: priorPolylines)
 
         if let end = points.last {
             var arrow = Path()
@@ -460,6 +558,7 @@ final class PAPDesignerViewModel: ObservableObject {
     @Published var connectMode: Bool = false
     @Published var connectFromId: UUID? = nil
     @Published var showGridGuides: Bool = true
+    @Published var bypassDistance: CGFloat = 28
 
     private var undoStack: [([PAPNode], [PAPEdge])] = []
     private var redoStack: [([PAPNode], [PAPEdge])] = []
@@ -692,10 +791,11 @@ final class PAPDesignerViewModel: ObservableObject {
         selectedId = newNode.id
     }
 
-    /// Adds a standalone node snapped to a grid column & row
-    func addNode(type: PAPShapeType, col: Int = 1, row: Int? = nil, label: String? = nil) {
+    /// Adds a node snapped to a grid column & row, optionally connecting to the preceding node in the column
+    func addNode(type: PAPShapeType, col: Int = 1, row: Int? = nil, label: String? = nil, autoConnect: Bool = true) {
         pushUndo()
-        let targetRow = row ?? ((nodes.filter { $0.col == col }.map { $0.row }.max() ?? -1) + 1)
+        let previousNode = nodes.filter { $0.col == col }.max(by: { $0.row < $1.row })
+        let targetRow = row ?? ((previousNode?.row ?? -1) + 1)
         let defaultLabel: String
         switch type {
         case .start:        defaultLabel = "Start"
@@ -715,6 +815,12 @@ final class PAPDesignerViewModel: ObservableObject {
             tag: type == .io ? "E" : ""
         )
         nodes.append(newNode)
+
+        if autoConnect, let prev = previousNode, prev.type != .end {
+            let edgeLabel = prev.type == .decision ? "ja" : ""
+            edges.append(PAPEdge(fromId: prev.id, toId: newNode.id, label: edgeLabel, fromPort: .bottom))
+        }
+
         selectedId = newNode.id
     }
 
@@ -912,7 +1018,7 @@ final class PAPDesignerViewModel: ObservableObject {
         let h = max(maxY - minY, 300)
 
         let offset = CGPoint(x: -minX, y: -minY)
-        let renderView = PAPExportRenderView(nodes: nodes, edges: edges, offset: offset)
+        let renderView = PAPExportRenderView(nodes: nodes, edges: edges, offset: offset, bypassDistance: bypassDistance)
             .frame(width: w, height: h)
             .background(Color.white)
 
@@ -1041,31 +1147,41 @@ struct PAPExportRenderView: View {
     let nodes: [PAPNode]
     let edges: [PAPEdge]
     let offset: CGPoint
+    var bypassDistance: CGFloat = 28
+
+    private var computedRoutes: [(edge: PAPEdge, offsetPoints: [CGPoint], arrowDir: ArrowDirection, offsetLabel: CGPoint, priorPolylines: [[CGPoint]])] {
+        var list: [(edge: PAPEdge, offsetPoints: [CGPoint], arrowDir: ArrowDirection, offsetLabel: CGPoint, priorPolylines: [[CGPoint]])] = []
+        var prior: [[CGPoint]] = []
+        for edge in edges {
+            guard let from = nodes.first(where: { $0.id == edge.fromId }),
+                  let to   = nodes.first(where: { $0.id == edge.toId }) else { continue }
+            let route = OrthogonalRoutingEngine.route(from: from, to: to, fromPort: edge.fromPort, bypassDistance: bypassDistance)
+            let offsetPoints = route.points.map { CGPoint(x: $0.x + offset.x, y: $0.y + offset.y) }
+            let offsetLabel = CGPoint(x: route.labelPos.x + offset.x, y: route.labelPos.y + offset.y)
+            let offsetPrior = prior.map { pts in pts.map { CGPoint(x: $0.x + offset.x, y: $0.y + offset.y) } }
+            list.append((edge: edge, offsetPoints: offsetPoints, arrowDir: route.arrowDir, offsetLabel: offsetLabel, priorPolylines: offsetPrior))
+            prior.append(route.points)
+        }
+        return list
+    }
 
     var body: some View {
         ZStack {
             // Render Edges
-            ForEach(edges) { edge in
-                if let from = nodes.first(where: { $0.id == edge.fromId }),
-                   let to   = nodes.first(where: { $0.id == edge.toId }) {
-                    let route = OrthogonalRoutingEngine.route(from: from, to: to, fromPort: edge.fromPort)
-                    let offsetPoints = route.points.map { CGPoint(x: $0.x + offset.x, y: $0.y + offset.y) }
-                    let offsetLabel = CGPoint(x: route.labelPos.x + offset.x, y: route.labelPos.y + offset.y)
+            ForEach(computedRoutes, id: \.edge.id) { item in
+                ZStack {
+                    OrthogonalEdgeShape(points: item.offsetPoints, arrowDir: item.arrowDir, priorPolylines: item.priorPolylines)
+                        .stroke(Color(white: 0.2), style: StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
 
-                    ZStack {
-                        OrthogonalEdgeShape(points: offsetPoints, arrowDir: route.arrowDir)
-                            .stroke(Color(white: 0.2), style: StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
-
-                        if !edge.label.isEmpty {
-                            Text(edge.label)
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundColor(Color(white: 0.25))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(Color.white.opacity(0.95))
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
-                                .position(offsetLabel)
-                        }
+                    if !item.edge.label.isEmpty {
+                        Text(item.edge.label)
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundColor(Color(white: 0.25))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.white.opacity(0.95))
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .position(item.offsetLabel)
                     }
                 }
             }
@@ -1142,6 +1258,7 @@ struct PAPDesignerView: View {
     @State private var selectedEdgePort: PAPBranchPort = .bottom
     @State private var showTextEditor: Bool = false
     @State private var selectedTag: String = "E"
+    @State private var showDistanceSettings: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -1235,7 +1352,11 @@ struct PAPDesignerView: View {
 
                 ForEach(PAPShapeType.allCases) { type in
                     Button {
-                        vm.addNode(type: type)
+                        if let selected = vm.selectedNode {
+                            vm.insertBelow(fromNode: selected, type: type)
+                        } else {
+                            vm.addNode(type: type)
+                        }
                     } label: {
                         VStack(spacing: 4) {
                             Image(systemName: type.icon)
@@ -1284,6 +1405,19 @@ struct PAPDesignerView: View {
 
     // MARK: - Main Interactive Canvas
 
+    private var computedRoutes: [(edge: PAPEdge, points: [CGPoint], arrowDir: ArrowDirection, labelPos: CGPoint, priorPolylines: [[CGPoint]])] {
+        var list: [(edge: PAPEdge, points: [CGPoint], arrowDir: ArrowDirection, labelPos: CGPoint, priorPolylines: [[CGPoint]])] = []
+        var prior: [[CGPoint]] = []
+        for edge in vm.edges {
+            guard let from = vm.nodes.first(where: { $0.id == edge.fromId }),
+                  let to   = vm.nodes.first(where: { $0.id == edge.toId }) else { continue }
+            let route = OrthogonalRoutingEngine.route(from: from, to: to, fromPort: edge.fromPort, bypassDistance: vm.bypassDistance)
+            list.append((edge: edge, points: route.points, arrowDir: route.arrowDir, labelPos: route.labelPos, priorPolylines: prior))
+            prior.append(route.points)
+        }
+        return list
+    }
+
     var mainCanvas: some View {
         ZStack(alignment: .top) {
             ScrollView([.horizontal, .vertical], showsIndicators: true) {
@@ -1293,8 +1427,8 @@ struct PAPDesignerView: View {
                         .frame(width: 1600, height: 2600)
 
                     // Orthogonal Edges
-                    ForEach(vm.edges) { edge in
-                        edgeView(edge)
+                    ForEach(computedRoutes, id: \.edge.id) { item in
+                        edgeView(item.edge, points: item.points, arrowDir: item.arrowDir, labelPos: item.labelPos, priorPolylines: item.priorPolylines)
                     }
 
                     // Nodes
@@ -1457,8 +1591,21 @@ struct PAPDesignerView: View {
         return PAPNodeCardView(node: node, isSelected: isSelected, isConnectSource: isConnect, isConnectTarget: isTarget)
             .position(currentPos)
             .onTapGesture {
-                vm.tapNode(id: node.id)
+                if vm.connectMode {
+                    vm.tapNode(id: node.id)
+                } else if vm.selectedId == node.id {
+                    openTextEditor(for: node)
+                } else {
+                    vm.tapNode(id: node.id)
+                }
             }
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded {
+                    if !vm.connectMode {
+                        openTextEditor(for: node)
+                    }
+                }
+            )
             .onLongPressGesture {
                 openTextEditor(for: node)
             }
@@ -1700,11 +1847,15 @@ struct PAPDesignerView: View {
             Button {
                 openTextEditor(for: node)
             } label: {
-                Image(systemName: "pencil")
-                    .font(.caption2.bold())
-                    .padding(6)
-                    .background(Color(.systemGray5))
-                    .clipShape(Circle())
+                HStack(spacing: 3) {
+                    Image(systemName: "pencil")
+                    Text("Text")
+                }
+                .font(.caption2.bold())
+                .padding(.horizontal, 7)
+                .padding(.vertical, 5)
+                .background(Color(.systemGray5))
+                .clipShape(Capsule())
             }
 
             // Delete
@@ -1728,47 +1879,38 @@ struct PAPDesignerView: View {
 
     // MARK: - Edge View
 
-    func edgeView(_ edge: PAPEdge) -> some View {
-        guard let from = vm.nodes.first(where: { $0.id == edge.fromId }),
-              let to   = vm.nodes.first(where: { $0.id == edge.toId }) else {
-            return AnyView(EmptyView())
-        }
+    func edgeView(_ edge: PAPEdge, points: [CGPoint], arrowDir: ArrowDirection, labelPos: CGPoint, priorPolylines: [[CGPoint]]) -> some View {
+        ZStack {
+            OrthogonalEdgeShape(points: points, arrowDir: arrowDir, priorPolylines: priorPolylines)
+                .stroke(Color(white: 0.22), style: StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
 
-        let route = OrthogonalRoutingEngine.route(from: from, to: to, fromPort: edge.fromPort)
-
-        return AnyView(
-            ZStack {
-                OrthogonalEdgeShape(points: route.points, arrowDir: route.arrowDir)
-                    .stroke(Color(white: 0.22), style: StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
-
-                if !edge.label.isEmpty {
-                    Text(edge.label)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundColor(Color(white: 0.25))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.95))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 3)
-                                .stroke(Color(white: 0.8), lineWidth: 0.8)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                        .position(route.labelPos)
-                        .onTapGesture {
-                            openEdgeEditor(edge)
-                        }
-                }
-
-                // Small tap area to edit/delete connection
-                Color.clear
-                    .frame(width: 44, height: 32)
-                    .contentShape(Rectangle())
-                    .position(route.labelPos)
+            if !edge.label.isEmpty {
+                Text(edge.label)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(Color(white: 0.25))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.white.opacity(0.95))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(Color(white: 0.8), lineWidth: 0.8)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .position(labelPos)
                     .onTapGesture {
                         openEdgeEditor(edge)
                     }
             }
-        )
+
+            // Small tap area to edit/delete connection
+            Color.clear
+                .frame(width: 44, height: 32)
+                .contentShape(Rectangle())
+                .position(labelPos)
+                .onTapGesture {
+                    openEdgeEditor(edge)
+                }
+        }
     }
 
     // MARK: - Toolbar
@@ -1804,6 +1946,30 @@ struct PAPDesignerView: View {
         }
 
         ToolbarItemGroup(placement: .navigationBarTrailing) {
+            Button {
+                showDistanceSettings.toggle()
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+            }
+            .popover(isPresented: $showDistanceSettings) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Verbindungsabstand")
+                        .font(.headline)
+                    Text("Wie weit Verbindungen von Bausteinen ausweichen, bevor sie abbiegen. Größerer Abstand vermeidet Überschneidungen bei dicht stehenden Bausteinen.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    HStack {
+                        Text("\(Int(vm.bypassDistance)) pt")
+                            .font(.subheadline.monospacedDigit().bold())
+                        Spacer()
+                    }
+                    Slider(value: $vm.bypassDistance, in: 16...80, step: 2)
+                }
+                .padding()
+                .frame(width: 300)
+            }
+            .accessibilityLabel("Verbindungsabstand einstellen")
+
             Button {
                 isDrawingMode.toggle()
             } label: {
