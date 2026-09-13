@@ -10,6 +10,7 @@ enum PAPShapeType: String, CaseIterable, Identifiable {
     case io             = "Ein-/Ausgabe"
     case decision       = "Verzweigung"
     case subroutine     = "Unterprogramm"
+    case comment        = "Kommentar"
     case connector      = "Konnektor"
 
     var id: String { rawValue }
@@ -22,6 +23,7 @@ enum PAPShapeType: String, CaseIterable, Identifiable {
         case .io:           return "Ein-/Ausgabe"
         case .decision:     return "Verzweigung"
         case .subroutine:   return "Unterprogramm"
+        case .comment:      return "Kommentar"
         case .connector:    return "Verbindung"
         }
     }
@@ -33,6 +35,7 @@ enum PAPShapeType: String, CaseIterable, Identifiable {
         case .io:             return 160
         case .decision:       return 150
         case .subroutine:     return 160
+        case .comment:        return 210
         case .connector:      return 32
         }
     }
@@ -44,28 +47,31 @@ enum PAPShapeType: String, CaseIterable, Identifiable {
         case .io:             return 54
         case .decision:       return 70
         case .subroutine:     return 54
+        case .comment:        return 65
         case .connector:      return 32
         }
     }
 
     var fillColor: Color {
         switch self {
-        case .start, .end:    return Color(red: 0.76, green: 0.88, blue: 0.98)
-        case .process:        return Color(red: 0.74, green: 0.94, blue: 0.78)
-        case .io:             return Color(red: 0.98, green: 0.84, blue: 0.74)
-        case .decision:       return Color(red: 1.00, green: 0.88, blue: 0.45)
-        case .subroutine:     return Color(red: 0.88, green: 0.80, blue: 0.98)
-        case .connector:      return Color(red: 0.90, green: 0.92, blue: 0.95)
+        case .start, .end:    return Color(red: 0.816, green: 0.902, blue: 0.980)
+        case .process:        return Color(red: 0.769, green: 0.957, blue: 0.780)
+        case .subroutine:     return Color(red: 0.769, green: 0.957, blue: 0.780)
+        case .io:             return Color(red: 1.000, green: 0.816, blue: 0.784)
+        case .decision:       return Color(red: 1.000, green: 0.941, blue: 0.647)
+        case .comment:        return Color.clear
+        case .connector:      return Color.white
         }
     }
 
     var strokeColor: Color {
         switch self {
-        case .start, .end:    return Color(red: 0.18, green: 0.45, blue: 0.75)
-        case .process:        return Color(red: 0.18, green: 0.58, blue: 0.28)
-        case .io:             return Color(red: 0.82, green: 0.42, blue: 0.18)
-        case .decision:       return Color(red: 0.85, green: 0.58, blue: 0.08)
-        case .subroutine:     return Color(red: 0.52, green: 0.28, blue: 0.75)
+        case .start, .end:    return Color(red: 0.290, green: 0.533, blue: 0.773)
+        case .process:        return Color(red: 0.204, green: 0.557, blue: 0.243)
+        case .subroutine:     return Color(red: 0.204, green: 0.557, blue: 0.243)
+        case .io:             return Color(red: 0.851, green: 0.282, blue: 0.220)
+        case .decision:       return Color(red: 0.761, green: 0.545, blue: 0.063)
+        case .comment:        return Color(red: 0.000, green: 0.000, blue: 0.545)
         case .connector:      return Color(white: 0.35)
         }
     }
@@ -77,6 +83,7 @@ enum PAPShapeType: String, CaseIterable, Identifiable {
         case .io:             return "parallelogram"
         case .decision:       return "diamond"
         case .subroutine:     return "rectangle.split.3x1"
+        case .comment:        return "text.bubble"
         case .connector:      return "circle.fill"
         }
     }
@@ -390,6 +397,18 @@ struct SubroutineShape: Shape {
     }
 }
 
+struct CommentBracketShape: Shape {
+    var hookWidth: CGFloat = 10
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX + hookWidth, y: r.minY))
+        p.addLine(to: CGPoint(x: r.minX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.minX + hookWidth, y: r.maxY))
+        return p
+    }
+}
+
 // MARK: - Crossing Jumps (Schematic-style line hops where two unrelated connections cross)
 
 private let crossingEpsilon: CGFloat = 2.0
@@ -529,21 +548,19 @@ struct OrthogonalEdgeShape: Shape {
 // MARK: - Templates
 
 enum PAPTemplate: String, CaseIterable, Identifiable {
-    case linear       = "Linearer Ablauf"
-    case ifElse       = "Verzweigung (If/Else)"
-    case whileLoop    = "Kopfgesteuerte Schleife (While)"
-    case doWhileLoop  = "Fußgesteuerte Schleife (Do-While)"
-    case empty        = "Neuer Start"
+    case tutorial1 = "Ablaufplan - Was ist das?"
+    case tutorial2 = "Ablaufplan - Beispiel 1"
+    case tutorial3 = "Ablaufplan - Beispiel 2"
+    case empty     = "Leerer Ablaufplan"
 
     var id: String { rawValue }
 
     var icon: String {
         switch self {
-        case .linear:      return "arrow.down"
-        case .ifElse:      return "arrow.triangle.branch"
-        case .whileLoop:   return "arrow.triangle.2.circlepath"
-        case .doWhileLoop: return "repeat"
-        case .empty:       return "plus.square"
+        case .tutorial1: return "info.circle"
+        case .tutorial2: return "function"
+        case .tutorial3: return "gearshape.2"
+        case .empty:     return "plus.square"
         }
     }
 }
@@ -552,6 +569,7 @@ enum PAPTemplate: String, CaseIterable, Identifiable {
 
 @MainActor
 final class PAPDesignerViewModel: ObservableObject {
+    @Published var diagramName: String = "Ablaufplan - Was ist das?"
     @Published var nodes: [PAPNode] = []
     @Published var edges: [PAPEdge] = []
     @Published var selectedId: UUID? = nil
@@ -572,7 +590,7 @@ final class PAPDesignerViewModel: ObservableObject {
     }
 
     init() {
-        loadTemplate(.linear)
+        loadTemplate(.tutorial1)
     }
 
     func pushUndo() {
@@ -621,6 +639,7 @@ final class PAPDesignerViewModel: ObservableObject {
         case .io:           defaultLabel = tag.isEmpty ? "Eingabe" : (tag == "A" ? "Ausgabe" : "Eingabe")
         case .decision:     defaultLabel = "Bedingung?"
         case .subroutine:   defaultLabel = "Unterprogramm()"
+        case .comment:      defaultLabel = "Kommentar"
         case .connector:    defaultLabel = ""
         }
 
@@ -661,6 +680,7 @@ final class PAPDesignerViewModel: ObservableObject {
         case .io:           defaultLabel = "Ausgabe"
         case .decision:     defaultLabel = "Bedingung 2?"
         case .subroutine:   defaultLabel = "Unterprogramm()"
+        case .comment:      defaultLabel = "Kommentar"
         case .connector:    defaultLabel = ""
         }
 
@@ -697,6 +717,7 @@ final class PAPDesignerViewModel: ObservableObject {
         case .io:           defaultLabel = "Ausgabe"
         case .decision:     defaultLabel = "Bedingung 2?"
         case .subroutine:   defaultLabel = "Unterprogramm()"
+        case .comment:      defaultLabel = "Kommentar"
         case .connector:    defaultLabel = ""
         }
 
@@ -738,6 +759,7 @@ final class PAPDesignerViewModel: ObservableObject {
         case .io:           defaultLabel = "Eingabe"
         case .decision:     defaultLabel = "Bedingung 2?"
         case .subroutine:   defaultLabel = "Unterprogramm()"
+        case .comment:      defaultLabel = "Kommentar"
         case .connector:    defaultLabel = ""
         }
 
@@ -775,6 +797,7 @@ final class PAPDesignerViewModel: ObservableObject {
         case .io:           defaultLabel = tag.isEmpty ? "Eingabe" : (tag == "A" ? "Ausgabe" : "Eingabe")
         case .decision:     defaultLabel = "Bedingung?"
         case .subroutine:   defaultLabel = "Unterprogramm()"
+        case .comment:      defaultLabel = "Kommentar"
         case .connector:    defaultLabel = ""
         }
 
@@ -804,6 +827,7 @@ final class PAPDesignerViewModel: ObservableObject {
         case .io:           defaultLabel = "Ein-/Ausgabe"
         case .decision:     defaultLabel = "Bedingung?"
         case .subroutine:   defaultLabel = "Unterprogramm()"
+        case .comment:      defaultLabel = "Kommentar"
         case .connector:    defaultLabel = ""
         }
 
@@ -932,69 +956,152 @@ final class PAPDesignerViewModel: ObservableObject {
         pushUndo()
         nodes.removeAll()
         edges.removeAll()
+        diagramName = template.rawValue
 
         switch template {
-        case .linear:
-            let n1 = PAPNode(type: .start,   label: "Start",             col: 1, row: 0)
-            let n2 = PAPNode(type: .io,      label: "Zahl x einlesen",   col: 1, row: 1, tag: "E")
-            let n3 = PAPNode(type: .process, label: "Ergebnis = x * 2",  col: 1, row: 2)
-            let n4 = PAPNode(type: .io,      label: "Ergebnis ausgeben", col: 1, row: 3, tag: "A")
-            let n5 = PAPNode(type: .end,     label: "Ende",              col: 1, row: 4)
-            nodes = [n1, n2, n3, n4, n5]
+        case .tutorial1:
+            // Main spine (Col 1)
+            let n1 = PAPNode(type: .start,      label: "Start",          col: 1, row: 0)
+            let n2 = PAPNode(type: .io,         label: "Eingabe",        col: 1, row: 1, tag: "E")
+            let n3 = PAPNode(type: .process,    label: "Vorgang",        col: 1, row: 2)
+            let n4 = PAPNode(type: .subroutine, label: "Unterprogramm",  col: 1, row: 3)
+            let n5 = PAPNode(type: .io,         label: "Ausgabe",        col: 1, row: 4, tag: "A")
+            let n6 = PAPNode(type: .end,        label: "Ende",           col: 1, row: 5)
+
+            // Left comments (Col 0)
+            let cL0 = PAPNode(type: .comment, label: "Programmablaufpläne (PAPs) sind grafische Diagramme. Sie zeigen, welche Vorgänge nacheinander ausgeführt werden.", col: 0, row: 0)
+            let cL1 = PAPNode(type: .comment, label: "Beispiele für Abläufe:\n• Rechenverfahren\n• Bedienungsanleitung\n• Garagentorsteuerung", col: 0, row: 1)
+            let cL2 = PAPNode(type: .comment, label: "Programmablaufpläne werden auch als Flussdiagramme bezeichnet, weil sie Vorgänge als zeitlichen Fluss darstellen.", col: 0, row: 2)
+            let cL3 = PAPNode(type: .comment, label: "Fahren Sie also gedanklich mit dem Boot entlang der Pfeile flussabwärts von Start bis Ende.", col: 0, row: 3)
+            let cL4 = PAPNode(type: .comment, label: "Verschiedene Symbole verdeutlichen unterschiedliche Arten von Vorgängen (DIN 66001 / PapDesigner).", col: 0, row: 4)
+
+            // Right comments (Col 2)
+            let cR0 = PAPNode(type: .comment, label: "Die verschiedenen Vorgänge oder Aktivitäten werden als Symbole dargestellt. Die Pfeile kennzeichnen die Reihenfolge.", col: 2, row: 0)
+            let cR1 = PAPNode(type: .comment, label: "Eingabevorgang:\nDaten werden in das System eingegeben bzw. eingelesen.\n(Hinweis: 'E' ist PapDesigner-Kennung)", col: 2, row: 1)
+            let cR2 = PAPNode(type: .comment, label: "Elementarer Vorgang,\ndessen interne Details nicht in einem anderen Diagramm näher dargestellt werden.", col: 2, row: 2)
+            let cR3 = PAPNode(type: .comment, label: "Komplexer Vorgang bzw. Unterprogramm,\ndessen Ablaufdetails meist in einem weiteren Diagramm dargestellt werden.", col: 2, row: 3)
+            let cR4 = PAPNode(type: .comment, label: "Ausgabevorgang:\nDaten werden vom System ausgegeben oder auf einem Sichtgerät angezeigt.", col: 2, row: 4)
+
+            nodes = [n1, n2, n3, n4, n5, n6, cL0, cL1, cL2, cL3, cL4, cR0, cR1, cR2, cR3, cR4]
             edges = [
                 PAPEdge(fromId: n1.id, toId: n2.id, label: "", fromPort: .bottom),
                 PAPEdge(fromId: n2.id, toId: n3.id, label: "", fromPort: .bottom),
                 PAPEdge(fromId: n3.id, toId: n4.id, label: "", fromPort: .bottom),
                 PAPEdge(fromId: n4.id, toId: n5.id, label: "", fromPort: .bottom),
-            ]
-
-        case .ifElse:
-            let n1 = PAPNode(type: .start,    label: "Start",              col: 1, row: 0)
-            let n2 = PAPNode(type: .io,       label: "Alter einlesen",     col: 1, row: 1, tag: "E")
-            let n3 = PAPNode(type: .decision, label: "Alter >= 18?",       col: 1, row: 2)
-            let n4 = PAPNode(type: .io,       label: "Status: Volljährig", col: 1, row: 3, tag: "A")
-            let n5 = PAPNode(type: .io,       label: "Status: Minderjährig",col: 2, row: 3, tag: "A")
-            let n6 = PAPNode(type: .end,      label: "Ende",              col: 1, row: 4)
-            nodes = [n1, n2, n3, n4, n5, n6]
-            edges = [
-                PAPEdge(fromId: n1.id, toId: n2.id, label: "", fromPort: .bottom),
-                PAPEdge(fromId: n2.id, toId: n3.id, label: "", fromPort: .bottom),
-                PAPEdge(fromId: n3.id, toId: n4.id, label: "ja", fromPort: .bottom),
-                PAPEdge(fromId: n3.id, toId: n5.id, label: "nein", fromPort: .right),
-                PAPEdge(fromId: n4.id, toId: n6.id, label: "", fromPort: .bottom),
                 PAPEdge(fromId: n5.id, toId: n6.id, label: "", fromPort: .bottom),
             ]
 
-        case .whileLoop:
-            let n1 = PAPNode(type: .start,    label: "Start",          col: 1, row: 0)
-            let n2 = PAPNode(type: .process,  label: "i = 0",          col: 1, row: 1)
-            let n3 = PAPNode(type: .decision, label: "i < 10?",        col: 1, row: 2)
-            let n4 = PAPNode(type: .process,  label: "i = i + 1",      col: 1, row: 3)
-            let n5 = PAPNode(type: .io,       label: "Fertig melden",  col: 2, row: 3, tag: "A")
-            let n6 = PAPNode(type: .end,      label: "Ende",           col: 2, row: 4)
-            nodes = [n1, n2, n3, n4, n5, n6]
-            edges = [
-                PAPEdge(fromId: n1.id, toId: n2.id, label: "", fromPort: .bottom),
-                PAPEdge(fromId: n2.id, toId: n3.id, label: "", fromPort: .bottom),
-                PAPEdge(fromId: n3.id, toId: n4.id, label: "ja", fromPort: .bottom),
-                PAPEdge(fromId: n4.id, toId: n3.id, label: "", fromPort: .left), // Loopback to condition
-                PAPEdge(fromId: n3.id, toId: n5.id, label: "nein", fromPort: .right),
-                PAPEdge(fromId: n5.id, toId: n6.id, label: "", fromPort: .bottom),
-            ]
+        case .tutorial2:
+            // Main spine (Col 1)
+            let n1 = PAPNode(type: .start,   label: "Start", col: 1, row: 0)
+            let n2 = PAPNode(type: .io,      label: "Eingabe von Zahl a", col: 1, row: 1, tag: "E")
+            let n3 = PAPNode(type: .io,      label: "Eingabe von Zahl b", col: 1, row: 2, tag: "E")
+            let n4 = PAPNode(type: .process, label: "Berechnung des Mittelwertes\nc = (a + b)/2", col: 1, row: 3)
+            let n5 = PAPNode(type: .io,      label: "Ausgabe des Ergebnisses\nc", col: 1, row: 4, tag: "A")
+            let n6 = PAPNode(type: .end,     label: "Ende", col: 1, row: 5)
 
-        case .doWhileLoop:
-            let n1 = PAPNode(type: .start,    label: "Start",              col: 1, row: 0)
-            let n2 = PAPNode(type: .io,       label: "PIN eingeben",       col: 1, row: 1, tag: "E")
-            let n3 = PAPNode(type: .decision, label: "PIN korrekt?",       col: 1, row: 2)
-            let n4 = PAPNode(type: .process,  label: "Zugriff gewähren",   col: 2, row: 3)
-            let n5 = PAPNode(type: .end,      label: "Ende",               col: 2, row: 4)
-            nodes = [n1, n2, n3, n4, n5]
+            // Left comments
+            let cL0 = PAPNode(type: .comment, label: "Zeigt ein Beispiel für das grundlegende EVA-Prinzip einfacher Datenverarbeitungssysteme.", col: 0, row: 0)
+            let cL1 = PAPNode(type: .comment, label: "E = Eingabe", col: 0, row: 1)
+            let cL3 = PAPNode(type: .comment, label: "V = Verarbeitung", col: 0, row: 3)
+            let cL4 = PAPNode(type: .comment, label: "A = Ausgabe", col: 0, row: 4)
+
+            // Right comment
+            let cR3 = PAPNode(type: .comment, label: "Beachten Sie, dass die Symbole knapp aber aussagekräftig beschriftet werden.\nZiel: Spontanes Verstehen!", col: 2, row: 3)
+
+            nodes = [n1, n2, n3, n4, n5, n6, cL0, cL1, cL3, cL4, cR3]
             edges = [
                 PAPEdge(fromId: n1.id, toId: n2.id, label: "", fromPort: .bottom),
                 PAPEdge(fromId: n2.id, toId: n3.id, label: "", fromPort: .bottom),
-                PAPEdge(fromId: n3.id, toId: n2.id, label: "nein", fromPort: .left), // Loopback up
-                PAPEdge(fromId: n3.id, toId: n4.id, label: "ja", fromPort: .right),
+                PAPEdge(fromId: n3.id, toId: n4.id, label: "", fromPort: .bottom),
                 PAPEdge(fromId: n4.id, toId: n5.id, label: "", fromPort: .bottom),
+                PAPEdge(fromId: n5.id, toId: n6.id, label: "", fromPort: .bottom),
+            ]
+
+        case .tutorial3:
+            // Main spine (Col 1)
+            let n1  = PAPNode(type: .start,    label: "Start", col: 1, row: 0)
+            let n2  = PAPNode(type: .io,       label: "Lizenzabkommen akzeptieren", col: 1, row: 1, tag: "E")
+            let n3  = PAPNode(type: .decision, label: "Lizenzvereinbarung akzeptiert?", col: 1, row: 2)
+            let n4  = PAPNode(type: .io,       label: "Auswahl der Installationsbestandteile", col: 1, row: 3, tag: "E")
+            let n5  = PAPNode(type: .decision, label: ".NET 2 Test ausgewählt?", col: 1, row: 4)
+            let n6  = PAPNode(type: .io,       label: "Eingabe von Zielverzeichnis", col: 1, row: 5, tag: "E")
+            let n7  = PAPNode(type: .decision, label: "Verzeichnis ok und schreibberechtigt?", col: 1, row: 6)
+            let n8  = PAPNode(type: .process,  label: "PapDesigner installieren", col: 1, row: 7)
+            let n9  = PAPNode(type: .decision, label: "Installation erfolgreich?", col: 1, row: 8)
+            let n10 = PAPNode(type: .decision, label: "Deinstaller ausgewählt?", col: 1, row: 9)
+            let n11 = PAPNode(type: .decision, label: "Startmenüeintrag ausgewählt?", col: 1, row: 10)
+            let n12 = PAPNode(type: .end,      label: "Ende", col: 1, row: 12)
+
+            // Side branches (Col 2 & 3)
+            let pDotNet   = PAPNode(type: .process,  label: ".NET 2 Installation testen", col: 2, row: 4)
+            let dDotNetOk = PAPNode(type: .decision, label: "Test erfolgreich?", col: 3, row: 4)
+
+            let pDeinst   = PAPNode(type: .process,  label: "Deinstaller installieren", col: 2, row: 9)
+            let dDeinstOk = PAPNode(type: .decision, label: "Installation erfolgreich?", col: 3, row: 9)
+
+            let pMenuAll   = PAPNode(type: .process,  label: "Startmenü anlegen alle Anwender (Admin)", col: 2, row: 10)
+            let dMenuAllOk = PAPNode(type: .decision, label: "Eintrag erfolgreich?", col: 3, row: 10)
+
+            let pMenuUser   = PAPNode(type: .process,  label: "Startmenü anlegen aktueller Anwender", col: 2, row: 11)
+            let dMenuUserOk = PAPNode(type: .decision, label: "Eintrag erfolgreich?", col: 3, row: 11)
+
+            // Abort bus node (Col 4, row 12)
+            let pAbbruch = PAPNode(type: .process, label: "Abbruch der Installation", col: 4, row: 12)
+
+            // Comments
+            let cIntro  = PAPNode(type: .comment, label: "Dieses Beispiel demonstriert den Installationsprozess vom PapDesigner-Setup", col: 2, row: 1)
+            let cOpt    = PAPNode(type: .comment, label: "Optional:\n• .NET 2 Test\n• Deinstaller einrichten\n• Startmenüeintrag vornehmen", col: 2, row: 3)
+            let cDefDir = PAPNode(type: .comment, label: "Standardvorgabe:\nC:\\Programme\\PapDesigner", col: 2, row: 5)
+
+            nodes = [
+                n1, n2, n3, n4, n5, n6, n7, n8, n9, n10, n11, n12,
+                pDotNet, dDotNetOk,
+                pDeinst, dDeinstOk,
+                pMenuAll, dMenuAllOk,
+                pMenuUser, dMenuUserOk,
+                pAbbruch,
+                cIntro, cOpt, cDefDir
+            ]
+
+            edges = [
+                PAPEdge(fromId: n1.id, toId: n2.id, label: "", fromPort: .bottom),
+                PAPEdge(fromId: n2.id, toId: n3.id, label: "", fromPort: .bottom),
+                PAPEdge(fromId: n3.id, toId: n4.id, label: "ja", fromPort: .bottom),
+                PAPEdge(fromId: n3.id, toId: pAbbruch.id, label: "nein", fromPort: .right),
+
+                PAPEdge(fromId: n4.id, toId: n5.id, label: "", fromPort: .bottom),
+                PAPEdge(fromId: n5.id, toId: n6.id, label: "nein", fromPort: .bottom),
+                PAPEdge(fromId: n5.id, toId: pDotNet.id, label: "ja", fromPort: .right),
+                PAPEdge(fromId: pDotNet.id, toId: dDotNetOk.id, label: "", fromPort: .right),
+                PAPEdge(fromId: dDotNetOk.id, toId: n6.id, label: "ja", fromPort: .bottom),
+                PAPEdge(fromId: dDotNetOk.id, toId: pAbbruch.id, label: "nein", fromPort: .right),
+
+                PAPEdge(fromId: n6.id, toId: n7.id, label: "", fromPort: .bottom),
+                PAPEdge(fromId: n7.id, toId: n8.id, label: "ja", fromPort: .bottom),
+                PAPEdge(fromId: n7.id, toId: n6.id, label: "nein", fromPort: .left), // Loopback!
+
+                PAPEdge(fromId: n8.id, toId: n9.id, label: "", fromPort: .bottom),
+                PAPEdge(fromId: n9.id, toId: n10.id, label: "ja", fromPort: .bottom),
+                PAPEdge(fromId: n9.id, toId: pAbbruch.id, label: "nein", fromPort: .right),
+
+                PAPEdge(fromId: n10.id, toId: n11.id, label: "nein", fromPort: .bottom),
+                PAPEdge(fromId: n10.id, toId: pDeinst.id, label: "ja", fromPort: .right),
+                PAPEdge(fromId: pDeinst.id, toId: dDeinstOk.id, label: "", fromPort: .right),
+                PAPEdge(fromId: dDeinstOk.id, toId: n11.id, label: "ja", fromPort: .bottom),
+                PAPEdge(fromId: dDeinstOk.id, toId: pAbbruch.id, label: "nein", fromPort: .right),
+
+                PAPEdge(fromId: n11.id, toId: n12.id, label: "nein", fromPort: .bottom),
+                PAPEdge(fromId: n11.id, toId: pMenuAll.id, label: "ja", fromPort: .right),
+                PAPEdge(fromId: pMenuAll.id, toId: dMenuAllOk.id, label: "", fromPort: .right),
+                PAPEdge(fromId: dMenuAllOk.id, toId: n12.id, label: "ja", fromPort: .bottom),
+                PAPEdge(fromId: dMenuAllOk.id, toId: pMenuUser.id, label: "nein", fromPort: .right),
+
+                PAPEdge(fromId: pMenuUser.id, toId: dMenuUserOk.id, label: "", fromPort: .right),
+                PAPEdge(fromId: dMenuUserOk.id, toId: n12.id, label: "ja", fromPort: .bottom),
+                PAPEdge(fromId: dMenuUserOk.id, toId: pAbbruch.id, label: "nein", fromPort: .right),
+
+                PAPEdge(fromId: pAbbruch.id, toId: n12.id, label: "", fromPort: .bottom),
             ]
 
         case .empty:
@@ -1018,7 +1125,7 @@ final class PAPDesignerViewModel: ObservableObject {
         let h = max(maxY - minY, 300)
 
         let offset = CGPoint(x: -minX, y: -minY)
-        let renderView = PAPExportRenderView(nodes: nodes, edges: edges, offset: offset, bypassDistance: bypassDistance)
+        let renderView = PAPExportRenderView(nodes: nodes, edges: edges, offset: offset, bypassDistance: bypassDistance, diagramName: diagramName)
             .frame(width: w, height: h)
             .background(Color.white)
 
@@ -1047,46 +1154,64 @@ struct PAPNodeCardView: View {
     var isConnectTarget: Bool = false
 
     var body: some View {
-        ZStack {
-            // Background fill
-            nodeShape
-                .fill(node.type.fillColor)
+        Group {
+            if node.type == .comment {
+                ZStack(alignment: .leading) {
+                    CommentBracketShape()
+                        .stroke(
+                            isConnectSource ? Color.purple : (isConnectTarget ? Color.blue : (isSelected ? Color.blue : node.type.strokeColor)),
+                            style: StrokeStyle(lineWidth: (isSelected || isConnectSource || isConnectTarget) ? 2.8 : 1.8)
+                        )
 
-            // Crisp border
-            nodeShape
-                .stroke(
-                    isConnectSource ? Color.purple : (isConnectTarget ? Color.blue : (isSelected ? Color.blue : node.type.strokeColor)),
-                    style: StrokeStyle(lineWidth: (isSelected || isConnectSource || isConnectTarget) ? 3 : 1.8, dash: isConnectTarget ? [5, 3] : [])
-                )
+                    Text(node.label)
+                        .font(.system(size: 11, weight: .regular))
+                        .multilineTextAlignment(.leading)
+                        .foregroundColor(Color(red: 0.0, green: 0.0, blue: 0.545))
+                        .padding(.leading, 14)
+                        .padding(.trailing, 6)
+                        .padding(.vertical, 4)
+                        .lineLimit(5)
+                        .minimumScaleFactor(0.8)
+                }
+            } else {
+                ZStack {
+                    // Background fill
+                    nodeShape
+                        .fill(node.type.fillColor)
 
-            // IO Tag badge (E for Input, A for Output)
-            if node.type == .io && !node.tag.isEmpty {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Text(node.tag)
-                            .font(.system(size: 11, weight: .black, design: .monospaced))
-                            .foregroundColor(node.type.strokeColor)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.85))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                            .padding(.leading, 18)
-                            .padding(.bottom, 4)
-                        Spacer()
+                    // Crisp border
+                    nodeShape
+                        .stroke(
+                            isConnectSource ? Color.purple : (isConnectTarget ? Color.blue : (isSelected ? Color.blue : node.type.strokeColor)),
+                            style: StrokeStyle(lineWidth: (isSelected || isConnectSource || isConnectTarget) ? 3 : 1.8, dash: isConnectTarget ? [5, 3] : [])
+                        )
+
+                    // IO Tag badge (E for Input, A for Output) in PapDesigner italic style
+                    if node.type == .io && !node.tag.isEmpty {
+                        VStack {
+                            Spacer()
+                            HStack {
+                                Text(node.tag)
+                                    .font(.system(size: 11, weight: .black, design: .default).italic())
+                                    .foregroundColor(node.type.strokeColor)
+                                    .padding(.leading, 16)
+                                    .padding(.bottom, 3)
+                                Spacer()
+                            }
+                        }
                     }
+
+                    // Node Text
+                    Text(node.label)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(Color(white: 0.12))
+                        .padding(.horizontal, node.type == .io ? 24 : (node.type == .decision ? 18 : 10))
+                        .padding(.vertical, 4)
+                        .lineLimit(3)
+                        .minimumScaleFactor(0.8)
                 }
             }
-
-            // Node Text
-            Text(node.label)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .multilineTextAlignment(.center)
-                .foregroundColor(Color(white: 0.12))
-                .padding(.horizontal, node.type == .io ? 24 : (node.type == .decision ? 18 : 10))
-                .padding(.vertical, 4)
-                .lineLimit(3)
-                .minimumScaleFactor(0.8)
         }
         .frame(width: node.type.defaultWidth, height: node.type.defaultHeight)
         .overlay(alignment: .topTrailing) {
@@ -1128,6 +1253,8 @@ struct PAPNodeCardView: View {
             return AnyShape(DiamondShape())
         case .subroutine:
             return AnyShape(SubroutineShape())
+        case .comment:
+            return AnyShape(CommentBracketShape())
         case .connector:
             return AnyShape(Circle())
         }
@@ -1141,6 +1268,70 @@ struct AnyShape: Shape {
     func path(in rect: CGRect) -> Path { _path(rect) }
 }
 
+// MARK: - DIN Title Block (Schriftfeld)
+
+struct PAPTitelblockView: View {
+    var projectName: String = "Tutorial - Ablaufplan"
+    var author: String = "f.folkmann"
+    var diagramName: String = "Ablaufplan"
+    var createdDate: String = "14.01.07"
+    var modifiedDate: String = "18.04.20"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text("Projekt:")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(Color(white: 0.4))
+                    .frame(width: 55, alignment: .leading)
+                Text(projectName)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.black)
+            }
+            HStack(spacing: 6) {
+                Text("Ersteller:")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(Color(white: 0.4))
+                    .frame(width: 55, alignment: .leading)
+                Text(author)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.black)
+            }
+            HStack(spacing: 6) {
+                Text("Diagramm:")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(Color(white: 0.4))
+                    .frame(width: 55, alignment: .leading)
+                Text(diagramName)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(Color(red: 0.0, green: 0.0, blue: 0.545))
+            }
+            HStack(spacing: 4) {
+                Text("Erstellt:")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(Color(white: 0.4))
+                    .frame(width: 55, alignment: .leading)
+                Text(createdDate)
+                    .font(.system(size: 9))
+                    .foregroundColor(.black)
+                Spacer()
+                Text("Geändert:")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(Color(white: 0.4))
+                Text(modifiedDate)
+                    .font(.system(size: 9))
+                    .foregroundColor(.black)
+            }
+        }
+        .padding(6)
+        .frame(width: 250)
+        .background(Color.white)
+        .overlay(
+            Rectangle().stroke(Color(white: 0.3), lineWidth: 1.2)
+        )
+    }
+}
+
 // MARK: - Export Render View
 
 struct PAPExportRenderView: View {
@@ -1148,6 +1339,7 @@ struct PAPExportRenderView: View {
     let edges: [PAPEdge]
     let offset: CGPoint
     var bypassDistance: CGFloat = 28
+    var diagramName: String = "Ablaufplan"
 
     private var computedRoutes: [(edge: PAPEdge, offsetPoints: [CGPoint], arrowDir: ArrowDirection, offsetLabel: CGPoint, priorPolylines: [[CGPoint]])] {
         var list: [(edge: PAPEdge, offsetPoints: [CGPoint], arrowDir: ArrowDirection, offsetLabel: CGPoint, priorPolylines: [[CGPoint]])] = []
@@ -1167,6 +1359,15 @@ struct PAPExportRenderView: View {
 
     var body: some View {
         ZStack {
+            // Render Diagram Title (Top Centered)
+            Text(diagramName)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(Color(red: 0.0, green: 0.0, blue: 0.545))
+                .position(
+                    x: (nodes.map { $0.cx + offset.x }.reduce(0, +) / CGFloat(max(1, nodes.count))),
+                    y: 28
+                )
+
             // Render Edges
             ForEach(computedRoutes, id: \.edge.id) { item in
                 ZStack {
@@ -1191,6 +1392,12 @@ struct PAPExportRenderView: View {
                 PAPNodeCardView(node: node, isSelected: false, isConnectSource: false)
                     .position(x: node.cx + offset.x, y: node.cy + offset.y)
             }
+
+            // Render DIN Title Block
+            let maxNodeY = (nodes.map { $0.cy + offset.y }.max() ?? 600) + 50
+            let maxNodeX = (nodes.map { $0.cx + offset.x }.max() ?? 400)
+            PAPTitelblockView(diagramName: diagramName)
+                .position(x: max(maxNodeX - 100, 240), y: max(maxNodeY, 740))
         }
     }
 }
@@ -1426,6 +1633,14 @@ struct PAPDesignerView: View {
                     gridBackground
                         .frame(width: 1600, height: 2600)
 
+                    // Centered Blue Diagram Title (PapDesigner style)
+                    Text(vm.diagramName)
+                        .font(.system(size: 19, weight: .bold, design: .default))
+                        .foregroundColor(Color(red: 0.0, green: 0.0, blue: 0.545))
+                        .multilineTextAlignment(.center)
+                        .frame(width: 400)
+                        .position(x: PAPGrid.center(col: 1, row: 0).x, y: 35)
+
                     // Orthogonal Edges
                     ForEach(computedRoutes, id: \.edge.id) { item in
                         edgeView(item.edge, points: item.points, arrowDir: item.arrowDir, labelPos: item.labelPos, priorPolylines: item.priorPolylines)
@@ -1435,6 +1650,15 @@ struct PAPDesignerView: View {
                     ForEach(vm.nodes) { node in
                         nodeItemView(node)
                     }
+
+                    // DIN Title Block (Schriftfeld) in Bottom-Right
+                    let maxRow = vm.nodes.map { $0.row }.max() ?? 6
+                    let titleBlockY = max(PAPGrid.center(col: 1, row: maxRow).y + 60, 780)
+                    let titleBlockX = PAPGrid.center(col: 2, row: 0).x + 130
+                    PAPTitelblockView(
+                        diagramName: vm.diagramName
+                    )
+                    .position(x: titleBlockX, y: titleBlockY)
 
                     // Quick Action HUD on Selected Node
                     if let selected = vm.selectedNode, !isDrawingMode {
