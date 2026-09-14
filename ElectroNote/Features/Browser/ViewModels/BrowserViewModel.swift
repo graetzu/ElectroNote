@@ -92,10 +92,11 @@ final class BrowserViewModel: ObservableObject {
     }
 
     @discardableResult
-    func createDocument(named name: String, type: DocumentType) -> DocumentItem? {
+    func createDocument(named name: String, type: DocumentType, at destination: URL? = nil) -> DocumentItem? {
         guard !name.isEmpty else { return nil }
         do {
-            let item = try fileService.createDocument(named: name, type: type, at: currentPath)
+            let targetURL = destination ?? currentPath
+            let item = try fileService.createDocument(named: name, type: type, at: targetURL)
             loadItems()
             return item
         } catch {

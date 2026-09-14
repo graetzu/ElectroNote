@@ -10,6 +10,12 @@ enum CollabSessionState: Equatable {
     case error(String)
 }
 
+struct DocumentSwitchRequest: Equatable {
+    let id: UUID = UUID()
+    let title: String
+    let type: CollabDocumentType
+}
+
 @MainActor
 final class LiveCollabSessionManager: ObservableObject {
     static let shared = LiveCollabSessionManager()
@@ -22,31 +28,44 @@ final class LiveCollabSessionManager: ObservableObject {
     @Published var discoveredRooms: [DiscoveredRoom] = []
     @Published var activeDocumentType: CollabDocumentType = .note
     @Published var autoOpenRequestedType: CollabDocumentType? = nil
+    @Published var remoteDocumentSwitchRequest: DocumentSwitchRequest? = nil
     @Published var activeDocumentTitle: String = "Live-Zusammenarbeit"
     @Published var myPeer: CollabPeer
+
+    static func cleanDocumentTitle(_ title: String) -> String {
+        var clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        for ext in [".enote", ".epap", ".ewb", ".emm", ".pdf"] {
+            if clean.hasSuffix(ext) {
+                clean = String(clean.dropLast(ext.count))
+            }
+        }
+        return clean.isEmpty ? "Live-Zusammenarbeit" : clean
+    }
 
     // Document hooks
     var onProvideSnapshot: (() -> (docJson: String?, drawingJson: String?, pkDrawingBase64: String?, documentTitle: String?))?
     var onApplySnapshot: ((String?, String?, String?) -> Void)? {
         didSet {
             if let onApplySnapshot = onApplySnapshot, (pendingDocSnapshot != nil || pendingDrawingSnapshot != nil || pendingPkDrawingBase64 != nil) {
-                print("[CollabSession] Replaying cached snapshot to newly attached onApplySnapshot")
+                print("[CollabSession] Replaying cached snapshot (\(pendingSnapshotDocTitle ?? "")) to newly attached onApplySnapshot")
                 let doc = pendingDocSnapshot
                 let drawing = pendingDrawingSnapshot
                 let pk = pendingPkDrawingBase64
                 pendingDocSnapshot = nil
                 pendingDrawingSnapshot = nil
                 pendingPkDrawingBase64 = nil
+                pendingSnapshotDocTitle = nil
                 onApplySnapshot(doc, drawing, pk)
             }
         }
     }
+    private var pendingSnapshotDocTitle: String?
     private var pendingDocSnapshot: String?
     private var pendingDrawingSnapshot: String?
     private var pendingPkDrawingBase64: String?
 
     var onRemoteStrokeReceived: ((PortableStrokeDTO, String?, String?) -> Void)?
-    var onRemoteStrokesCleared: (() -> Void)?
+    var onRemoteStrokesCleared: ((String?) -> Void)?
     var onRemoteElementUpsert: ((String) -> Void)?
     var onRemoteElementMoved: ((String, Double, Double) -> Void)?
     var onRemoteElementDeleted: ((String) -> Void)?
@@ -98,13 +117,17 @@ final class LiveCollabSessionManager: ObservableObject {
 
         client.onConnectedChanged = { [weak self] connected in
             Task { @MainActor [weak self] in
+                guard let self = self else { return }
                 if connected {
-                    self?.sessionState = .connected
-                    self?.autoOpenRequestedType = self?.activeDocumentType
-                } else if case .connected = self?.sessionState {
-                    self?.sessionState = .idle
-                    self?.connectedPeers = []
-                    self?.autoOpenRequestedType = nil
+                    self.sessionState = .connected
+                    self.autoOpenRequestedType = self.activeDocumentType
+                    let title = Self.cleanDocumentTitle(self.activeDocumentTitle)
+                    self.remoteDocumentSwitchRequest = DocumentSwitchRequest(title: title, type: self.activeDocumentType)
+                } else if case .connected = self.sessionState {
+                    self.sessionState = .idle
+                    self.connectedPeers = []
+                    self.autoOpenRequestedType = nil
+                    self.remoteDocumentSwitchRequest = nil
                 }
             }
         }
@@ -120,18 +143,20 @@ final class LiveCollabSessionManager: ObservableObject {
 
     func startHosting(documentName: String, documentType: CollabDocumentType) {
         leaveSession()
+        let cleanName = Self.cleanDocumentTitle(documentName)
         activeDocumentType = documentType
-        activeDocumentTitle = documentName
+        activeDocumentTitle = cleanName
         myPeer.isHost = true
 
         do {
-            try server.start(hostPeer: myPeer, documentType: documentType, roomName: "ElectroNote - \(documentName)")
+            try server.start(hostPeer: myPeer, documentType: documentType, roomName: "ElectroNote - \(cleanName)")
             hostIP = server.localIP
             hostPort = server.port
             roomCode = generateRoomCode(port: server.port)
             sessionState = .hosting
             connectedPeers = [myPeer]
             autoOpenRequestedType = documentType
+            remoteDocumentSwitchRequest = DocumentSwitchRequest(title: cleanName, type: documentType)
         } catch {
             sessionState = .error(error.localizedDescription)
         }
@@ -174,9 +199,11 @@ final class LiveCollabSessionManager: ObservableObject {
         sessionState = .idle
         connectedPeers = []
         autoOpenRequestedType = nil
+        remoteDocumentSwitchRequest = nil
         pendingDocSnapshot = nil
         pendingDrawingSnapshot = nil
         pendingPkDrawingBase64 = nil
+        pendingSnapshotDocTitle = nil
     }
 
     func requestSnapshot() {
@@ -217,10 +244,20 @@ final class LiveCollabSessionManager: ObservableObject {
 
     func switchDocument(title: String, type: CollabDocumentType) {
         guard sessionState == .hosting || sessionState == .connected else { return }
-        guard activeDocumentTitle != title || activeDocumentType != type else { return }
-        print("[CollabSession] switchDocument: \(title) (\(type))")
-        activeDocumentTitle = title
+        let cleanTitle = Self.cleanDocumentTitle(title)
+        guard activeDocumentTitle != cleanTitle || activeDocumentType != type else { return }
+        print("[CollabSession] switchDocument: \(cleanTitle) (\(type))")
+        activeDocumentTitle = cleanTitle
         activeDocumentType = type
+
+        // Invalidate old snapshot callbacks and pending data from previous document
+        onApplySnapshot = nil
+        onProvideSnapshot = nil
+        pendingDocSnapshot = nil
+        pendingDrawingSnapshot = nil
+        pendingPkDrawingBase64 = nil
+        pendingSnapshotDocTitle = nil
+
         if sessionState == .hosting {
             server.documentType = type
         }
@@ -229,7 +266,7 @@ final class LiveCollabSessionManager: ObservableObject {
             senderId: myPeer.id,
             senderName: myPeer.name,
             documentType: type,
-            documentTitle: title
+            documentTitle: cleanTitle
         )
         dispatchMessage(msg)
     }
@@ -361,46 +398,68 @@ final class LiveCollabSessionManager: ObservableObject {
             }
 
         case .snapshotResponse:
-            print("[CollabSession] Received snapshotResponse for type: \(message.documentType)")
+            let cleanTitle = Self.cleanDocumentTitle(message.documentTitle ?? self.activeDocumentTitle)
+            print("[CollabSession] Received snapshotResponse for type: \(message.documentType), title: \(cleanTitle)")
+            let docChanged = (self.activeDocumentTitle != cleanTitle || self.activeDocumentType != message.documentType)
             self.activeDocumentType = message.documentType
-            if let title = message.documentTitle, !title.isEmpty {
-                self.activeDocumentTitle = title
-            }
+            self.activeDocumentTitle = cleanTitle
             self.autoOpenRequestedType = message.documentType
-            if let onApplySnapshot = self.onApplySnapshot {
-                print("[CollabSession] Applying snapshot immediately to attached handler")
+
+            if docChanged {
+                self.onApplySnapshot = nil
+                self.pendingSnapshotDocTitle = cleanTitle
+                self.pendingDocSnapshot = message.documentSnapshotJson
+                self.pendingDrawingSnapshot = message.drawingSnapshotJson
+                self.pendingPkDrawingBase64 = message.pkDrawingData
+                self.remoteDocumentSwitchRequest = DocumentSwitchRequest(title: cleanTitle, type: message.documentType)
+            } else if let onApplySnapshot = self.onApplySnapshot {
+                print("[CollabSession] Applying snapshot immediately to attached handler for \(cleanTitle)")
                 onApplySnapshot(message.documentSnapshotJson, message.drawingSnapshotJson, message.pkDrawingData)
                 self.pendingDocSnapshot = nil
                 self.pendingDrawingSnapshot = nil
                 self.pendingPkDrawingBase64 = nil
+                self.pendingSnapshotDocTitle = nil
             } else {
-                print("[CollabSession] Caching snapshot until view mounts")
+                print("[CollabSession] Caching snapshot until view mounts for \(cleanTitle)")
+                self.pendingSnapshotDocTitle = cleanTitle
                 self.pendingDocSnapshot = message.documentSnapshotJson
                 self.pendingDrawingSnapshot = message.drawingSnapshotJson
                 self.pendingPkDrawingBase64 = message.pkDrawingData
             }
 
         case .documentSwitched:
-            print("[CollabSession] Remote switched document to: \(message.documentTitle ?? "") (\(message.documentType))")
-            self.activeDocumentType = message.documentType
-            if let title = message.documentTitle, !title.isEmpty {
-                self.activeDocumentTitle = title
+            let cleanTitle = Self.cleanDocumentTitle(message.documentTitle ?? "Live-Zusammenarbeit")
+            print("[CollabSession] Remote switched document to: \(cleanTitle) (\(message.documentType))")
+            if self.activeDocumentTitle != cleanTitle || self.activeDocumentType != message.documentType {
+                self.onApplySnapshot = nil
+                self.onProvideSnapshot = nil
+                self.pendingDocSnapshot = nil
+                self.pendingDrawingSnapshot = nil
+                self.pendingPkDrawingBase64 = nil
+                self.pendingSnapshotDocTitle = nil
             }
+            self.activeDocumentType = message.documentType
+            self.activeDocumentTitle = cleanTitle
             self.autoOpenRequestedType = message.documentType
+            self.remoteDocumentSwitchRequest = DocumentSwitchRequest(title: cleanTitle, type: message.documentType)
 
         case .strokeAdded:
             if let stroke = message.stroke {
-                if let docTitle = message.documentTitle, !docTitle.isEmpty, docTitle != self.activeDocumentTitle {
-                    print("[CollabSession] Received stroke for different document: '\(docTitle)' (current: '\(self.activeDocumentTitle)'), triggering switch")
-                    self.activeDocumentTitle = docTitle
-                    self.activeDocumentType = message.documentType
-                    self.autoOpenRequestedType = message.documentType
+                if let docTitle = message.documentTitle {
+                    let clean = Self.cleanDocumentTitle(docTitle)
+                    if clean != self.activeDocumentTitle {
+                        print("[CollabSession] Received stroke for different document: '\(clean)' (current: '\(self.activeDocumentTitle)'), triggering switch")
+                        self.activeDocumentTitle = clean
+                        self.activeDocumentType = message.documentType
+                        self.autoOpenRequestedType = message.documentType
+                        self.remoteDocumentSwitchRequest = DocumentSwitchRequest(title: clean, type: message.documentType)
+                    }
                 }
                 onRemoteStrokeReceived?(stroke, message.pkStrokeData, message.documentTitle)
             }
 
         case .strokesCleared:
-            onRemoteStrokesCleared?()
+            onRemoteStrokesCleared?(message.documentTitle)
 
         case .elementUpsert:
             if let json = message.elementJson {

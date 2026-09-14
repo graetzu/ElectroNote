@@ -376,7 +376,7 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
             let drawingData = try? JSONEncoder().encode(strokes)
             let drawingJson = drawingData.flatMap { String(data: $0, encoding: .utf8) }
             let pkDrawingBase64 = self.canvasView.drawing.dataRepresentation().base64EncodedString()
-            let docTitle = self.folderURL?.lastPathComponent ?? collab.activeDocumentTitle
+            let docTitle = self.folderURL?.deletingPathExtension().lastPathComponent ?? collab.activeDocumentTitle
             return (nil, drawingJson, pkDrawingBase64, docTitle)
         }
 
@@ -400,8 +400,10 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
 
         collab.onRemoteStrokeReceived = { [weak self] strokeDTO, pkStrokeData, docTitle in
             guard let self = self else { return }
-            if let docTitle = docTitle, !docTitle.isEmpty, docTitle != (self.folderURL?.lastPathComponent ?? "") {
-                print("[WhiteboardView] Skipping stroke intended for '\(docTitle)' while current is '\(self.folderURL?.lastPathComponent ?? "")'")
+            let myTitle = self.folderURL?.deletingPathExtension().lastPathComponent ?? ""
+            let cleanRemoteTitle = LiveCollabSessionManager.cleanDocumentTitle(docTitle ?? "")
+            if !cleanRemoteTitle.isEmpty && !myTitle.isEmpty && cleanRemoteTitle != myTitle {
+                print("[WhiteboardView] Skipping stroke intended for '\(cleanRemoteTitle)' while current is '\(myTitle)'")
                 return
             }
             self.isApplyingRemoteStroke = true
@@ -423,8 +425,11 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
             self.isApplyingRemoteStroke = false
         }
 
-        collab.onRemoteStrokesCleared = { [weak self] in
+        collab.onRemoteStrokesCleared = { [weak self] docTitle in
             guard let self = self else { return }
+            let myTitle = self.folderURL?.deletingPathExtension().lastPathComponent ?? ""
+            let cleanRemote = LiveCollabSessionManager.cleanDocumentTitle(docTitle ?? "")
+            if !cleanRemote.isEmpty && !myTitle.isEmpty && cleanRemote != myTitle { return }
             self.isApplyingRemoteStroke = true
             self.canvasView.drawing = PKDrawing()
             for (_, v) in self.stickyNoteViews {

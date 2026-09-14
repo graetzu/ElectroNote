@@ -284,7 +284,7 @@ final class InfiniteNotebookViewController: UIViewController {
                 let drawingData = try? JSONEncoder().encode(strokes)
                 let drawingJson = drawingData.flatMap { String(data: $0, encoding: .utf8) }
                 let pkDrawingBase64 = self.canvasView.drawing.dataRepresentation().base64EncodedString()
-                let docTitle = self.store?.noteURL.lastPathComponent ?? LiveCollabSessionManager.shared.activeDocumentTitle
+                let docTitle = self.store?.noteURL.deletingPathExtension().lastPathComponent ?? LiveCollabSessionManager.shared.activeDocumentTitle
                 LiveCollabSessionManager.shared.broadcastHostSnapshot(
                     docJson: docJson,
                     drawingJson: drawingJson,
@@ -4705,7 +4705,7 @@ extension InfiniteNotebookViewController {
             let drawingData = try? JSONEncoder().encode(strokes)
             let drawingJson = drawingData.flatMap { String(data: $0, encoding: .utf8) }
             let pkDrawingBase64 = self.canvasView.drawing.dataRepresentation().base64EncodedString()
-            let docTitle = self.store?.noteURL.lastPathComponent ?? collab.activeDocumentTitle
+            let docTitle = self.store?.noteURL.deletingPathExtension().lastPathComponent ?? collab.activeDocumentTitle
             return (docJson, drawingJson, pkDrawingBase64, docTitle)
         }
 
@@ -4735,8 +4735,10 @@ extension InfiniteNotebookViewController {
 
         collab.onRemoteStrokeReceived = { [weak self] strokeDTO, pkStrokeData, docTitle in
             guard let self = self else { return }
-            if let docTitle = docTitle, !docTitle.isEmpty, docTitle != self.store?.noteURL.lastPathComponent {
-                print("[NotebookVC] Skipping stroke intended for '\(docTitle)' while current is '\(self.store?.noteURL.lastPathComponent ?? "")'")
+            let myTitle = self.store?.noteURL.deletingPathExtension().lastPathComponent ?? ""
+            let cleanRemoteTitle = LiveCollabSessionManager.cleanDocumentTitle(docTitle ?? "")
+            if !cleanRemoteTitle.isEmpty && !myTitle.isEmpty && cleanRemoteTitle != myTitle {
+                print("[NotebookVC] Skipping stroke intended for '\(cleanRemoteTitle)' while current is '\(myTitle)'")
                 return
             }
             self.isApplyingRemoteStroke = true
@@ -4758,8 +4760,11 @@ extension InfiniteNotebookViewController {
             self.isApplyingRemoteStroke = false
         }
 
-        collab.onRemoteStrokesCleared = { [weak self] in
+        collab.onRemoteStrokesCleared = { [weak self] docTitle in
             guard let self = self else { return }
+            let myTitle = self.store?.noteURL.deletingPathExtension().lastPathComponent ?? ""
+            let cleanRemote = LiveCollabSessionManager.cleanDocumentTitle(docTitle ?? "")
+            if !cleanRemote.isEmpty && !myTitle.isEmpty && cleanRemote != myTitle { return }
             self.isApplyingRemoteStroke = true
             self.canvasView.drawing = PKDrawing()
             self.lastCollabStrokeCount = 0

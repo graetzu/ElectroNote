@@ -58,8 +58,9 @@ struct ContentView: View {
                 // If in an active live session, propagate document switch to other peers
                 if let collabType = item.type.collabDocumentType,
                    (collab.sessionState == .hosting || collab.sessionState == .connected) {
-                    if collab.activeDocumentTitle != item.name || collab.activeDocumentType != collabType {
-                        collab.switchDocument(title: item.name, type: collabType)
+                    let cleanName = LiveCollabSessionManager.cleanDocumentTitle(item.name)
+                    if collab.activeDocumentTitle != cleanName || collab.activeDocumentType != collabType {
+                        collab.switchDocument(title: cleanName, type: collabType)
                     }
                 }
             }
@@ -69,21 +70,29 @@ struct ContentView: View {
             withAnimation { sidebarVisibility = .detailOnly }
             #endif
         }
-        .onReceive(collab.$autoOpenRequestedType) { requestedType in
-            guard let type = requestedType else { return }
-            let targetDocType = type.browserDocumentType
-            let liveDocName = collab.activeDocumentTitle.isEmpty ? "Live-Zusammenarbeit" : collab.activeDocumentTitle
+        .onReceive(collab.$remoteDocumentSwitchRequest) { request in
+            guard let request = request else { return }
+            let targetDocType = request.type.browserDocumentType
+            let cleanName = LiveCollabSessionManager.cleanDocumentTitle(request.title)
+            print("[ContentView] Handling remoteDocumentSwitchRequest: '\(cleanName)' (\(request.type))")
 
+            // Look up across all documents in library
+            let allDocs = browserVM.listAllDocuments()
             let targetDoc: DocumentItem
-            if let existing = browserVM.items.first(where: { $0.name == liveDocName && $0.type == targetDocType.itemType }) {
+            if let existing = allDocs.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(cleanName) == .orderedSame &&
+                $0.type == targetDocType.itemType
+            }) {
                 targetDoc = existing
-            } else if let newDoc = browserVM.createDocument(named: liveDocName, type: targetDocType) {
+            } else if let newDoc = browserVM.createDocument(named: cleanName, type: targetDocType, at: browserVM.rootURL) {
                 targetDoc = newDoc
             } else {
+                print("[ContentView] Failed to find or create document '\(cleanName)'")
                 return
             }
 
-            if selectedItem?.id != targetDoc.id {
+            if selectedItem?.path != targetDoc.path {
+                print("[ContentView] Switching selectedItem to '\(targetDoc.name)'")
                 selectedItem = targetDoc
             }
 
