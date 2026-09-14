@@ -4,13 +4,21 @@ import CoreImage
 struct LiveCollabSheetView: View {
     let documentName: String
     let documentType: CollabDocumentType
+    var initialTab: Int = 1
 
     @ObservedObject private var collab = LiveCollabSessionManager.shared
     @Environment(\.dismiss) private var dismiss
 
-    @State private var selectedTab: Int = 0 // 0 = Hosten, 1 = Beitreten
+    @State private var selectedTab: Int
     @State private var manualHost: String = ""
     @State private var manualPortText: String = "8765"
+
+    init(documentName: String, documentType: CollabDocumentType, initialTab: Int = 1) {
+        self.documentName = documentName
+        self.documentType = documentType
+        self.initialTab = initialTab
+        self._selectedTab = State(initialValue: initialTab)
+    }
 
     var body: some View {
         NavigationStack {
@@ -38,7 +46,17 @@ struct LiveCollabSheetView: View {
         .onAppear {
             collab.startBrowsingRooms()
             if manualHost.isEmpty {
-                manualHost = collab.hostIP.isEmpty ? "192.168." : collab.hostIP
+                let ip = collab.hostIP.isEmpty ? (getLocalIPAddress() ?? "") : collab.hostIP
+                if !ip.isEmpty && ip.contains(".") {
+                    let parts = ip.split(separator: ".")
+                    if parts.count >= 3 {
+                        manualHost = "\(parts[0]).\(parts[1]).\(parts[2])."
+                    } else {
+                        manualHost = ip
+                    }
+                } else {
+                    manualHost = "10.100.72."
+                }
             }
         }
     }
@@ -62,13 +80,44 @@ struct LiveCollabSheetView: View {
                 .padding(.horizontal)
             }
 
-            Picker("Modus", selection: $selectedTab) {
-                Text("Sitzung hosten").tag(0)
-                Text("Sitzung beitreten").tag(1)
+            // Big, prominent tab switcher (Beitreten / Hosten)
+            HStack(spacing: 12) {
+                Button {
+                    selectedTab = 1
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.system(size: 16, weight: .bold))
+                        Text("Sitzung beitreten")
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(selectedTab == 1 ? Color.blue : Color(uiColor: .tertiarySystemFill))
+                    .foregroundColor(selectedTab == 1 ? .white : .primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    selectedTab = 0
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "person.2.wave.2.fill")
+                            .font(.system(size: 16, weight: .bold))
+                        Text("Sitzung hosten")
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(selectedTab == 0 ? Color.green : Color(uiColor: .tertiarySystemFill))
+                    .foregroundColor(selectedTab == 0 ? .white : .primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
             }
-            .pickerStyle(.segmented)
             .padding(.horizontal)
-            .padding(.top, 8)
+            .padding(.top, 12)
 
             if selectedTab == 0 {
                 hostTabContent

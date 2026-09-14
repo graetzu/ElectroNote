@@ -3,6 +3,7 @@ import SwiftUI
 struct LiveCollabBadgeButton: View {
     let documentName: String
     let documentType: CollabDocumentType
+    var initialTab: Int = 1
 
     @ObservedObject private var collab = LiveCollabSessionManager.shared
     @State private var showSheet: Bool = false
@@ -48,7 +49,7 @@ struct LiveCollabBadgeButton: View {
         }
         .accessibilityLabel("Live-Zusammenarbeit")
         .sheet(isPresented: $showSheet) {
-            LiveCollabSheetView(documentName: documentName, documentType: documentType)
+            LiveCollabSheetView(documentName: documentName, documentType: documentType, initialTab: initialTab)
         }
     }
 }
