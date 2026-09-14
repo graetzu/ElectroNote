@@ -16,6 +16,7 @@
 		20CFDF8285BF9D60BA249E16 /* DocumentPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 509B35F0AE957F323B74AD91 /* DocumentPicker.swift */; };
 		222097FCC420D891F99E589E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 06464E357D4DC30E74926C49 /* Assets.xcassets */; };
 		2E545FA27E937E1271FF28BD /* InfiniteNotebookViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523001FAD465C034DBF85C71 /* InfiniteNotebookViewController.swift */; };
+		2E545FA27E937E1271FF28BE /* InlineCanvasTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523001FAD465C034DBF85C72 /* InlineCanvasTextView.swift */; };
 		48163F798E8117CA8C88865F /* MathViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5D726EEA9E4029579A2DD3F /* MathViewModel.swift */; };
 		4B8F2A5AEB729EC10070D4BF /* ClipArtOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E85309E50DCDF646CD878434 /* ClipArtOverlayView.swift */; };
 		4E3B583F92A15CE6DFC00BDC /* NewItemSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32783332653099D32A9AF5DC /* NewItemSheet.swift */; };
@@ -77,6 +78,13 @@
 		LC01000000000000000000AA /* LiveCastServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0100000000000000000AA /* LiveCastServer.swift */; };
 		LC02000000000000000000BB /* LiveCastSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0200000000000000000BB /* LiveCastSheetView.swift */; };
 		LC03000000000000000000CC /* LiveCastBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCF0300000000000000000CC /* LiveCastBadgeView.swift */; };
+		CO01000000000000000000AA /* CollabMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = COF010000000000000000AA /* CollabMessage.swift */; };
+		CO02000000000000000000BB /* LiveCollabServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = COF020000000000000000BB /* LiveCollabServer.swift */; };
+		CO03000000000000000000CC /* LiveCollabClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = COF030000000000000000CC /* LiveCollabClient.swift */; };
+		CO04000000000000000000DD /* LiveCollabSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = COF040000000000000000DD /* LiveCollabSessionManager.swift */; };
+		CO05000000000000000000EE /* LiveCollabSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = COF050000000000000000EE /* LiveCollabSheetView.swift */; };
+		CO06000000000000000000FF /* LiveCollabBadgeButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = COF060000000000000000FF /* LiveCollabBadgeButton.swift */; };
+		CO07000000000000000000GG /* RemoteCursorBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = COF070000000000000000GG /* RemoteCursorBadgeView.swift */; };
 		EFM00001 /* ExternalFileImportManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFMREF01 /* ExternalFileImportManager.swift */; };
 		IFI00001 /* IncomingFileImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = IFIREF01 /* IncomingFileImportSheet.swift */; };
 		CPV00001000000000000001 /* CameraPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CPVREF010000000000000001 /* CameraPickerView.swift */; };
@@ -118,6 +126,7 @@
 		509B35F0AE957F323B74AD91 /* DocumentPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPicker.swift; sourceTree = "<group>"; };
 		522009BCC10C02F2DB79AEAA /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		523001FAD465C034DBF85C71 /* InfiniteNotebookViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InfiniteNotebookViewController.swift; sourceTree = "<group>"; };
+		523001FAD465C034DBF85C72 /* InlineCanvasTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineCanvasTextView.swift; sourceTree = "<group>"; };
 		5394F3D6AC1E80E2D1ABF5C2 /* InfiniteNotebookRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InfiniteNotebookRepresentable.swift; sourceTree = "<group>"; };
 		550B4D6EFBAA49AEF198BD00 /* ClipArtItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipArtItem.swift; sourceTree = "<group>"; };
 		59ED4D66AE57C9555BF8EA27 /* ClipArtPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipArtPickerView.swift; sourceTree = "<group>"; };
@@ -165,6 +174,13 @@
 		LCF0100000000000000000AA /* LiveCastServer.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LiveCastServer.swift; sourceTree = "<group>"; };
 		LCF0200000000000000000BB /* LiveCastSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/LiveCastSheetView.swift; sourceTree = "<group>"; };
 		LCF0300000000000000000CC /* LiveCastBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/LiveCastBadgeView.swift; sourceTree = "<group>"; };
+		COF010000000000000000AA /* CollabMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/CollabMessage.swift; sourceTree = "<group>"; };
+		COF020000000000000000BB /* LiveCollabServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LiveCollabServer.swift; sourceTree = "<group>"; };
+		COF030000000000000000CC /* LiveCollabClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LiveCollabClient.swift; sourceTree = "<group>"; };
+		COF040000000000000000DD /* LiveCollabSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LiveCollabSessionManager.swift; sourceTree = "<group>"; };
+		COF050000000000000000EE /* LiveCollabSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/LiveCollabSheetView.swift; sourceTree = "<group>"; };
+		COF060000000000000000FF /* LiveCollabBadgeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/LiveCollabBadgeButton.swift; sourceTree = "<group>"; };
+		COF070000000000000000GG /* RemoteCursorBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/RemoteCursorBadgeView.swift; sourceTree = "<group>"; };
 		DOCREF01 /* DocumentConverter.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentConverter.swift;    sourceTree = "<group>"; };
 		OCRREF01 /* OCRService.swift */           = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCRService.swift;           sourceTree = "<group>"; };
 		TEV00001 /* TagEditorView.swift */       = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagEditorView.swift;       sourceTree = "<group>"; };
@@ -367,6 +383,7 @@
 				E444F98B1D4EA227548C3F18 /* Sync */,
 				BB99887766554433221100FF /* Whiteboard */,
 				CC99887766554433221100FF /* LiveCast */,
+				COL0000000000000000000FF /* Collab */,
 				EE99887766554433221100FF /* Electrical */,
 				ST01REF00000000000000001 /* SettingsViewModel.swift */,
 				ST02REF00000000000000002 /* AppSettingsView.swift */,
@@ -383,6 +400,20 @@
 				ELEF000400000000000000DD /* ElektroSimWebSheetView.swift */,
 			);
 			path = Electrical;
+			sourceTree = "<group>";
+		};
+		COL0000000000000000000FF /* Collab */ = {
+			isa = PBXGroup;
+			children = (
+				COF010000000000000000AA /* CollabMessage.swift */,
+				COF020000000000000000BB /* LiveCollabServer.swift */,
+				COF030000000000000000CC /* LiveCollabClient.swift */,
+				COF040000000000000000DD /* LiveCollabSessionManager.swift */,
+				COF050000000000000000EE /* LiveCollabSheetView.swift */,
+				COF060000000000000000FF /* LiveCollabBadgeButton.swift */,
+				COF070000000000000000GG /* RemoteCursorBadgeView.swift */,
+			);
+			path = Collab;
 			sourceTree = "<group>";
 		};
 		CC99887766554433221100FF /* LiveCast */ = {
@@ -569,6 +600,7 @@
 				5ED6DFDF53E81863D619F52E /* InfiniteNotebookHostView.swift */,
 				5394F3D6AC1E80E2D1ABF5C2 /* InfiniteNotebookRepresentable.swift */,
 				523001FAD465C034DBF85C71 /* InfiniteNotebookViewController.swift */,
+				523001FAD465C034DBF85C72 /* InlineCanvasTextView.swift */,
 				AA11BB22CC33DD44EE55FF66 /* StickyNoteView.swift */,
 				CC33DD44EE55FF6677AA88BB /* ShapeSnapper.swift */,
 				HSELREF000000000000AABB /* HandwritingSelectionOverlay.swift */,
@@ -685,6 +717,7 @@
 				5D2A7C50AE76BB35D738F414 /* InfiniteNotebookHostView.swift in Sources */,
 				736F233BA5DD186CE6927DEA /* InfiniteNotebookRepresentable.swift in Sources */,
 				2E545FA27E937E1271FF28BD /* InfiniteNotebookViewController.swift in Sources */,
+				2E545FA27E937E1271FF28BE /* InlineCanvasTextView.swift in Sources */,
 				BB22CC33DD44EE55FF6677AA /* StickyNoteView.swift in Sources */,
 				DD44EE55FF6677AA88BB99CC /* ShapeSnapper.swift in Sources */,
 				B9754B80D8D2AA7CBD7394B3 /* InfiniteNotebookViewModel.swift in Sources */,
@@ -730,6 +763,13 @@
 				LC01000000000000000000AA /* LiveCastServer.swift in Sources */,
 				LC02000000000000000000BB /* LiveCastSheetView.swift in Sources */,
 				LC03000000000000000000CC /* LiveCastBadgeView.swift in Sources */,
+				CO01000000000000000000AA /* CollabMessage.swift in Sources */,
+				CO02000000000000000000BB /* LiveCollabServer.swift in Sources */,
+				CO03000000000000000000CC /* LiveCollabClient.swift in Sources */,
+				CO04000000000000000000DD /* LiveCollabSessionManager.swift in Sources */,
+				CO05000000000000000000EE /* LiveCollabSheetView.swift in Sources */,
+				CO06000000000000000000FF /* LiveCollabBadgeButton.swift in Sources */,
+				CO07000000000000000000GG /* RemoteCursorBadgeView.swift in Sources */,
 				EFM00001 /* ExternalFileImportManager.swift in Sources */,
 				IFI00001 /* IncomingFileImportSheet.swift in Sources */,
 				ELEC000100000000000000AA /* CircuitSymbol.swift in Sources */,
@@ -779,7 +819,8 @@
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = de.graetz.electronote;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = 2;
+				SUPPORTS_MACCATALYST = YES;
+				TARGETED_DEVICE_FAMILY = "2";
 			};
 			name = Debug;
 		};
@@ -800,7 +841,8 @@
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = de.graetz.electronote;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = 2;
+				SUPPORTS_MACCATALYST = YES;
+				TARGETED_DEVICE_FAMILY = "2";
 			};
 			name = Release;
 		};

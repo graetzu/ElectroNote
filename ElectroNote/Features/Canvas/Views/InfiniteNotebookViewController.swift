@@ -73,16 +73,23 @@ final class InfiniteNotebookViewController: UIViewController {
     private var activeSearchIndex: Int = 0
 
     // MARK: - Transform & Selection Tools (Markieren, Verschieben, Drehen, Vergrößern)
+    #if targetEnvironment(macCatalyst)
+    var currentCanvasToolType: CanvasToolType = .textSelect
+    #else
     var currentCanvasToolType: CanvasToolType = .pen
+    #endif
     private var activeTransformBox: UniversalTransformBox?
     private var lassoOverlay: LassoCanvasOverlay?
     private var canvasLongPress: UILongPressGestureRecognizer?
     private var canvasTapToDeselect: UITapGestureRecognizer?
+    private var canvasDoubleTapRecognizer: UITapGestureRecognizer?
+    private var canvasPointerInteraction: UIPointerInteraction?
     private var longPressInitialTouch: CGPoint?
     private var longPressStartCenter: CGPoint?
     private var isLongPressDragging: Bool = false
 
-    // MARK: - Native text input
+    // MARK: - Inline & Native text input
+    private(set) var activeInlineTextView: InlineCanvasTextView?
     private var nativeTextView: UITextView?
     private var nativeTextContentOrigin: CGPoint = .zero
     private lazy var nativeTextDelegate = NativeTextViewDelegate(vc: self)
@@ -91,6 +98,11 @@ final class InfiniteNotebookViewController: UIViewController {
     private(set) var document = NotebookDocument()
     var store: NotebookDocumentStore!
     private var didLoad = false
+
+    // MARK: - Live Collaboration State
+    var isApplyingRemoteStroke = false
+    var lastCollabStrokeCount: Int = 0
+    private var remoteCursorViews: [String: RemoteCursorBadgeView] = [:]
 
     // MARK: - Callbacks
     var onDrawingChanged: (() -> Void)?
@@ -140,18 +152,28 @@ final class InfiniteNotebookViewController: UIViewController {
 
     // MARK: - Configurable
 
+    #if targetEnvironment(macCatalyst)
+    var pencilOnly: Bool = false {
+        didSet { applyDrawingPolicy() }
+    }
+    #else
     var pencilOnly: Bool = true {
         didSet { applyDrawingPolicy() }
     }
+    #endif
 
     private func applyDrawingPolicy() {
         if currentCanvasToolType == .pan {
             canvasView.drawingGestureRecognizer.isEnabled = false
             pencilScrollPanGesture.isEnabled = true
-            canvasView.panGestureRecognizer.allowedTouchTypes = [
+            var panTypes = [
                 NSNumber(value: UITouch.TouchType.direct.rawValue),
                 NSNumber(value: UITouch.TouchType.pencil.rawValue)
             ]
+            #if targetEnvironment(macCatalyst)
+            panTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+            #endif
+            canvasView.panGestureRecognizer.allowedTouchTypes = panTypes
             canvasView.panGestureRecognizer.minimumNumberOfTouches = 1
             return
         }
@@ -159,10 +181,18 @@ final class InfiniteNotebookViewController: UIViewController {
         if currentCanvasToolType == .textSelect {
             canvasView.drawingGestureRecognizer.isEnabled = false
             pencilScrollPanGesture.isEnabled = false
+            #if targetEnvironment(macCatalyst)
+            canvasView.panGestureRecognizer.allowedTouchTypes = [
+                NSNumber(value: UITouch.TouchType.direct.rawValue),
+                NSNumber(value: UITouch.TouchType.indirect.rawValue)
+            ]
+            canvasView.panGestureRecognizer.minimumNumberOfTouches = 1
+            #else
             canvasView.panGestureRecognizer.allowedTouchTypes = [
                 NSNumber(value: UITouch.TouchType.direct.rawValue)
             ]
             canvasView.panGestureRecognizer.minimumNumberOfTouches = pencilOnly ? 1 : 2
+            #endif
             return
         }
 
@@ -170,6 +200,14 @@ final class InfiniteNotebookViewController: UIViewController {
         if currentCanvasToolType != .lasso {
             canvasView.drawingGestureRecognizer.isEnabled = true
         }
+        #if targetEnvironment(macCatalyst)
+        canvasView.drawingPolicy = .anyInput
+        canvasView.panGestureRecognizer.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.indirect.rawValue)
+        ]
+        canvasView.panGestureRecognizer.minimumNumberOfTouches = 2
+        #else
         canvasView.drawingPolicy = pencilOnly ? .pencilOnly : .anyInput
         // In pencilOnly mode (Standard):
         // - 1 finger moves / scrolls smoothly across the canvas
@@ -182,6 +220,7 @@ final class InfiniteNotebookViewController: UIViewController {
             NSNumber(value: UITouch.TouchType.direct.rawValue)
         ]
         canvasView.panGestureRecognizer.minimumNumberOfTouches = pencilOnly ? 1 : 2
+        #endif
     }
 
     var mathEnabled: Bool {
@@ -225,6 +264,7 @@ final class InfiniteNotebookViewController: UIViewController {
                                     : UIColor(red: 0.88, green: 0.90, blue: 0.92, alpha: 1.0)
         setupCanvas()
         setupToolPicker()
+        setupLiveCollabHooks()
     }
 
     override func viewDidLayoutSubviews() {
@@ -262,11 +302,53 @@ final class InfiniteNotebookViewController: UIViewController {
 
     override var keyCommands: [UIKeyCommand]? {
         [
+            UIKeyCommand(title: "Text", action: #selector(handleKeyTextTool), input: "1", modifierFlags: .command),
+            UIKeyCommand(title: "Stift", action: #selector(handleKeyPenTool), input: "2", modifierFlags: .command),
+            UIKeyCommand(title: "Marker", action: #selector(handleKeyMarkerTool), input: "3", modifierFlags: .command),
+            UIKeyCommand(title: "Bleistift", action: #selector(handleKeyPencilTool), input: "4", modifierFlags: .command),
+            UIKeyCommand(title: "Radierer", action: #selector(handleKeyEraserTool), input: "5", modifierFlags: .command),
+            UIKeyCommand(title: "Lasso", action: #selector(handleKeyLassoTool), input: "6", modifierFlags: .command),
+            UIKeyCommand(title: "Verschieben", action: #selector(handleKeyPanTool), input: "7", modifierFlags: .command),
             UIKeyCommand(title: "Einfügen", action: #selector(handleKeyboardPaste), input: "v", modifierFlags: .command),
             UIKeyCommand(title: "Kopieren", action: #selector(handleKeyboardCopy), input: "c", modifierFlags: .command),
             UIKeyCommand(title: "Rückgängig", action: #selector(handleKeyboardUndo), input: "z", modifierFlags: .command),
             UIKeyCommand(title: "Wiederholen", action: #selector(handleKeyboardRedo), input: "z", modifierFlags: [.command, .shift])
         ]
+    }
+
+    @objc private func handleKeyTextTool() {
+        setCanvasToolType(.textSelect)
+        onToolChanged?(.textSelect)
+    }
+
+    @objc private func handleKeyPenTool() {
+        setCanvasToolType(.pen)
+        onToolChanged?(.pen)
+    }
+
+    @objc private func handleKeyMarkerTool() {
+        setCanvasToolType(.marker)
+        onToolChanged?(.marker)
+    }
+
+    @objc private func handleKeyPencilTool() {
+        setCanvasToolType(.pencil)
+        onToolChanged?(.pencil)
+    }
+
+    @objc private func handleKeyEraserTool() {
+        setCanvasToolType(.eraser)
+        onToolChanged?(.eraser)
+    }
+
+    @objc private func handleKeyLassoTool() {
+        setCanvasToolType(.lasso)
+        onToolChanged?(.lasso)
+    }
+
+    @objc private func handleKeyPanTool() {
+        setCanvasToolType(.pan)
+        onToolChanged?(.pan)
     }
 
     @objc private func handleKeyboardPaste() {
@@ -352,6 +434,9 @@ final class InfiniteNotebookViewController: UIViewController {
 
         setupCanvasLongPress()
         setupCanvasTapToDeselect()
+        let pointerInteraction = UIPointerInteraction(delegate: self)
+        canvasView.addInteraction(pointerInteraction)
+        self.canvasPointerInteraction = pointerInteraction
         setupExternalFileObserver()
 
         searchHighlightOverlay.frame = CGRect(origin: .zero, size: canvasView.contentSize)
@@ -1678,6 +1763,11 @@ extension InfiniteNotebookViewController {
             previousDrawingTool = tool
         }
         currentCanvasToolType = tool
+        if tool != .textSelect {
+            commitActiveInlineTextInput()
+        }
+        canvasPointerInteraction?.invalidate()
+
         if tool == .lasso {
             enableLassoMode()
         } else {
@@ -1688,13 +1778,17 @@ extension InfiniteNotebookViewController {
             // Verschieben (Pan) mode: disable drawing, enable 1-touch Apple Pencil & finger canvas navigation
             canvasView.drawingGestureRecognizer.isEnabled = false
             pencilScrollPanGesture.isEnabled = true
-            canvasView.panGestureRecognizer.allowedTouchTypes = [
+            var panTypes = [
                 NSNumber(value: UITouch.TouchType.direct.rawValue),
                 NSNumber(value: UITouch.TouchType.pencil.rawValue)
             ]
+            #if targetEnvironment(macCatalyst)
+            panTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+            #endif
+            canvasView.panGestureRecognizer.allowedTouchTypes = panTypes
             canvasView.panGestureRecognizer.minimumNumberOfTouches = 1
         } else if tool == .textSelect {
-            // Text auswählen mode: disable PK drawing so Live Text selection handles touches
+            // Text auswählen mode: disable PK drawing so click-to-type & Live Text selection handle touches
             canvasView.drawingGestureRecognizer.isEnabled = false
             pencilScrollPanGesture.isEnabled = false
             applyDrawingPolicy()
@@ -2049,9 +2143,13 @@ extension InfiniteNotebookViewController {
         let lp = UILongPressGestureRecognizer(target: self, action: #selector(handleCanvasLongPress(_:)))
         lp.minimumPressDuration = 0.55
         lp.allowableMovement = 15.0
-        lp.allowedTouchTypes = [
+        var lpTypes = [
             NSNumber(value: UITouch.TouchType.direct.rawValue)
         ]
+        #if targetEnvironment(macCatalyst)
+        lpTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+        #endif
+        lp.allowedTouchTypes = lpTypes
         lp.cancelsTouchesInView = true
         lp.delegate = self
         canvasView.addGestureRecognizer(lp)
@@ -2061,36 +2159,79 @@ extension InfiniteNotebookViewController {
     func setupCanvasTapToDeselect() {
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleCanvasTapToDeselect(_:)))
         tap.cancelsTouchesInView = false
-        tap.allowedTouchTypes = [
+        var tapTypes = [
             NSNumber(value: UITouch.TouchType.direct.rawValue),
             NSNumber(value: UITouch.TouchType.pencil.rawValue)
         ]
+        #if targetEnvironment(macCatalyst)
+        tapTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+        #endif
+        tap.allowedTouchTypes = tapTypes
         tap.delegate = self
         canvasView.addGestureRecognizer(tap)
         self.canvasTapToDeselect = tap
+
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleCanvasDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.cancelsTouchesInView = false
+        doubleTap.allowedTouchTypes = tapTypes
+        doubleTap.delegate = self
+        canvasView.addGestureRecognizer(doubleTap)
+        tap.require(toFail: doubleTap)
+        self.canvasDoubleTapRecognizer = doubleTap
+    }
+
+    @objc private func handleCanvasDoubleTap(_ gr: UITapGestureRecognizer) {
+        let loc = gr.location(in: paperBackgroundView)
+        setCanvasToolType(.textSelect)
+        onToolChanged?(.textSelect)
+        startInlineTextInput(atContentPoint: loc)
     }
 
     @objc private func handleCanvasTapToDeselect(_ gr: UITapGestureRecognizer) {
         let loc = gr.location(in: paperBackgroundView)
 
+        // 1. If inline text editor is open, check whether click is inside or outside
+        if let editor = activeInlineTextView {
+            let locInEditor = gr.location(in: editor)
+            if editor.point(inside: locInEditor, with: nil) {
+                return
+            }
+            commitActiveInlineTextInput()
+        }
+
+        // 2. Check if an element was tapped
+        if let elementId = findElement(near: loc) {
+            removeAccidentalDotStroke(near: loc)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            #if targetEnvironment(macCatalyst)
+            let isTextOrMac = true
+            #else
+            let isTextOrMac = (currentCanvasToolType == .textSelect)
+            #endif
+
+            if isTextElement(id: elementId) && isTextOrMac {
+                startInlineTextInput(atContentPoint: loc, existingElementId: elementId)
+            } else {
+                presentTransformBox(forElementId: elementId)
+            }
+            return
+        }
+
+        // 3. If transform box is active and clicked outside, dismiss it
         if let box = activeTransformBox {
             let locInBox = gr.location(in: box)
             if box.point(inside: locInBox, with: nil) {
                 return
             }
-            if let elementId = findElement(near: loc) {
-                removeAccidentalDotStroke(near: loc)
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                presentTransformBox(forElementId: elementId)
-                return
-            }
             box.dismiss()
-        } else {
-            if let elementId = findElement(near: loc) {
-                removeAccidentalDotStroke(near: loc)
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                presentTransformBox(forElementId: elementId)
-            }
+        }
+
+        // 4. Blank canvas click:
+        // On Mac Catalyst or in .textSelect mode, click anywhere defaults to inline text input!
+        let shouldStartTextInput = (currentCanvasToolType == .textSelect)
+        if shouldStartTextInput {
+            startInlineTextInput(atContentPoint: loc)
         }
     }
 
@@ -2660,7 +2801,7 @@ extension InfiniteNotebookViewController {
         return CGPoint(x: (pt.x + off.x) / sc, y: (pt.y + off.y) / sc)
     }
 
-    func fontFor(design: String?, size: CGFloat) -> UIFont {
+    static func fontFor(design: String?, size: CGFloat) -> UIFont {
         let style = design ?? "default"
         switch style {
         case "rounded":
@@ -2687,6 +2828,80 @@ extension InfiniteNotebookViewController {
             break
         }
         return UIFont.systemFont(ofSize: size, weight: .regular)
+    }
+
+    func fontFor(design: String?, size: CGFloat) -> UIFont {
+        Self.fontFor(design: design, size: size)
+    }
+
+    func isTextElement(id: UUID) -> Bool {
+        guard let entry = document.insertedImages.first(where: { $0.id == id }) else { return false }
+        return entry.textContent != nil
+    }
+
+    var isMacCatalyst: Bool {
+        #if targetEnvironment(macCatalyst)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    func commitActiveInlineTextInput() {
+        guard let active = activeInlineTextView else { return }
+        active.commitAndDismiss()
+    }
+
+    func startInlineTextInput(atContentPoint point: CGPoint, existingElementId: UUID? = nil) {
+        if activeInlineTextView != nil {
+            commitActiveInlineTextInput()
+        }
+        activeTransformBox?.dismiss()
+
+        var initialText = ""
+        var fontSize: CGFloat = 22
+        var fontDesign: String? = nil
+        var fontColorHex: String? = nil
+        var origin = point
+
+        if let existingId = existingElementId,
+           let entry = document.insertedImages.first(where: { $0.id == existingId }) {
+            initialText = entry.textContent ?? ""
+            fontSize = entry.fontSize ?? 22
+            fontDesign = entry.fontDesign
+            fontColorHex = entry.fontColorHex
+            origin = CGPoint(x: entry.startX, y: entry.startY)
+            imageViews[existingId]?.isHidden = true
+            imageHandles[existingId]?.isHidden = true
+        }
+
+        let canvasW = canvasView.contentSize.width
+        let canvasH = canvasView.contentSize.height
+        let clampedX = max(16, min(origin.x, canvasW - 200))
+        let clampedY = max(16, min(origin.y, canvasH - 80))
+        origin = CGPoint(x: clampedX, y: clampedY)
+
+        let editor = InlineCanvasTextView(
+            elementId: existingElementId,
+            contentOrigin: origin,
+            initialText: initialText,
+            fontSize: fontSize,
+            fontDesign: fontDesign,
+            fontColorHex: fontColorHex,
+            isDarkCanvas: document.darkDrawingMode,
+            canvasWidth: canvasW
+        )
+        editor.delegate = self
+        paperOverlayView.addSubview(editor)
+        canvasView.bringSubviewToFront(paperOverlayView)
+        activeInlineTextView = editor
+
+        let visibleRect = canvasView.convert(editor.frame, from: paperOverlayView)
+        canvasView.scrollRectToVisible(visibleRect.insetBy(dx: -40, dy: -40), animated: true)
+
+        DispatchQueue.main.async {
+            editor.focus()
+        }
     }
 
     @discardableResult
@@ -2851,6 +3066,10 @@ extension InfiniteNotebookViewController {
         document.stickyNotes.append(note)
         store.saveDocument(document)
         mountStickyNoteView(note)
+        if let data = try? JSONEncoder().encode(note),
+           let json = String(data: data, encoding: .utf8) {
+            LiveCollabSessionManager.shared.sendStickyNoteUpsert(noteJson: json, noteId: note.id.uuidString)
+        }
     }
 
     func mountStickyNoteView(_ note: StickyNote) {
@@ -2864,6 +3083,10 @@ extension InfiniteNotebookViewController {
                 self.document.stickyNotes[i].x = contentOrigin.x
                 self.document.stickyNotes[i].y = contentOrigin.y
                 self.store.saveDocument(self.document)
+                if let data = try? JSONEncoder().encode(self.document.stickyNotes[i]),
+                   let json = String(data: data, encoding: .utf8) {
+                    LiveCollabSessionManager.shared.sendStickyNoteUpsert(noteJson: json, noteId: note.id.uuidString)
+                }
             }
         }
         v.onTextChanged = { [weak self] text in
@@ -2871,6 +3094,10 @@ extension InfiniteNotebookViewController {
             if let i = self.document.stickyNotes.firstIndex(where: { $0.id == note.id }) {
                 self.document.stickyNotes[i].text = text
                 self.store.saveDocument(self.document)
+                if let data = try? JSONEncoder().encode(self.document.stickyNotes[i]),
+                   let json = String(data: data, encoding: .utf8) {
+                    LiveCollabSessionManager.shared.sendStickyNoteUpsert(noteJson: json, noteId: note.id.uuidString)
+                }
             }
         }
         v.onDrawingChanged = { [weak self] data in
@@ -2878,6 +3105,10 @@ extension InfiniteNotebookViewController {
             if let i = self.document.stickyNotes.firstIndex(where: { $0.id == note.id }) {
                 self.document.stickyNotes[i].drawingData = data
                 self.store.saveDocument(self.document)
+                if let data = try? JSONEncoder().encode(self.document.stickyNotes[i]),
+                   let json = String(data: data, encoding: .utf8) {
+                    LiveCollabSessionManager.shared.sendStickyNoteUpsert(noteJson: json, noteId: note.id.uuidString)
+                }
             }
         }
         v.onDelete = { [weak self] in
@@ -2886,6 +3117,7 @@ extension InfiniteNotebookViewController {
             self.stickyNoteViews[note.id]?.removeFromSuperview()
             self.stickyNoteViews.removeValue(forKey: note.id)
             self.store.saveDocument(self.document)
+            LiveCollabSessionManager.shared.sendStickyNoteDeleted(noteId: note.id.uuidString)
         }
         stickyNoteViews[note.id] = v
         canvasView.addSubview(v)
@@ -2950,6 +3182,21 @@ extension InfiniteNotebookViewController: PKCanvasViewDelegate {
         scheduleScan()
         NotificationCenter.default.post(name: .electroNoteDrawingBegan, object: nil)
         scheduleShapeSnap()
+
+        if !isApplyingRemoteStroke {
+            let currentCount = canvasView.drawing.strokes.count
+            if currentCount > lastCollabStrokeCount {
+                let newStrokes = canvasView.drawing.strokes.suffix(currentCount - lastCollabStrokeCount)
+                for stroke in newStrokes {
+                    if let portable = PencilKitBridge.portableStrokes(from: PKDrawing(strokes: [stroke])).first {
+                        LiveCollabSessionManager.shared.sendStroke(portable)
+                    }
+                }
+            } else if currentCount == 0 && lastCollabStrokeCount > 0 {
+                LiveCollabSessionManager.shared.sendStrokesCleared()
+            }
+            lastCollabStrokeCount = currentCount
+        }
 
         if let store = store {
             NoteIndexingService.shared.scheduleDebouncedIndex(for: store, drawing: canvasView.drawing, document: document, delay: 2.5)
@@ -3253,10 +3500,13 @@ final class ImageHandleView: UIView {
         isOpaque = false
         isUserInteractionEnabled = true
 
-        let touchTypes: [NSNumber] = [
+        var touchTypes: [NSNumber] = [
             NSNumber(value: UITouch.TouchType.direct.rawValue),
             NSNumber(value: UITouch.TouchType.pencil.rawValue)
         ]
+        #if targetEnvironment(macCatalyst)
+        touchTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+        #endif
 
         // 1. Pan for moving (both finger and Apple Pencil)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
@@ -3522,6 +3772,11 @@ extension InfiniteNotebookViewController {
     func editInsertedElement(id: UUID) {
         guard let entry = document.insertedImages.first(where: { $0.id == id }) else { return }
 
+        if entry.textContent != nil && (currentCanvasToolType == .textSelect || isMacCatalyst) {
+            startInlineTextInput(atContentPoint: CGPoint(x: entry.startX, y: entry.startY), existingElementId: id)
+            return
+        }
+
         let alert = UIAlertController(
             title: entry.textContent != nil ? "Textstil & Aktionen" : "Objekt-Aktionen",
             message: nil,
@@ -3554,7 +3809,7 @@ extension InfiniteNotebookViewController {
 
             // 4. Textinhalt bearbeiten
             alert.addAction(UIAlertAction(title: "✍️ Text bearbeiten…", style: .default) { [weak self] _ in
-                self?.promptEditText(id: id, currentText: text, fontSize: currentSize)
+                self?.startInlineTextInput(atContentPoint: CGPoint(x: entry.startX, y: entry.startY), existingElementId: id)
             })
 
             // 5. Kopieren
@@ -4019,10 +4274,19 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if let editor = activeInlineTextView {
+            let loc = touch.location(in: editor)
+            if editor.point(inside: loc, with: nil) {
+                if gestureRecognizer === canvasTapToDeselect || gestureRecognizer === canvasDoubleTapRecognizer || gestureRecognizer === canvasLongPress || gestureRecognizer === pencilScrollPanGesture {
+                    return false
+                }
+            }
+        }
+
         if let box = activeTransformBox {
             let loc = touch.location(in: box)
             if box.point(inside: loc, with: nil) {
-                if gestureRecognizer === canvasTapToDeselect || gestureRecognizer === canvasLongPress || gestureRecognizer === pencilScrollPanGesture {
+                if gestureRecognizer === canvasTapToDeselect || gestureRecognizer === canvasDoubleTapRecognizer || gestureRecognizer === canvasLongPress || gestureRecognizer === pencilScrollPanGesture {
                     return false
                 }
             }
@@ -4031,7 +4295,7 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
         if touch.type == .direct {
             let loc = touch.location(in: paperBackgroundView)
             if isTouchInsideDocumentPage(loc) {
-                if gestureRecognizer === canvasTapToDeselect {
+                if gestureRecognizer === canvasTapToDeselect || gestureRecognizer === canvasDoubleTapRecognizer {
                     return false
                 }
             }
@@ -4329,3 +4593,166 @@ extension InfiniteNotebookViewController {
         }
     }
 }
+
+// MARK: - InlineCanvasTextViewDelegate
+
+extension InfiniteNotebookViewController: InlineCanvasTextViewDelegate {
+    func inlineCanvasTextViewDidCommit(_ view: InlineCanvasTextView, text: String, origin: CGPoint, existingId: UUID?) {
+        if text.isEmpty {
+            if let id = existingId {
+                deleteInsertedElement(id: id)
+            }
+        } else {
+            if let id = existingId {
+                updateInsertedText(id: id, newText: text, fontSize: view.fontSize, fontDesign: view.fontDesign, colorHex: view.fontColorHex)
+                imageViews[id]?.isHidden = false
+                imageHandles[id]?.isHidden = false
+            } else {
+                insertTypedText(text: text, fontSize: view.fontSize, fontDesign: view.fontDesign, colorHex: view.fontColorHex, contentOrigin: origin, addHandle: true, registerUndoAction: true)
+                activeTransformBox?.dismiss()
+            }
+        }
+        view.removeFromSuperview()
+        if activeInlineTextView === view {
+            activeInlineTextView = nil
+        }
+        onDrawingChanged?()
+    }
+
+    func inlineCanvasTextViewDidCancel(_ view: InlineCanvasTextView, existingId: UUID?) {
+        if let id = existingId {
+            imageViews[id]?.isHidden = false
+            imageHandles[id]?.isHidden = false
+        }
+        view.removeFromSuperview()
+        if activeInlineTextView === view {
+            activeInlineTextView = nil
+        }
+    }
+
+    func inlineCanvasTextViewDidChangeSize(_ view: InlineCanvasTextView) {
+        let needed = view.frame.maxY + 200
+        if needed > canvasView.contentSize.height {
+            canvasView.contentSize.height = needed
+            document.documentHeight = needed
+            store?.saveDocument(document)
+        }
+    }
+
+    func inlineCanvasTextViewRequestDelete(_ view: InlineCanvasTextView, existingId: UUID) {
+        deleteInsertedElement(id: existingId)
+        view.removeFromSuperview()
+        if activeInlineTextView === view {
+            activeInlineTextView = nil
+        }
+        onDrawingChanged?()
+    }
+}
+
+// MARK: - UIPointerInteractionDelegate
+
+extension InfiniteNotebookViewController: UIPointerInteractionDelegate {
+    func pointerInteraction(_ interaction: UIPointerInteraction, styleFor region: UIPointerRegion) -> UIPointerStyle? {
+        if currentCanvasToolType == .textSelect {
+            return UIPointerStyle(shape: .verticalBeam(length: 22))
+        }
+        return nil
+    }
+}
+
+// MARK: - Live Collaboration Hooks
+
+extension InfiniteNotebookViewController {
+    func setupLiveCollabHooks() {
+        let collab = LiveCollabSessionManager.shared
+
+        collab.onProvideSnapshot = { [weak self] in
+            guard let self = self else { return (nil, nil) }
+            let docData = try? JSONEncoder().encode(self.document)
+            let docJson = docData.flatMap { String(data: $0, encoding: .utf8) }
+            let strokes = PencilKitBridge.portableStrokes(from: self.canvasView.drawing)
+            let drawingData = try? JSONEncoder().encode(strokes)
+            let drawingJson = drawingData.flatMap { String(data: $0, encoding: .utf8) }
+            return (docJson, drawingJson)
+        }
+
+        collab.onApplySnapshot = { [weak self] docJson, drawingJson in
+            guard let self = self else { return }
+            self.isApplyingRemoteStroke = true
+            if let drawingJson = drawingJson,
+               let data = drawingJson.data(using: .utf8),
+               let strokes = try? JSONDecoder().decode([PortableStrokeDTO].self, from: data) {
+                let drawing = PencilKitBridge.drawing(fromPortableStrokes: strokes)
+                self.canvasView.drawing = drawing
+                self.lastCollabStrokeCount = drawing.strokes.count
+            }
+            if let docJson = docJson,
+               let data = docJson.data(using: .utf8),
+               let doc = try? JSONDecoder().decode(NotebookDocument.self, from: data) {
+                self.applyRemoteDocument(doc)
+            }
+            self.isApplyingRemoteStroke = false
+        }
+
+        collab.onRemoteStrokeReceived = { [weak self] strokeDTO in
+            guard let self = self else { return }
+            self.isApplyingRemoteStroke = true
+            let pkDrawing = PencilKitBridge.drawing(fromPortableStrokes: [strokeDTO])
+            var current = self.canvasView.drawing
+            current.strokes.append(contentsOf: pkDrawing.strokes)
+            self.canvasView.drawing = current
+            self.lastCollabStrokeCount = self.canvasView.drawing.strokes.count
+            self.isApplyingRemoteStroke = false
+        }
+
+        collab.onRemoteStrokesCleared = { [weak self] in
+            guard let self = self else { return }
+            self.isApplyingRemoteStroke = true
+            self.canvasView.drawing = PKDrawing()
+            self.lastCollabStrokeCount = 0
+            self.isApplyingRemoteStroke = false
+        }
+
+        collab.onRemoteStickyNoteUpsert = { [weak self] noteJson in
+            guard let self = self,
+                  let data = noteJson.data(using: .utf8),
+                  let note = try? JSONDecoder().decode(StickyNote.self, from: data) else { return }
+            if let existing = self.stickyNoteViews[note.id] {
+                existing.update(text: note.text, origin: CGPoint(x: note.x, y: note.y))
+            } else {
+                self.document.stickyNotes.append(note)
+                self.mountStickyNoteView(note)
+            }
+        }
+
+        collab.onRemoteStickyNoteDeleted = { [weak self] noteId in
+            guard let self = self, let uuid = UUID(uuidString: noteId) else { return }
+            self.document.stickyNotes.removeAll { $0.id == uuid }
+            self.stickyNoteViews[uuid]?.removeFromSuperview()
+            self.stickyNoteViews.removeValue(forKey: uuid)
+        }
+
+        collab.onRemoteCursorMoved = { [weak self] cursor in
+            guard let self = self else { return }
+            let badge = self.remoteCursorViews[cursor.name] ?? {
+                let b = RemoteCursorBadgeView(name: cursor.name, colorHex: cursor.colorHex)
+                self.canvasView.addSubview(b)
+                self.remoteCursorViews[cursor.name] = b
+                return b
+            }()
+            badge.updatePosition(CGPoint(x: cursor.x, y: cursor.y))
+        }
+    }
+
+    private func applyRemoteDocument(_ newDoc: NotebookDocument) {
+        self.document = newDoc
+        for (_, view) in stickyNoteViews {
+            view.removeFromSuperview()
+        }
+        stickyNoteViews.removeAll()
+        newDoc.stickyNotes.forEach { mountStickyNoteView($0) }
+        store?.saveDocument(self.document)
+    }
+}
+
+

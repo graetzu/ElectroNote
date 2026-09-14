@@ -48,13 +48,17 @@ struct ContentView: View {
         // kein eigener .toolbar-Modifier nötig (der crasht auf NavigationSplitView)
         .onChange(of: selectedItem) { _, newItem in
             if let item = newItem, !item.isFolder {
+                #if !targetEnvironment(macCatalyst)
                 withAnimation(.easeInOut(duration: 0.25)) {
                     sidebarVisibility = .detailOnly
                 }
+                #endif
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .electroNoteDrawingBegan)) { _ in
+            #if !targetEnvironment(macCatalyst)
             withAnimation { sidebarVisibility = .detailOnly }
+            #endif
         }
         .sheet(isPresented: $showMath) {
             MathPanelView()

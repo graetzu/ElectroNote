@@ -149,6 +149,13 @@ final class StickyNoteView: UIView, UITextViewDelegate, PKCanvasViewDelegate {
         onDelete?()
     }
 
+    func update(text: String, origin: CGPoint) {
+        self.frame.origin = origin
+        if self.textView.text != text {
+            self.textView.text = text
+        }
+    }
+
     // MARK: - PKCanvasViewDelegate
     func canvasViewDrawingDidChange(_ cv: PKCanvasView) {
         let data = cv.drawing.dataRepresentation()

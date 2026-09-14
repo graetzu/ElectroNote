@@ -16,6 +16,11 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
 
     private var stickyNoteViews: [UUID: StickyNoteView] = [:]
 
+    // MARK: - Live Collaboration State
+    var isApplyingRemoteStroke = false
+    var lastCollabStrokeCount: Int = 0
+    private var remoteCursorViews: [String: RemoteCursorBadgeView] = [:]
+
     var folderURL: URL? = nil {
         didSet {
             loadSavedDrawing()
@@ -76,6 +81,7 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
         view.backgroundColor = darkDrawingMode ? UIColor(white: 0.12, alpha: 1) : .white
         setupCanvas()
         loadSavedDrawing()
+        setupLiveCollabHooks()
     }
 
     override func viewDidLayoutSubviews() {
@@ -119,6 +125,20 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
 
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
         scheduleSave()
+        if !isApplyingRemoteStroke {
+            let currentCount = canvasView.drawing.strokes.count
+            if currentCount > lastCollabStrokeCount {
+                let newStrokes = canvasView.drawing.strokes.suffix(currentCount - lastCollabStrokeCount)
+                for stroke in newStrokes {
+                    if let portable = PencilKitBridge.portableStrokes(from: PKDrawing(strokes: [stroke])).first {
+                        LiveCollabSessionManager.shared.sendStroke(portable)
+                    }
+                }
+            } else if currentCount == 0 && lastCollabStrokeCount > 0 {
+                LiveCollabSessionManager.shared.sendStrokesCleared()
+            }
+            lastCollabStrokeCount = currentCount
+        }
         guard shapeSnapEnabled, !isSnappingShape else { return }
         scheduleShapeSnap()
     }
@@ -154,6 +174,10 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
         let cy = (offset.y + canvasView.bounds.height / 2) / scale - StickyNoteView.noteSize.height / 2
         let note = StickyNote(id: UUID(), text: "", x: max(20, cx), y: max(20, cy), colorIndex: stickyNoteViews.count % 4)
         mountStickyNoteView(note)
+        if let data = try? JSONEncoder().encode(note),
+           let json = String(data: data, encoding: .utf8) {
+            LiveCollabSessionManager.shared.sendStickyNoteUpsert(noteJson: json, noteId: note.id.uuidString)
+        }
     }
 
     private func mountStickyNoteView(_ note: StickyNote) {
@@ -163,9 +187,27 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
                          height: StickyNoteView.noteSize.height)
         canvasView.addSubview(v)
         stickyNoteViews[note.id] = v
+        v.onMoved = { [weak self] contentOrigin in
+            var updated = note
+            updated.x = contentOrigin.x
+            updated.y = contentOrigin.y
+            if let data = try? JSONEncoder().encode(updated),
+               let json = String(data: data, encoding: .utf8) {
+                LiveCollabSessionManager.shared.sendStickyNoteUpsert(noteJson: json, noteId: note.id.uuidString)
+            }
+        }
+        v.onTextChanged = { [weak self] text in
+            var updated = note
+            updated.text = text
+            if let data = try? JSONEncoder().encode(updated),
+               let json = String(data: data, encoding: .utf8) {
+                LiveCollabSessionManager.shared.sendStickyNoteUpsert(noteJson: json, noteId: note.id.uuidString)
+            }
+        }
         v.onDelete = { [weak self, weak v] in
             v?.removeFromSuperview()
             self?.stickyNoteViews.removeValue(forKey: note.id)
+            LiveCollabSessionManager.shared.sendStickyNoteDeleted(noteId: note.id.uuidString)
         }
     }
 
@@ -245,6 +287,7 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
                 v.removeFromSuperview()
             }
             self?.stickyNoteViews.removeAll()
+            LiveCollabSessionManager.shared.sendStrokesCleared()
         })
         present(alert, animated: true)
     }
@@ -315,6 +358,82 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
             if inkImage.size.width > 0 && inkImage.size.height > 0 {
                 inkImage.draw(in: CGRect(origin: .zero, size: renderSize))
             }
+        }
+    }
+
+    func setupLiveCollabHooks() {
+        let collab = LiveCollabSessionManager.shared
+
+        collab.onProvideSnapshot = { [weak self] in
+            guard let self = self else { return (nil, nil) }
+            let strokes = PencilKitBridge.portableStrokes(from: self.canvasView.drawing)
+            let drawingData = try? JSONEncoder().encode(strokes)
+            let drawingJson = drawingData.flatMap { String(data: $0, encoding: .utf8) }
+            return (nil, drawingJson)
+        }
+
+        collab.onApplySnapshot = { [weak self] _, drawingJson in
+            guard let self = self else { return }
+            self.isApplyingRemoteStroke = true
+            if let drawingJson = drawingJson,
+               let data = drawingJson.data(using: .utf8),
+               let strokes = try? JSONDecoder().decode([PortableStrokeDTO].self, from: data) {
+                let drawing = PencilKitBridge.drawing(fromPortableStrokes: strokes)
+                self.canvasView.drawing = drawing
+                self.lastCollabStrokeCount = drawing.strokes.count
+            }
+            self.isApplyingRemoteStroke = false
+        }
+
+        collab.onRemoteStrokeReceived = { [weak self] strokeDTO in
+            guard let self = self else { return }
+            self.isApplyingRemoteStroke = true
+            let pkDrawing = PencilKitBridge.drawing(fromPortableStrokes: [strokeDTO])
+            var current = self.canvasView.drawing
+            current.strokes.append(contentsOf: pkDrawing.strokes)
+            self.canvasView.drawing = current
+            self.lastCollabStrokeCount = self.canvasView.drawing.strokes.count
+            self.isApplyingRemoteStroke = false
+        }
+
+        collab.onRemoteStrokesCleared = { [weak self] in
+            guard let self = self else { return }
+            self.isApplyingRemoteStroke = true
+            self.canvasView.drawing = PKDrawing()
+            for (_, v) in self.stickyNoteViews {
+                v.removeFromSuperview()
+            }
+            self.stickyNoteViews.removeAll()
+            self.lastCollabStrokeCount = 0
+            self.isApplyingRemoteStroke = false
+        }
+
+        collab.onRemoteStickyNoteUpsert = { [weak self] noteJson in
+            guard let self = self,
+                  let data = noteJson.data(using: .utf8),
+                  let note = try? JSONDecoder().decode(StickyNote.self, from: data) else { return }
+            if let existing = self.stickyNoteViews[note.id] {
+                existing.update(text: note.text, origin: CGPoint(x: note.x, y: note.y))
+            } else {
+                self.mountStickyNoteView(note)
+            }
+        }
+
+        collab.onRemoteStickyNoteDeleted = { [weak self] noteId in
+            guard let self = self, let uuid = UUID(uuidString: noteId) else { return }
+            self.stickyNoteViews[uuid]?.removeFromSuperview()
+            self.stickyNoteViews.removeValue(forKey: uuid)
+        }
+
+        collab.onRemoteCursorMoved = { [weak self] cursor in
+            guard let self = self else { return }
+            let badge = self.remoteCursorViews[cursor.name] ?? {
+                let b = RemoteCursorBadgeView(name: cursor.name, colorHex: cursor.colorHex)
+                self.canvasView.addSubview(b)
+                self.remoteCursorViews[cursor.name] = b
+                return b
+            }()
+            badge.updatePosition(CGPoint(x: cursor.x, y: cursor.y))
         }
     }
 }
@@ -427,6 +546,9 @@ struct WhiteboardView: View {
                 }
 
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    // Live Collaboration (Interaktive Zusammenarbeit)
+                    LiveCollabBadgeButton(documentName: item?.name ?? "Whiteboard", documentType: .whiteboard)
+
                     // Live Cast (WLAN Übertragung)
                     LiveCastBadgeButton()
 

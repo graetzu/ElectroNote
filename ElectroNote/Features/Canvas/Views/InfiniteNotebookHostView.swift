@@ -26,6 +26,10 @@ struct InfiniteNotebookHostView: View {
         vm.mathEnabled = doc.mathEnabled
         vm.darkDrawingMode = doc.darkDrawingMode
         vm.shapeSnapEnabled = doc.shapeSnapEnabled
+        #if targetEnvironment(macCatalyst)
+        vm.pencilOnly = false
+        vm.activeTool = .textSelect
+        #endif
         self._vm = StateObject(wrappedValue: vm)
     }
 
@@ -394,6 +398,9 @@ struct InfiniteNotebookHostView: View {
                 Image(systemName: "keyboard")
             }
             .accessibilityLabel("Text per Tastatur eingeben")
+
+            // Live Collaboration (Interaktive Zusammenarbeit)
+            LiveCollabBadgeButton(documentName: item.name, documentType: .note)
 
             // Live Cast Button (WLAN Übertragung)
             LiveCastBadgeButton()

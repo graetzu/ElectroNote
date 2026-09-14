@@ -634,10 +634,13 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     // MARK: - Gestures
 
     private func setupGestures() {
-        let touchTypes = [
+        var touchTypes = [
             NSNumber(value: UITouch.TouchType.direct.rawValue),
             NSNumber(value: UITouch.TouchType.pencil.rawValue)
         ]
+        #if targetEnvironment(macCatalyst)
+        touchTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+        #endif
 
         // 1. Move Pan (center) - single touch only so 2 fingers pinch & rotate
         let movePan = UIPanGestureRecognizer(target: self, action: #selector(handleMovePan(_:)))

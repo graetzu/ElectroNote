@@ -114,6 +114,10 @@ final class MindMapDesignerViewModel: ObservableObject {
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
 
+    init() {
+        setupLiveCollabHooks()
+    }
+
     func configure(folderURL: URL) {
         let store = DiagramDocumentStore(folderURL: folderURL)
         self.store = store
@@ -145,10 +149,10 @@ final class MindMapDesignerViewModel: ObservableObject {
             }
             save()
         }
+        setupLiveCollabHooks()
     }
 
-    func save() {
-        guard let store = self.store else { return }
+    func exportDTO() -> DiagramDocumentDTO {
         let nodeDTOs = nodes.map { n in
             let uiColor = UIColor(n.color)
             return DiagramNodeDTO(
@@ -172,7 +176,7 @@ final class MindMapDesignerViewModel: ObservableObject {
                 fromPort: "BOTTOM"
             )
         }
-        let doc = DiagramDocumentDTO(
+        return DiagramDocumentDTO(
             id: diagramId,
             name: diagramName,
             type: "mindmap",
@@ -182,6 +186,70 @@ final class MindMapDesignerViewModel: ObservableObject {
             connections: edgeDTOs,
             bypassDistancePx: nil
         )
+    }
+
+    func applyDTO(_ doc: DiagramDocumentDTO) {
+        self.diagramId = doc.id
+        self.diagramName = doc.name
+        self.createdAt = doc.createdAt
+        self.nodes = doc.nodes.compactMap { dto in
+            let shape = BubbleShape.fromShapeKind(dto.shape)
+            let id = UUID(uuidString: dto.id) ?? UUID()
+            let color = dto.color != nil ? Color(uiColor: UIColor(argbInt: dto.color!)) : .blue
+            let cx = CGFloat(dto.x) + shape.defaultWidth / 2
+            let cy = CGFloat(dto.y) + shape.defaultHeight / 2
+            return MindMapNode(id: id, shape: shape, label: dto.text, color: color, cx: cx, cy: cy)
+        }
+        self.edges = doc.connections.compactMap { dto in
+            guard let fromId = UUID(uuidString: dto.fromNodeId),
+                  let toId = UUID(uuidString: dto.toNodeId) else { return nil }
+            let id = UUID(uuidString: dto.id) ?? UUID()
+            return MindMapEdge(id: id, fromId: fromId, toId: toId, label: dto.label)
+        }
+    }
+
+    func broadcastCurrentState() {
+        let dto = exportDTO()
+        if let data = try? JSONEncoder().encode(dto),
+           let json = String(data: data, encoding: .utf8) {
+            LiveCollabSessionManager.shared.sendDiagramAction(action: .nodeUpdated, nodeJson: json)
+        }
+    }
+
+    func setupLiveCollabHooks() {
+        let collab = LiveCollabSessionManager.shared
+
+        collab.onProvideSnapshot = { [weak self] in
+            guard let self = self else { return (nil, nil) }
+            let dto = self.exportDTO()
+            let data = try? JSONEncoder().encode(dto)
+            let json = data.flatMap { String(data: $0, encoding: .utf8) }
+            return (json, nil)
+        }
+
+        collab.onApplySnapshot = { [weak self] docJson, _ in
+            guard let self = self,
+                  let docJson = docJson,
+                  let data = docJson.data(using: .utf8),
+                  let dto = try? JSONDecoder().decode(DiagramDocumentDTO.self, from: data) else { return }
+            self.applyDTO(dto)
+            self.store?.save(dto)
+        }
+
+        collab.onRemoteDiagramAction = { [weak self] message in
+            guard let self = self else { return }
+            if let json = message.nodeJson,
+               let data = json.data(using: .utf8),
+               let dto = try? JSONDecoder().decode(DiagramDocumentDTO.self, from: data) {
+                self.applyDTO(dto)
+                self.store?.save(dto)
+            }
+        }
+    }
+
+    func save() {
+        guard let store = self.store else { return }
+        let doc = exportDTO()
         store.save(doc)
     }
 
@@ -189,6 +257,7 @@ final class MindMapDesignerViewModel: ObservableObject {
         undoStack.append((nodes, edges))
         redoStack.removeAll()
         save()
+        broadcastCurrentState()
     }
 
     func undo() {
@@ -199,6 +268,7 @@ final class MindMapDesignerViewModel: ObservableObject {
         selectedId = nil
         connectFromId = nil
         save()
+        broadcastCurrentState()
     }
 
     func redo() {
@@ -207,6 +277,7 @@ final class MindMapDesignerViewModel: ObservableObject {
         nodes = next.0
         edges = next.1
         save()
+        broadcastCurrentState()
     }
 
     func addNode(_ shape: BubbleShape, color: Color, near anchor: CGPoint) {
@@ -714,6 +785,9 @@ struct MindMapDesignerView: View {
         }
 
         ToolbarItemGroup(placement: .navigationBarTrailing) {
+            // Live Collaboration
+            LiveCollabBadgeButton(documentName: vm.diagramName, documentType: .mindmap)
+
             // Edit text button for selected node
             if let sel = vm.selectedId, let node = vm.nodes.first(where: { $0.id == sel }) {
                 Button {

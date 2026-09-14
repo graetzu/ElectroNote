@@ -632,6 +632,7 @@ final class PAPDesignerViewModel: ObservableObject {
 
     init() {
         loadTemplate(.tutorial1)
+        setupLiveCollabHooks()
     }
 
     private var store: DiagramDocumentStore? = nil
@@ -670,10 +671,10 @@ final class PAPDesignerViewModel: ObservableObject {
             }
             save()
         }
+        setupLiveCollabHooks()
     }
 
-    func save() {
-        guard let store = self.store else { return }
+    func exportDTO() -> DiagramDocumentDTO {
         let nodeDTOs = nodes.map { n in
             DiagramNodeDTO(
                 id: n.id.uuidString,
@@ -696,7 +697,7 @@ final class PAPDesignerViewModel: ObservableObject {
                 fromPort: e.fromPort.portString
             )
         }
-        let doc = DiagramDocumentDTO(
+        return DiagramDocumentDTO(
             id: diagramId,
             name: diagramName,
             type: "pap",
@@ -706,6 +707,71 @@ final class PAPDesignerViewModel: ObservableObject {
             connections: edgeDTOs,
             bypassDistancePx: Double(bypassDistance)
         )
+    }
+
+    func applyDTO(_ doc: DiagramDocumentDTO) {
+        self.diagramId = doc.id
+        self.diagramName = doc.name
+        self.createdAt = doc.createdAt
+        self.bypassDistance = CGFloat(doc.bypassDistancePx ?? 28.0)
+        self.nodes = doc.nodes.compactMap { dto in
+            guard let type = PAPShapeType.fromShapeKind(dto.shape) else { return nil }
+            let id = UUID(uuidString: dto.id) ?? UUID()
+            let col = dto.col ?? PAPGrid.nearestGrid(from: CGPoint(x: dto.x + type.defaultWidth / 2, y: dto.y + type.defaultHeight / 2)).col
+            let row = dto.row ?? PAPGrid.nearestGrid(from: CGPoint(x: dto.x + type.defaultWidth / 2, y: dto.y + type.defaultHeight / 2)).row
+            return PAPNode(id: id, type: type, label: dto.text, col: col, row: row, tag: dto.tag ?? "")
+        }
+        self.edges = doc.connections.compactMap { dto in
+            guard let fromId = UUID(uuidString: dto.fromNodeId),
+                  let toId = UUID(uuidString: dto.toNodeId) else { return nil }
+            let id = UUID(uuidString: dto.id) ?? UUID()
+            let port = PAPBranchPort.fromPortString(dto.fromPort)
+            return PAPEdge(id: id, fromId: fromId, toId: toId, label: dto.label, fromPort: port)
+        }
+    }
+
+    func broadcastCurrentState() {
+        let dto = exportDTO()
+        if let data = try? JSONEncoder().encode(dto),
+           let json = String(data: data, encoding: .utf8) {
+            LiveCollabSessionManager.shared.sendDiagramAction(action: .nodeUpdated, nodeJson: json)
+        }
+    }
+
+    func setupLiveCollabHooks() {
+        let collab = LiveCollabSessionManager.shared
+
+        collab.onProvideSnapshot = { [weak self] in
+            guard let self = self else { return (nil, nil) }
+            let dto = self.exportDTO()
+            let data = try? JSONEncoder().encode(dto)
+            let json = data.flatMap { String(data: $0, encoding: .utf8) }
+            return (json, nil)
+        }
+
+        collab.onApplySnapshot = { [weak self] docJson, _ in
+            guard let self = self,
+                  let docJson = docJson,
+                  let data = docJson.data(using: .utf8),
+                  let dto = try? JSONDecoder().decode(DiagramDocumentDTO.self, from: data) else { return }
+            self.applyDTO(dto)
+            self.store?.save(dto)
+        }
+
+        collab.onRemoteDiagramAction = { [weak self] message in
+            guard let self = self else { return }
+            if let json = message.nodeJson,
+               let data = json.data(using: .utf8),
+               let dto = try? JSONDecoder().decode(DiagramDocumentDTO.self, from: data) {
+                self.applyDTO(dto)
+                self.store?.save(dto)
+            }
+        }
+    }
+
+    func save() {
+        guard let store = self.store else { return }
+        let doc = exportDTO()
         store.save(doc)
     }
 
@@ -713,6 +779,7 @@ final class PAPDesignerViewModel: ObservableObject {
         undoStack.append((nodes, edges))
         redoStack.removeAll()
         save()
+        broadcastCurrentState()
     }
 
     func undo() {
@@ -723,6 +790,7 @@ final class PAPDesignerViewModel: ObservableObject {
         selectedId = nil
         connectFromId = nil
         save()
+        broadcastCurrentState()
     }
 
     func redo() {
@@ -733,6 +801,7 @@ final class PAPDesignerViewModel: ObservableObject {
         selectedId = nil
         connectFromId = nil
         save()
+        broadcastCurrentState()
     }
 
     // MARK: Step-by-Step Construction (Bedienung wie PAP Designer)
@@ -2216,6 +2285,9 @@ struct PAPDesignerView: View {
         }
 
         ToolbarItemGroup(placement: .navigationBarTrailing) {
+            // Live Collaboration
+            LiveCollabBadgeButton(documentName: vm.diagramName, documentType: .pap)
+
             Button {
                 showTemplatePicker = true
             } label: {

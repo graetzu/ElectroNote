@@ -19,7 +19,7 @@ enum CanvasToolType: String, CaseIterable, Identifiable {
         case .pencil:     return "pencil"
         case .eraser:     return "eraser.fill"
         case .lasso:      return "lasso"
-        case .textSelect: return "text.viewfinder"
+        case .textSelect: return "character.cursor.ibeam"
         case .pan:        return "hand.draw"
         }
     }
@@ -56,6 +56,16 @@ final class InfiniteNotebookViewModel: ObservableObject {
 
     // MARK: - Pen Toolbar State
     @Published var lastDrawingTool: CanvasToolType = .pen
+    #if targetEnvironment(macCatalyst)
+    @Published var activeTool: CanvasToolType = .textSelect {
+        didSet {
+            if activeTool != .pan && activeTool != .lasso && activeTool != .textSelect {
+                lastDrawingTool = activeTool
+            }
+            applyCurrentTool()
+        }
+    }
+    #else
     @Published var activeTool: CanvasToolType = .pen {
         didSet {
             if activeTool != .pan && activeTool != .lasso && activeTool != .textSelect {
@@ -64,6 +74,7 @@ final class InfiniteNotebookViewModel: ObservableObject {
             applyCurrentTool()
         }
     }
+    #endif
     @Published var selectedColor: Color = .black {
         didSet { applyCurrentTool() }
     }
@@ -76,7 +87,11 @@ final class InfiniteNotebookViewModel: ObservableObject {
     @Published var pendingPKTool: PKTool? = nil
 
     // MARK: - Published state (synced to UIKit VC)
+    #if targetEnvironment(macCatalyst)
+    @Published var pencilOnly:      Bool            = false
+    #else
     @Published var pencilOnly:      Bool            = true
+    #endif
     @Published var background:      BackgroundStyle  = .grid
     @Published var lineSpacing:     LineSpacing      = .medium
     @Published var mathEnabled:       Bool            = false
@@ -106,6 +121,10 @@ final class InfiniteNotebookViewModel: ObservableObject {
     }
 
     init() {
+        #if targetEnvironment(macCatalyst)
+        activeTool = .textSelect
+        pencilOnly = false
+        #endif
         applyCurrentTool()
     }
 
