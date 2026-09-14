@@ -45,7 +45,7 @@ final class LiveCollabSessionManager: ObservableObject {
     private var pendingDrawingSnapshot: String?
     private var pendingPkDrawingBase64: String?
 
-    var onRemoteStrokeReceived: ((PortableStrokeDTO, String?) -> Void)?
+    var onRemoteStrokeReceived: ((PortableStrokeDTO, String?, String?) -> Void)?
     var onRemoteStrokesCleared: (() -> Void)?
     var onRemoteElementUpsert: ((String) -> Void)?
     var onRemoteElementMoved: ((String, Double, Double) -> Void)?
@@ -197,6 +197,7 @@ final class LiveCollabSessionManager: ObservableObject {
             senderId: myPeer.id,
             senderName: myPeer.name,
             documentType: activeDocumentType,
+            documentTitle: activeDocumentTitle,
             stroke: stroke,
             pkStrokeData: pkStrokeBase64
         )
@@ -208,9 +209,39 @@ final class LiveCollabSessionManager: ObservableObject {
             type: .strokesCleared,
             senderId: myPeer.id,
             senderName: myPeer.name,
-            documentType: activeDocumentType
+            documentType: activeDocumentType,
+            documentTitle: activeDocumentTitle
         )
         dispatchMessage(msg)
+    }
+
+    func switchDocument(title: String, type: CollabDocumentType) {
+        guard sessionState == .hosting || sessionState == .connected else { return }
+        guard activeDocumentTitle != title || activeDocumentType != type else { return }
+        print("[CollabSession] switchDocument: \(title) (\(type))")
+        activeDocumentTitle = title
+        activeDocumentType = type
+        if sessionState == .hosting {
+            server.documentType = type
+        }
+        let msg = CollabMessage(
+            type: .documentSwitched,
+            senderId: myPeer.id,
+            senderName: myPeer.name,
+            documentType: type,
+            documentTitle: title
+        )
+        dispatchMessage(msg)
+    }
+
+    func broadcastHostSnapshot(docJson: String?, drawingJson: String?, pkDrawingBase64: String?, documentTitle: String?) {
+        guard sessionState == .hosting, !connectedPeers.isEmpty else { return }
+        server.broadcastSnapshot(
+            docJson: docJson,
+            drawingJson: drawingJson,
+            pkDrawingBase64: pkDrawingBase64,
+            documentTitle: documentTitle
+        )
     }
 
     func sendFullDrawingSync(pkDrawingBase64: String?, portableStrokes: [PortableStrokeDTO]? = nil) {
@@ -349,9 +380,23 @@ final class LiveCollabSessionManager: ObservableObject {
                 self.pendingPkDrawingBase64 = message.pkDrawingData
             }
 
+        case .documentSwitched:
+            print("[CollabSession] Remote switched document to: \(message.documentTitle ?? "") (\(message.documentType))")
+            self.activeDocumentType = message.documentType
+            if let title = message.documentTitle, !title.isEmpty {
+                self.activeDocumentTitle = title
+            }
+            self.autoOpenRequestedType = message.documentType
+
         case .strokeAdded:
             if let stroke = message.stroke {
-                onRemoteStrokeReceived?(stroke, message.pkStrokeData)
+                if let docTitle = message.documentTitle, !docTitle.isEmpty, docTitle != self.activeDocumentTitle {
+                    print("[CollabSession] Received stroke for different document: '\(docTitle)' (current: '\(self.activeDocumentTitle)'), triggering switch")
+                    self.activeDocumentTitle = docTitle
+                    self.activeDocumentType = message.documentType
+                    self.autoOpenRequestedType = message.documentType
+                }
+                onRemoteStrokeReceived?(stroke, message.pkStrokeData, message.documentTitle)
             }
 
         case .strokesCleared:

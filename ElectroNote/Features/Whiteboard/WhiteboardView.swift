@@ -398,8 +398,12 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
             self.isApplyingRemoteStroke = false
         }
 
-        collab.onRemoteStrokeReceived = { [weak self] strokeDTO, pkStrokeData in
+        collab.onRemoteStrokeReceived = { [weak self] strokeDTO, pkStrokeData, docTitle in
             guard let self = self else { return }
+            if let docTitle = docTitle, !docTitle.isEmpty, docTitle != (self.folderURL?.lastPathComponent ?? "") {
+                print("[WhiteboardView] Skipping stroke intended for '\(docTitle)' while current is '\(self.folderURL?.lastPathComponent ?? "")'")
+                return
+            }
             self.isApplyingRemoteStroke = true
             if let pkStrokeData = pkStrokeData,
                let data = Data(base64Encoded: pkStrokeData),

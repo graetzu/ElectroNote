@@ -26,6 +26,7 @@ enum CollabActionType: String, Codable {
     case roomState
     case snapshotRequest
     case snapshotResponse
+    case documentSwitched
     case leave
 
     // Canvas actions (Notebook & Whiteboard)

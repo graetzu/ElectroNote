@@ -54,6 +54,14 @@ struct ContentView: View {
                     sidebarVisibility = .detailOnly
                 }
                 #endif
+
+                // If in an active live session, propagate document switch to other peers
+                if let collabType = item.type.collabDocumentType,
+                   (collab.sessionState == .hosting || collab.sessionState == .connected) {
+                    if collab.activeDocumentTitle != item.name || collab.activeDocumentType != collabType {
+                        collab.switchDocument(title: item.name, type: collabType)
+                    }
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .electroNoteDrawingBegan)) { _ in

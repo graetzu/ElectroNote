@@ -277,6 +277,20 @@ final class InfiniteNotebookViewController: UIViewController {
             loadDocument()
             if LiveCollabSessionManager.shared.sessionState == .connected {
                 LiveCollabSessionManager.shared.requestSnapshot()
+            } else if LiveCollabSessionManager.shared.sessionState == .hosting && LiveCollabSessionManager.shared.connectedPeers.count > 1 {
+                let docData = try? JSONEncoder().encode(self.document)
+                let docJson = docData.flatMap { String(data: $0, encoding: .utf8) }
+                let strokes = PencilKitBridge.portableStrokes(from: self.canvasView.drawing)
+                let drawingData = try? JSONEncoder().encode(strokes)
+                let drawingJson = drawingData.flatMap { String(data: $0, encoding: .utf8) }
+                let pkDrawingBase64 = self.canvasView.drawing.dataRepresentation().base64EncodedString()
+                let docTitle = self.store?.noteURL.lastPathComponent ?? LiveCollabSessionManager.shared.activeDocumentTitle
+                LiveCollabSessionManager.shared.broadcastHostSnapshot(
+                    docJson: docJson,
+                    drawingJson: drawingJson,
+                    pkDrawingBase64: pkDrawingBase64,
+                    documentTitle: docTitle
+                )
             }
             if canvasView.contentSize.width > view.bounds.width && view.bounds.width > 0 {
                 let fitScale = view.bounds.width / canvasView.contentSize.width
@@ -4719,8 +4733,12 @@ extension InfiniteNotebookViewController {
             self.isApplyingRemoteStroke = false
         }
 
-        collab.onRemoteStrokeReceived = { [weak self] strokeDTO, pkStrokeData in
+        collab.onRemoteStrokeReceived = { [weak self] strokeDTO, pkStrokeData, docTitle in
             guard let self = self else { return }
+            if let docTitle = docTitle, !docTitle.isEmpty, docTitle != self.store?.noteURL.lastPathComponent {
+                print("[NotebookVC] Skipping stroke intended for '\(docTitle)' while current is '\(self.store?.noteURL.lastPathComponent ?? "")'")
+                return
+            }
             self.isApplyingRemoteStroke = true
             if let pkStrokeData = pkStrokeData,
                let data = Data(base64Encoded: pkStrokeData),

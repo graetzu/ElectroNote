@@ -7,7 +7,7 @@ final class LiveCollabServer {
     var port: UInt16 = 8765
     private(set) var isRunning: Bool = false
     private(set) var localIP: String = "127.0.0.1"
-    private(set) var documentType: CollabDocumentType = .note
+    var documentType: CollabDocumentType = .note
 
     var onMessageReceived: ((CollabMessage) -> Void)?
     var onPeerListChanged: (([CollabPeer]) -> Void)?
@@ -353,6 +353,11 @@ final class LiveCollabServer {
                 send(message: snapshotMsg, to: connection)
             }
 
+        case .documentSwitched:
+            self.documentType = message.documentType
+            onMessageReceived?(message)
+            broadcast(message: message, excluding: connId)
+
         case .leave:
             removeConnection(id: connId)
 
@@ -361,6 +366,20 @@ final class LiveCollabServer {
             onMessageReceived?(message)
             broadcast(message: message, excluding: connId)
         }
+    }
+
+    func broadcastSnapshot(docJson: String?, drawingJson: String?, pkDrawingBase64: String?, documentTitle: String?) {
+        let msg = CollabMessage(
+            type: .snapshotResponse,
+            senderId: hostPeer?.id ?? "host",
+            senderName: hostPeer?.name ?? "Host",
+            documentType: self.documentType,
+            documentTitle: documentTitle,
+            documentSnapshotJson: docJson,
+            drawingSnapshotJson: drawingJson,
+            pkDrawingData: pkDrawingBase64
+        )
+        broadcast(message: msg)
     }
 
     func broadcast(message: CollabMessage, excluding excludeId: ObjectIdentifier? = nil) {

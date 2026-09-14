@@ -31,6 +31,16 @@ struct DocumentItem: Identifiable, Hashable {
 
     enum ItemType: String {
         case folder, pdf, note, pap, whiteboard, mindmap
+
+        var collabDocumentType: CollabDocumentType? {
+            switch self {
+            case .note: return .note
+            case .whiteboard: return .whiteboard
+            case .pap: return .pap
+            case .mindmap: return .mindmap
+            case .folder, .pdf: return nil
+            }
+        }
     }
 
     enum SyncStatus: Equatable {
