@@ -416,6 +416,25 @@ struct LiveCollabSheetView: View {
                 // Peers List
                 peersListView
 
+                // Jump to Document / Dismiss button
+                Button {
+                    dismiss()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "pencil.and.outline")
+                            .font(.system(size: 16, weight: .bold))
+                        Text("Zum Dokument & Zeichnen")
+                            .fontWeight(.bold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+                }
+                .padding(.horizontal)
+                .buttonStyle(.plain)
+
                 // Terminate Button
                 Button(role: .destructive) {
                     collab.leaveSession()

@@ -97,6 +97,7 @@ final class InfiniteNotebookViewController: UIViewController {
 
     // MARK: - Live Collaboration State
     var isApplyingRemoteStroke = false
+    var hasAppliedRemoteSnapshot = false
     var lastCollabStrokeCount: Int = 0
     private var remoteCursorViews: [String: RemoteCursorBadgeView] = [:]
 
@@ -466,6 +467,11 @@ final class InfiniteNotebookViewController: UIViewController {
 
     private func loadDocument() {
         guard store != nil else { return }
+        if hasAppliedRemoteSnapshot {
+            setupBackgroundLayer()
+            refreshBackground()
+            return
+        }
         document = store.loadDocument()
         canvasView.drawing = store.loadDrawing()
 
@@ -3190,14 +3196,20 @@ extension InfiniteNotebookViewController: PKCanvasViewDelegate {
         if !isApplyingRemoteStroke {
             let currentCount = canvasView.drawing.strokes.count
             if currentCount > lastCollabStrokeCount {
-                let newStrokes = canvasView.drawing.strokes.suffix(currentCount - lastCollabStrokeCount)
+                let newStrokes = Array(canvasView.drawing.strokes.suffix(currentCount - lastCollabStrokeCount))
                 for stroke in newStrokes {
-                    if let portable = PencilKitBridge.portableStrokes(from: PKDrawing(strokes: [stroke])).first {
-                        LiveCollabSessionManager.shared.sendStroke(portable)
+                    let portable = PencilKitBridge.portableStrokes(from: PKDrawing(strokes: [stroke])).first
+                    let pkStrokeBase64 = PKDrawing(strokes: [stroke]).dataRepresentation().base64EncodedString()
+                    if let portable = portable {
+                        LiveCollabSessionManager.shared.sendStroke(portable, pkStrokeBase64: pkStrokeBase64)
                     }
                 }
             } else if currentCount == 0 && lastCollabStrokeCount > 0 {
                 LiveCollabSessionManager.shared.sendStrokesCleared()
+            } else if currentCount < lastCollabStrokeCount {
+                let portable = PencilKitBridge.portableStrokes(from: canvasView.drawing)
+                let pkDrawingBase64 = canvasView.drawing.dataRepresentation().base64EncodedString()
+                LiveCollabSessionManager.shared.sendFullDrawingSync(pkDrawingBase64: pkDrawingBase64, portableStrokes: portable)
             }
             lastCollabStrokeCount = currentCount
         }
@@ -4672,19 +4684,27 @@ extension InfiniteNotebookViewController {
         let collab = LiveCollabSessionManager.shared
 
         collab.onProvideSnapshot = { [weak self] in
-            guard let self = self else { return (nil, nil) }
+            guard let self = self else { return (nil, nil, nil, nil) }
             let docData = try? JSONEncoder().encode(self.document)
             let docJson = docData.flatMap { String(data: $0, encoding: .utf8) }
             let strokes = PencilKitBridge.portableStrokes(from: self.canvasView.drawing)
             let drawingData = try? JSONEncoder().encode(strokes)
             let drawingJson = drawingData.flatMap { String(data: $0, encoding: .utf8) }
-            return (docJson, drawingJson)
+            let pkDrawingBase64 = self.canvasView.drawing.dataRepresentation().base64EncodedString()
+            let docTitle = self.store?.noteURL.lastPathComponent ?? collab.activeDocumentTitle
+            return (docJson, drawingJson, pkDrawingBase64, docTitle)
         }
 
-        collab.onApplySnapshot = { [weak self] docJson, drawingJson in
+        collab.onApplySnapshot = { [weak self] docJson, drawingJson, pkDrawingData in
             guard let self = self else { return }
             self.isApplyingRemoteStroke = true
-            if let drawingJson = drawingJson,
+            self.hasAppliedRemoteSnapshot = true
+            if let pkDrawingData = pkDrawingData,
+               let data = Data(base64Encoded: pkDrawingData),
+               let nativeDrawing = try? PKDrawing(data: data) {
+                self.canvasView.drawing = nativeDrawing
+                self.lastCollabStrokeCount = nativeDrawing.strokes.count
+            } else if let drawingJson = drawingJson,
                let data = drawingJson.data(using: .utf8),
                let strokes = try? JSONDecoder().decode([PortableStrokeDTO].self, from: data) {
                 let drawing = PencilKitBridge.drawing(fromPortableStrokes: strokes)
@@ -4699,14 +4719,24 @@ extension InfiniteNotebookViewController {
             self.isApplyingRemoteStroke = false
         }
 
-        collab.onRemoteStrokeReceived = { [weak self] strokeDTO in
+        collab.onRemoteStrokeReceived = { [weak self] strokeDTO, pkStrokeData in
             guard let self = self else { return }
             self.isApplyingRemoteStroke = true
-            let pkDrawing = PencilKitBridge.drawing(fromPortableStrokes: [strokeDTO])
-            var current = self.canvasView.drawing
-            current.strokes.append(contentsOf: pkDrawing.strokes)
-            self.canvasView.drawing = current
-            self.lastCollabStrokeCount = self.canvasView.drawing.strokes.count
+            if let pkStrokeData = pkStrokeData,
+               let data = Data(base64Encoded: pkStrokeData),
+               let remoteDrawing = try? PKDrawing(data: data),
+               !remoteDrawing.strokes.isEmpty {
+                var current = self.canvasView.drawing
+                current.strokes.append(contentsOf: remoteDrawing.strokes)
+                self.canvasView.drawing = current
+                self.lastCollabStrokeCount = self.canvasView.drawing.strokes.count
+            } else {
+                let pkDrawing = PencilKitBridge.drawing(fromPortableStrokes: [strokeDTO])
+                var current = self.canvasView.drawing
+                current.strokes.append(contentsOf: pkDrawing.strokes)
+                self.canvasView.drawing = current
+                self.lastCollabStrokeCount = self.canvasView.drawing.strokes.count
+            }
             self.isApplyingRemoteStroke = false
         }
 
@@ -4755,14 +4785,41 @@ extension InfiniteNotebookViewController {
 
     private func applyRemoteDocument(_ newDoc: NotebookDocument) {
         self.document = newDoc
+
+        // 1. Dark/light appearance
+        canvasView.overrideUserInterfaceStyle = newDoc.darkDrawingMode ? .dark : .light
+
+        // 2. Compute proper content size matching host and drawing
+        let drawingMaxY = canvasView.drawing.bounds.isNull ? 0 : canvasView.drawing.bounds.maxY
+        let h = max(newDoc.documentHeight, drawingMaxY + Self.initialHeight * 0.5)
+        let screenW = view.bounds.width > 0 ? view.bounds.width : 820
+        let docPagesMaxW = newDoc.insertedImages.filter { isDocumentPage($0) }.map { $0.startX + $0.width }.max() ?? 0
+        let w = max(docPagesMaxW, min(screenW, 834), 820)
+        canvasView.contentSize = CGSize(width: w, height: h)
+
+        // 3. Clear and remount sticky notes
         for (_, view) in stickyNoteViews {
             view.removeFromSuperview()
         }
         stickyNoteViews.removeAll()
         newDoc.stickyNotes.forEach { mountStickyNoteView($0) }
+
+        // 4. Clear and remount inserted images / pages
+        for (_, view) in imageViews {
+            view.removeFromSuperview()
+        }
+        imageViews.removeAll()
+        imageLayers.removeAll()
+        newDoc.insertedImages.forEach { loadImageEntry($0) }
+
+        // 5. Update canvas container bounds and background pattern
+        updateBackgroundFrame()
         refreshBackground()
-        centerCanvasContent()
+        updateVisibleImages()
+
+        // 6. Save synced state locally
         store?.saveDocument(self.document)
+        store?.saveDrawing(self.canvasView.drawing)
     }
 }
 

@@ -742,14 +742,14 @@ final class PAPDesignerViewModel: ObservableObject {
         let collab = LiveCollabSessionManager.shared
 
         collab.onProvideSnapshot = { [weak self] in
-            guard let self = self else { return (nil, nil) }
+            guard let self = self else { return (nil, nil, nil, nil) }
             let dto = self.exportDTO()
             let data = try? JSONEncoder().encode(dto)
             let json = data.flatMap { String(data: $0, encoding: .utf8) }
-            return (json, nil)
+            return (json, nil, nil, self.diagramName)
         }
 
-        collab.onApplySnapshot = { [weak self] docJson, _ in
+        collab.onApplySnapshot = { [weak self] docJson, _, _ in
             guard let self = self,
                   let docJson = docJson,
                   let data = docJson.data(using: .utf8),

@@ -128,14 +128,20 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
         if !isApplyingRemoteStroke {
             let currentCount = canvasView.drawing.strokes.count
             if currentCount > lastCollabStrokeCount {
-                let newStrokes = canvasView.drawing.strokes.suffix(currentCount - lastCollabStrokeCount)
+                let newStrokes = Array(canvasView.drawing.strokes.suffix(currentCount - lastCollabStrokeCount))
                 for stroke in newStrokes {
-                    if let portable = PencilKitBridge.portableStrokes(from: PKDrawing(strokes: [stroke])).first {
-                        LiveCollabSessionManager.shared.sendStroke(portable)
+                    let portable = PencilKitBridge.portableStrokes(from: PKDrawing(strokes: [stroke])).first
+                    let pkStrokeBase64 = PKDrawing(strokes: [stroke]).dataRepresentation().base64EncodedString()
+                    if let portable = portable {
+                        LiveCollabSessionManager.shared.sendStroke(portable, pkStrokeBase64: pkStrokeBase64)
                     }
                 }
             } else if currentCount == 0 && lastCollabStrokeCount > 0 {
                 LiveCollabSessionManager.shared.sendStrokesCleared()
+            } else if currentCount < lastCollabStrokeCount {
+                let portable = PencilKitBridge.portableStrokes(from: canvasView.drawing)
+                let pkDrawingBase64 = canvasView.drawing.dataRepresentation().base64EncodedString()
+                LiveCollabSessionManager.shared.sendFullDrawingSync(pkDrawingBase64: pkDrawingBase64, portableStrokes: portable)
             }
             lastCollabStrokeCount = currentCount
         }
@@ -365,17 +371,24 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
         let collab = LiveCollabSessionManager.shared
 
         collab.onProvideSnapshot = { [weak self] in
-            guard let self = self else { return (nil, nil) }
+            guard let self = self else { return (nil, nil, nil, nil) }
             let strokes = PencilKitBridge.portableStrokes(from: self.canvasView.drawing)
             let drawingData = try? JSONEncoder().encode(strokes)
             let drawingJson = drawingData.flatMap { String(data: $0, encoding: .utf8) }
-            return (nil, drawingJson)
+            let pkDrawingBase64 = self.canvasView.drawing.dataRepresentation().base64EncodedString()
+            let docTitle = self.folderURL?.lastPathComponent ?? collab.activeDocumentTitle
+            return (nil, drawingJson, pkDrawingBase64, docTitle)
         }
 
-        collab.onApplySnapshot = { [weak self] _, drawingJson in
+        collab.onApplySnapshot = { [weak self] _, drawingJson, pkDrawingData in
             guard let self = self else { return }
             self.isApplyingRemoteStroke = true
-            if let drawingJson = drawingJson,
+            if let pkDrawingData = pkDrawingData,
+               let data = Data(base64Encoded: pkDrawingData),
+               let nativeDrawing = try? PKDrawing(data: data) {
+                self.canvasView.drawing = nativeDrawing
+                self.lastCollabStrokeCount = nativeDrawing.strokes.count
+            } else if let drawingJson = drawingJson,
                let data = drawingJson.data(using: .utf8),
                let strokes = try? JSONDecoder().decode([PortableStrokeDTO].self, from: data) {
                 let drawing = PencilKitBridge.drawing(fromPortableStrokes: strokes)
@@ -385,14 +398,24 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
             self.isApplyingRemoteStroke = false
         }
 
-        collab.onRemoteStrokeReceived = { [weak self] strokeDTO in
+        collab.onRemoteStrokeReceived = { [weak self] strokeDTO, pkStrokeData in
             guard let self = self else { return }
             self.isApplyingRemoteStroke = true
-            let pkDrawing = PencilKitBridge.drawing(fromPortableStrokes: [strokeDTO])
-            var current = self.canvasView.drawing
-            current.strokes.append(contentsOf: pkDrawing.strokes)
-            self.canvasView.drawing = current
-            self.lastCollabStrokeCount = self.canvasView.drawing.strokes.count
+            if let pkStrokeData = pkStrokeData,
+               let data = Data(base64Encoded: pkStrokeData),
+               let remoteDrawing = try? PKDrawing(data: data),
+               !remoteDrawing.strokes.isEmpty {
+                var current = self.canvasView.drawing
+                current.strokes.append(contentsOf: remoteDrawing.strokes)
+                self.canvasView.drawing = current
+                self.lastCollabStrokeCount = self.canvasView.drawing.strokes.count
+            } else {
+                let pkDrawing = PencilKitBridge.drawing(fromPortableStrokes: [strokeDTO])
+                var current = self.canvasView.drawing
+                current.strokes.append(contentsOf: pkDrawing.strokes)
+                self.canvasView.drawing = current
+                self.lastCollabStrokeCount = self.canvasView.drawing.strokes.count
+            }
             self.isApplyingRemoteStroke = false
         }
 

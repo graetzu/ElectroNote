@@ -11,7 +11,7 @@ final class LiveCollabServer {
 
     var onMessageReceived: ((CollabMessage) -> Void)?
     var onPeerListChanged: (([CollabPeer]) -> Void)?
-    var onSnapshotNeeded: (() -> (docJson: String?, drawingJson: String?))?
+    var onSnapshotNeeded: (() -> (docJson: String?, drawingJson: String?, pkDrawingBase64: String?, documentTitle: String?))?
 
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
@@ -329,8 +329,10 @@ final class LiveCollabServer {
                         senderId: hostPeer?.id ?? "host",
                         senderName: hostPeer?.name ?? "Host",
                         documentType: self.documentType,
+                        documentTitle: snapshots.documentTitle,
                         documentSnapshotJson: snapshots.docJson,
-                        drawingSnapshotJson: snapshots.drawingJson
+                        drawingSnapshotJson: snapshots.drawingJson,
+                        pkDrawingData: snapshots.pkDrawingBase64
                     )
                     send(message: snapshotMsg, to: connection)
                 }
@@ -343,8 +345,10 @@ final class LiveCollabServer {
                     senderId: hostPeer?.id ?? "host",
                     senderName: hostPeer?.name ?? "Host",
                     documentType: self.documentType,
+                    documentTitle: snapshots.documentTitle,
                     documentSnapshotJson: snapshots.docJson,
-                    drawingSnapshotJson: snapshots.drawingJson
+                    drawingSnapshotJson: snapshots.drawingJson,
+                    pkDrawingData: snapshots.pkDrawingBase64
                 )
                 send(message: snapshotMsg, to: connection)
             }

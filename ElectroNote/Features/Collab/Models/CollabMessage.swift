@@ -85,9 +85,12 @@ struct CollabMessage: Codable {
     // Optional Payloads
     var peer: CollabPeer?
     var peers: [CollabPeer]?
+    var documentTitle: String?
     var documentSnapshotJson: String?
     var drawingSnapshotJson: String?
+    var pkDrawingData: String? // Base64 encoded native PKDrawing for 100% lossless sync between Apple devices
     var stroke: PortableStrokeDTO?
+    var pkStrokeData: String? // Base64 encoded native PKStroke for 100% lossless sync between Apple devices
     var elementJson: String?
     var elementId: String?
     var position: CollabPoint?

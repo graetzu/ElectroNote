@@ -22,26 +22,30 @@ final class LiveCollabSessionManager: ObservableObject {
     @Published var discoveredRooms: [DiscoveredRoom] = []
     @Published var activeDocumentType: CollabDocumentType = .note
     @Published var autoOpenRequestedType: CollabDocumentType? = nil
+    @Published var activeDocumentTitle: String = "Live-Zusammenarbeit"
     @Published var myPeer: CollabPeer
 
     // Document hooks
-    var onProvideSnapshot: (() -> (docJson: String?, drawingJson: String?))?
-    var onApplySnapshot: ((String?, String?) -> Void)? {
+    var onProvideSnapshot: (() -> (docJson: String?, drawingJson: String?, pkDrawingBase64: String?, documentTitle: String?))?
+    var onApplySnapshot: ((String?, String?, String?) -> Void)? {
         didSet {
-            if let onApplySnapshot = onApplySnapshot, (pendingDocSnapshot != nil || pendingDrawingSnapshot != nil) {
+            if let onApplySnapshot = onApplySnapshot, (pendingDocSnapshot != nil || pendingDrawingSnapshot != nil || pendingPkDrawingBase64 != nil) {
                 print("[CollabSession] Replaying cached snapshot to newly attached onApplySnapshot")
                 let doc = pendingDocSnapshot
                 let drawing = pendingDrawingSnapshot
+                let pk = pendingPkDrawingBase64
                 pendingDocSnapshot = nil
                 pendingDrawingSnapshot = nil
-                onApplySnapshot(doc, drawing)
+                pendingPkDrawingBase64 = nil
+                onApplySnapshot(doc, drawing, pk)
             }
         }
     }
     private var pendingDocSnapshot: String?
     private var pendingDrawingSnapshot: String?
+    private var pendingPkDrawingBase64: String?
 
-    var onRemoteStrokeReceived: ((PortableStrokeDTO) -> Void)?
+    var onRemoteStrokeReceived: ((PortableStrokeDTO, String?) -> Void)?
     var onRemoteStrokesCleared: (() -> Void)?
     var onRemoteElementUpsert: ((String) -> Void)?
     var onRemoteElementMoved: ((String, Double, Double) -> Void)?
@@ -78,10 +82,10 @@ final class LiveCollabSessionManager: ObservableObject {
 
         server.onSnapshotNeeded = { [weak self] in
             if Thread.isMainThread {
-                return self?.onProvideSnapshot?() ?? (nil, nil)
+                return self?.onProvideSnapshot?() ?? (nil, nil, nil, nil)
             } else {
                 return DispatchQueue.main.sync {
-                    return self?.onProvideSnapshot?() ?? (nil, nil)
+                    return self?.onProvideSnapshot?() ?? (nil, nil, nil, nil)
                 }
             }
         }
@@ -117,6 +121,7 @@ final class LiveCollabSessionManager: ObservableObject {
     func startHosting(documentName: String, documentType: CollabDocumentType) {
         leaveSession()
         activeDocumentType = documentType
+        activeDocumentTitle = documentName
         myPeer.isHost = true
 
         do {
@@ -171,6 +176,7 @@ final class LiveCollabSessionManager: ObservableObject {
         autoOpenRequestedType = nil
         pendingDocSnapshot = nil
         pendingDrawingSnapshot = nil
+        pendingPkDrawingBase64 = nil
     }
 
     func requestSnapshot() {
@@ -185,13 +191,14 @@ final class LiveCollabSessionManager: ObservableObject {
 
     // MARK: - Broadcasting Actions
 
-    func sendStroke(_ stroke: PortableStrokeDTO) {
+    func sendStroke(_ stroke: PortableStrokeDTO, pkStrokeBase64: String? = nil) {
         let msg = CollabMessage(
             type: .strokeAdded,
             senderId: myPeer.id,
             senderName: myPeer.name,
             documentType: activeDocumentType,
-            stroke: stroke
+            stroke: stroke,
+            pkStrokeData: pkStrokeBase64
         )
         dispatchMessage(msg)
     }
@@ -202,6 +209,21 @@ final class LiveCollabSessionManager: ObservableObject {
             senderId: myPeer.id,
             senderName: myPeer.name,
             documentType: activeDocumentType
+        )
+        dispatchMessage(msg)
+    }
+
+    func sendFullDrawingSync(pkDrawingBase64: String?, portableStrokes: [PortableStrokeDTO]? = nil) {
+        let strokesJson = (try? JSONEncoder().encode(portableStrokes)).flatMap { String(data: $0, encoding: .utf8) }
+        let msg = CollabMessage(
+            type: .snapshotResponse,
+            senderId: myPeer.id,
+            senderName: myPeer.name,
+            documentType: activeDocumentType,
+            documentTitle: activeDocumentTitle,
+            documentSnapshotJson: nil,
+            drawingSnapshotJson: strokesJson,
+            pkDrawingData: pkDrawingBase64
         )
         dispatchMessage(msg)
     }
@@ -310,21 +332,26 @@ final class LiveCollabSessionManager: ObservableObject {
         case .snapshotResponse:
             print("[CollabSession] Received snapshotResponse for type: \(message.documentType)")
             self.activeDocumentType = message.documentType
+            if let title = message.documentTitle, !title.isEmpty {
+                self.activeDocumentTitle = title
+            }
             self.autoOpenRequestedType = message.documentType
             if let onApplySnapshot = self.onApplySnapshot {
                 print("[CollabSession] Applying snapshot immediately to attached handler")
-                onApplySnapshot(message.documentSnapshotJson, message.drawingSnapshotJson)
+                onApplySnapshot(message.documentSnapshotJson, message.drawingSnapshotJson, message.pkDrawingData)
                 self.pendingDocSnapshot = nil
                 self.pendingDrawingSnapshot = nil
+                self.pendingPkDrawingBase64 = nil
             } else {
                 print("[CollabSession] Caching snapshot until view mounts")
                 self.pendingDocSnapshot = message.documentSnapshotJson
                 self.pendingDrawingSnapshot = message.drawingSnapshotJson
+                self.pendingPkDrawingBase64 = message.pkDrawingData
             }
 
         case .strokeAdded:
             if let stroke = message.stroke {
-                onRemoteStrokeReceived?(stroke)
+                onRemoteStrokeReceived?(stroke, message.pkStrokeData)
             }
 
         case .strokesCleared:
