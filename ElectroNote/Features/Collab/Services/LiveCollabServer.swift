@@ -172,7 +172,7 @@ final class LiveCollabServer {
         let id = ObjectIdentifier(connection)
         guard let key = extractWebSocketKey(from: headers) else {
             let badResp = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-            connection.send(content: badResp.data(using: .utf8), completion: .contentProcessed({ _ in
+            connection.send(content: badResp.data(using: .utf8), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed({ _ in
                 self.removeConnection(id: id)
             }))
             return
@@ -183,14 +183,18 @@ final class LiveCollabServer {
         let accept = Data(digest).base64EncodedString()
 
         let response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(accept)\r\n\r\n"
-        connection.send(content: response.data(using: .utf8), completion: .contentProcessed({ [weak self, weak connection] error in
+        
+        // Mark handshake as accepted immediately so incoming frames are parsed as WebSocket
+        self.handshakeDone[id] = true
+        print("[CollabServer] WebSocket handshake accepted for client")
+
+        connection.send(content: response.data(using: .utf8), isComplete: false, completion: .contentProcessed({ [weak self, weak connection] error in
             guard let self = self, let conn = connection else { return }
             if error != nil {
                 self.removeConnection(id: id)
                 return
             }
-            self.handshakeDone[id] = true
-            print("[CollabServer] WebSocket handshake complete with client")
+            print("[CollabServer] WebSocket 101 Switching Protocols sent")
 
             // If buffered data remains, process it now
             if var rem = self.buffers[id], !rem.isEmpty {
@@ -268,7 +272,7 @@ final class LiveCollabServer {
                 return payloadList
             } else if opcode == 0x09 { // Ping frame -> reply with Pong (0x0A)
                 let pongFrame = makeFrame(payload: payload, opcode: 0x0A)
-                connection.send(content: pongFrame, completion: .contentProcessed({ _ in }))
+                connection.send(content: pongFrame, isComplete: false, completion: .contentProcessed({ _ in }))
             } else if opcode == 0x01 || opcode == 0x02 { // Text or Binary frame
                 payloadList.append(payload)
             }
@@ -360,14 +364,14 @@ final class LiveCollabServer {
         let frame = makeFrame(payload: data, opcode: 0x01)
         for (id, conn) in connections {
             if let exclude = excludeId, id == exclude { continue }
-            conn.send(content: frame, completion: .contentProcessed({ _ in }))
+            conn.send(content: frame, isComplete: false, completion: .contentProcessed({ _ in }))
         }
     }
 
     private func send(message: CollabMessage, to connection: NWConnection) {
         guard let data = try? JSONEncoder().encode(message) else { return }
         let frame = makeFrame(payload: data, opcode: 0x01)
-        connection.send(content: frame, completion: .contentProcessed({ _ in }))
+        connection.send(content: frame, isComplete: false, completion: .contentProcessed({ _ in }))
     }
 
     private func broadcastRoomState() {

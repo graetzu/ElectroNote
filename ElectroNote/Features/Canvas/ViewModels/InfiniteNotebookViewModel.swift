@@ -56,16 +56,6 @@ final class InfiniteNotebookViewModel: ObservableObject {
 
     // MARK: - Pen Toolbar State
     @Published var lastDrawingTool: CanvasToolType = .pen
-    #if targetEnvironment(macCatalyst)
-    @Published var activeTool: CanvasToolType = .textSelect {
-        didSet {
-            if activeTool != .pan && activeTool != .lasso && activeTool != .textSelect {
-                lastDrawingTool = activeTool
-            }
-            applyCurrentTool()
-        }
-    }
-    #else
     @Published var activeTool: CanvasToolType = .pen {
         didSet {
             if activeTool != .pan && activeTool != .lasso && activeTool != .textSelect {
@@ -74,7 +64,6 @@ final class InfiniteNotebookViewModel: ObservableObject {
             applyCurrentTool()
         }
     }
-    #endif
     @Published var selectedColor: Color = .black {
         didSet { applyCurrentTool() }
     }

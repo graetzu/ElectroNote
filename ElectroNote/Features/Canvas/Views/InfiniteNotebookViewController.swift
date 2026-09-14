@@ -73,11 +73,7 @@ final class InfiniteNotebookViewController: UIViewController {
     private var activeSearchIndex: Int = 0
 
     // MARK: - Transform & Selection Tools (Markieren, Verschieben, Drehen, Vergrößern)
-    #if targetEnvironment(macCatalyst)
-    var currentCanvasToolType: CanvasToolType = .textSelect
-    #else
     var currentCanvasToolType: CanvasToolType = .pen
-    #endif
     private var activeTransformBox: UniversalTransformBox?
     private var lassoOverlay: LassoCanvasOverlay?
     private var canvasLongPress: UILongPressGestureRecognizer?
@@ -172,6 +168,7 @@ final class InfiniteNotebookViewController: UIViewController {
             ]
             #if targetEnvironment(macCatalyst)
             panTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+            panTypes.append(NSNumber(value: UITouch.TouchType.indirectPointer.rawValue))
             #endif
             canvasView.panGestureRecognizer.allowedTouchTypes = panTypes
             canvasView.panGestureRecognizer.minimumNumberOfTouches = 1
@@ -184,7 +181,8 @@ final class InfiniteNotebookViewController: UIViewController {
             #if targetEnvironment(macCatalyst)
             canvasView.panGestureRecognizer.allowedTouchTypes = [
                 NSNumber(value: UITouch.TouchType.direct.rawValue),
-                NSNumber(value: UITouch.TouchType.indirect.rawValue)
+                NSNumber(value: UITouch.TouchType.indirect.rawValue),
+                NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
             ]
             canvasView.panGestureRecognizer.minimumNumberOfTouches = 1
             #else
@@ -204,7 +202,8 @@ final class InfiniteNotebookViewController: UIViewController {
         canvasView.drawingPolicy = .anyInput
         canvasView.panGestureRecognizer.allowedTouchTypes = [
             NSNumber(value: UITouch.TouchType.direct.rawValue),
-            NSNumber(value: UITouch.TouchType.indirect.rawValue)
+            NSNumber(value: UITouch.TouchType.indirect.rawValue),
+            NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
         ]
         canvasView.panGestureRecognizer.minimumNumberOfTouches = 2
         #else
@@ -275,6 +274,9 @@ final class InfiniteNotebookViewController: UIViewController {
         if !didLoad {
             didLoad = true
             loadDocument()
+            if LiveCollabSessionManager.shared.sessionState == .connected {
+                LiveCollabSessionManager.shared.requestSnapshot()
+            }
             if canvasView.contentSize.width > view.bounds.width && view.bounds.width > 0 {
                 let fitScale = view.bounds.width / canvasView.contentSize.width
                 canvasView.setZoomScale(fitScale, animated: false)
@@ -2148,6 +2150,7 @@ extension InfiniteNotebookViewController {
         ]
         #if targetEnvironment(macCatalyst)
         lpTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+        lpTypes.append(NSNumber(value: UITouch.TouchType.indirectPointer.rawValue))
         #endif
         lp.allowedTouchTypes = lpTypes
         lp.cancelsTouchesInView = true
@@ -2165,6 +2168,7 @@ extension InfiniteNotebookViewController {
         ]
         #if targetEnvironment(macCatalyst)
         tapTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+        tapTypes.append(NSNumber(value: UITouch.TouchType.indirectPointer.rawValue))
         #endif
         tap.allowedTouchTypes = tapTypes
         tap.delegate = self
@@ -3506,6 +3510,7 @@ final class ImageHandleView: UIView {
         ]
         #if targetEnvironment(macCatalyst)
         touchTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+        touchTypes.append(NSNumber(value: UITouch.TouchType.indirectPointer.rawValue))
         #endif
 
         // 1. Pan for moving (both finger and Apple Pencil)
@@ -4742,6 +4747,10 @@ extension InfiniteNotebookViewController {
             }()
             badge.updatePosition(CGPoint(x: cursor.x, y: cursor.y))
         }
+
+        if case .connected = collab.sessionState {
+            collab.requestSnapshot()
+        }
     }
 
     private func applyRemoteDocument(_ newDoc: NotebookDocument) {
@@ -4751,6 +4760,8 @@ extension InfiniteNotebookViewController {
         }
         stickyNoteViews.removeAll()
         newDoc.stickyNotes.forEach { mountStickyNoteView($0) }
+        refreshBackground()
+        centerCanvasContent()
         store?.saveDocument(self.document)
     }
 }

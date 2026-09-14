@@ -43,6 +43,13 @@ struct LiveCollabSheetView: View {
             }
         }
         .frame(minWidth: 420, minHeight: 520)
+        .onChange(of: collab.sessionState) { _, newState in
+            if case .connected = newState {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    dismiss()
+                }
+            }
+        }
         .onAppear {
             collab.startBrowsingRooms()
             if manualHost.isEmpty {
@@ -449,6 +456,24 @@ struct LiveCollabSheetView: View {
                 .background(Color.blue.opacity(0.12))
                 .cornerRadius(12)
                 .padding(.horizontal)
+
+                Button {
+                    dismiss()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "pencil.and.outline")
+                            .font(.system(size: 16, weight: .bold))
+                        Text("Zur geteilten Arbeitsfläche")
+                            .fontWeight(.bold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+                }
+                .padding(.horizontal)
+                .buttonStyle(.plain)
 
                 // Peers List
                 peersListView

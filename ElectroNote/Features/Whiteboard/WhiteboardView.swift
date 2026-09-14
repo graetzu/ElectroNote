@@ -435,6 +435,10 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
             }()
             badge.updatePosition(CGPoint(x: cursor.x, y: cursor.y))
         }
+
+        if case .connected = collab.sessionState {
+            collab.requestSnapshot()
+        }
     }
 }
 

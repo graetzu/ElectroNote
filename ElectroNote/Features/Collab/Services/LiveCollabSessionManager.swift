@@ -3,7 +3,7 @@ import Combine
 import UIKit
 import Network
 
-enum CollabSessionState {
+enum CollabSessionState: Equatable {
     case idle
     case hosting
     case connected
@@ -26,7 +26,21 @@ final class LiveCollabSessionManager: ObservableObject {
 
     // Document hooks
     var onProvideSnapshot: (() -> (docJson: String?, drawingJson: String?))?
-    var onApplySnapshot: ((String?, String?) -> Void)?
+    var onApplySnapshot: ((String?, String?) -> Void)? {
+        didSet {
+            if let onApplySnapshot = onApplySnapshot, (pendingDocSnapshot != nil || pendingDrawingSnapshot != nil) {
+                print("[CollabSession] Replaying cached snapshot to newly attached onApplySnapshot")
+                let doc = pendingDocSnapshot
+                let drawing = pendingDrawingSnapshot
+                pendingDocSnapshot = nil
+                pendingDrawingSnapshot = nil
+                onApplySnapshot(doc, drawing)
+            }
+        }
+    }
+    private var pendingDocSnapshot: String?
+    private var pendingDrawingSnapshot: String?
+
     var onRemoteStrokeReceived: ((PortableStrokeDTO) -> Void)?
     var onRemoteStrokesCleared: (() -> Void)?
     var onRemoteElementUpsert: ((String) -> Void)?
@@ -63,7 +77,13 @@ final class LiveCollabSessionManager: ObservableObject {
         }
 
         server.onSnapshotNeeded = { [weak self] in
-            return self?.onProvideSnapshot?() ?? (nil, nil)
+            if Thread.isMainThread {
+                return self?.onProvideSnapshot?() ?? (nil, nil)
+            } else {
+                return DispatchQueue.main.sync {
+                    return self?.onProvideSnapshot?() ?? (nil, nil)
+                }
+            }
         }
 
         client.onMessageReceived = { [weak self] message in
@@ -106,6 +126,7 @@ final class LiveCollabSessionManager: ObservableObject {
             roomCode = generateRoomCode(port: server.port)
             sessionState = .hosting
             connectedPeers = [myPeer]
+            autoOpenRequestedType = documentType
         } catch {
             sessionState = .error(error.localizedDescription)
         }
@@ -148,6 +169,18 @@ final class LiveCollabSessionManager: ObservableObject {
         sessionState = .idle
         connectedPeers = []
         autoOpenRequestedType = nil
+        pendingDocSnapshot = nil
+        pendingDrawingSnapshot = nil
+    }
+
+    func requestSnapshot() {
+        let msg = CollabMessage(
+            type: .snapshotRequest,
+            senderId: myPeer.id,
+            senderName: myPeer.name,
+            documentType: activeDocumentType
+        )
+        dispatchMessage(msg)
     }
 
     // MARK: - Broadcasting Actions
@@ -275,9 +308,19 @@ final class LiveCollabSessionManager: ObservableObject {
             }
 
         case .snapshotResponse:
+            print("[CollabSession] Received snapshotResponse for type: \(message.documentType)")
             self.activeDocumentType = message.documentType
             self.autoOpenRequestedType = message.documentType
-            onApplySnapshot?(message.documentSnapshotJson, message.drawingSnapshotJson)
+            if let onApplySnapshot = self.onApplySnapshot {
+                print("[CollabSession] Applying snapshot immediately to attached handler")
+                onApplySnapshot(message.documentSnapshotJson, message.drawingSnapshotJson)
+                self.pendingDocSnapshot = nil
+                self.pendingDrawingSnapshot = nil
+            } else {
+                print("[CollabSession] Caching snapshot until view mounts")
+                self.pendingDocSnapshot = message.documentSnapshotJson
+                self.pendingDrawingSnapshot = message.drawingSnapshotJson
+            }
 
         case .strokeAdded:
             if let stroke = message.stroke {

@@ -78,10 +78,15 @@ final class HandwritingSelectionOverlay: UIView {
         cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-        pan.allowedTouchTypes = [
+        var panTypes = [
             NSNumber(value: UITouch.TouchType.direct.rawValue),
             NSNumber(value: UITouch.TouchType.pencil.rawValue)
         ]
+        #if targetEnvironment(macCatalyst)
+        panTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+        panTypes.append(NSNumber(value: UITouch.TouchType.indirectPointer.rawValue))
+        #endif
+        pan.allowedTouchTypes = panTypes
         addGestureRecognizer(pan)
     }
 
@@ -199,19 +204,22 @@ final class LassoCanvasOverlay: UIView {
         isOpaque = false
         isUserInteractionEnabled = true
 
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-        pan.allowedTouchTypes = [
+        var itemTouchTypes = [
             NSNumber(value: UITouch.TouchType.direct.rawValue),
             NSNumber(value: UITouch.TouchType.pencil.rawValue)
         ]
+        #if targetEnvironment(macCatalyst)
+        itemTouchTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+        itemTouchTypes.append(NSNumber(value: UITouch.TouchType.indirectPointer.rawValue))
+        #endif
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.allowedTouchTypes = itemTouchTypes
         pan.maximumNumberOfTouches = 1
         addGestureRecognizer(pan)
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
-        tap.allowedTouchTypes = [
-            NSNumber(value: UITouch.TouchType.direct.rawValue),
-            NSNumber(value: UITouch.TouchType.pencil.rawValue)
-        ]
+        tap.allowedTouchTypes = itemTouchTypes
         addGestureRecognizer(tap)
         pan.require(toFail: tap)
     }
@@ -640,6 +648,7 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
         ]
         #if targetEnvironment(macCatalyst)
         touchTypes.append(NSNumber(value: UITouch.TouchType.indirect.rawValue))
+        touchTypes.append(NSNumber(value: UITouch.TouchType.indirectPointer.rawValue))
         #endif
 
         // 1. Move Pan (center) - single touch only so 2 fingers pinch & rotate

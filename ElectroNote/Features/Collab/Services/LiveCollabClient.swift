@@ -150,7 +150,7 @@ final class LiveCollabClient {
             return
         }
 
-        connection.send(content: reqData, completion: .contentProcessed({ [weak self, weak connection] error in
+        connection.send(content: reqData, isComplete: false, completion: .contentProcessed({ [weak self, weak connection] error in
             guard let self = self, let conn = connection, error == nil else {
                 self?.disconnect()
                 return
@@ -298,7 +298,7 @@ final class LiveCollabClient {
                 return payloadList
             } else if opcode == 0x09 { // Ping frame -> reply with masked Pong (0x0A)
                 let pongFrame = makeClientFrame(payload: payload, opcode: 0x0A)
-                connection.send(content: pongFrame, completion: .contentProcessed({ _ in }))
+                connection.send(content: pongFrame, isComplete: false, completion: .contentProcessed({ _ in }))
             } else if opcode == 0x01 || opcode == 0x02 { // Text or Binary frame
                 payloadList.append(payload)
             }
@@ -370,7 +370,7 @@ final class LiveCollabClient {
     func send(message: CollabMessage) {
         guard let conn = connection, let data = try? JSONEncoder().encode(message) else { return }
         let frame = makeClientFrame(payload: data, opcode: 0x01)
-        conn.send(content: frame, completion: .contentProcessed({ error in
+        conn.send(content: frame, isComplete: false, completion: .contentProcessed({ error in
             if let error = error {
                 print("[CollabClient] Send error: \(error)")
             }
