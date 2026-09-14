@@ -236,8 +236,16 @@ struct LiveCollabSheetView: View {
                     }
 
                     Button {
-                        let port = UInt16(manualPortText) ?? 8765
-                        collab.joinSession(host: manualHost, port: port, documentType: documentType)
+                        var targetHost = manualHost.trimmingCharacters(in: .whitespacesAndNewlines)
+                        var targetPort = UInt16(manualPortText.filter { $0.isNumber }) ?? 8765
+                        if targetHost.contains(":") {
+                            let parts = targetHost.split(separator: ":")
+                            if let h = parts.first { targetHost = String(h) }
+                            if parts.count > 1, let p = UInt16(parts[1].filter { $0.isNumber }) {
+                                targetPort = p
+                            }
+                        }
+                        collab.joinSession(host: targetHost, port: targetPort, documentType: documentType)
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.right.circle.fill")
@@ -289,6 +297,13 @@ struct LiveCollabSheetView: View {
                         Text(collab.hostIP)
                             .font(.system(.body, design: .monospaced))
                             .fontWeight(.bold)
+                        Button {
+                            UIPasteboard.general.string = "\(collab.hostIP):\(String(collab.hostPort))"
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                        }
                     }
 
                     Divider()
@@ -297,7 +312,7 @@ struct LiveCollabSheetView: View {
                         Text("Port:")
                             .foregroundColor(.secondary)
                         Spacer()
-                        Text("\(collab.hostPort)")
+                        Text(String(collab.hostPort))
                             .font(.system(.body, design: .monospaced))
                             .fontWeight(.bold)
                     }
@@ -322,7 +337,7 @@ struct LiveCollabSheetView: View {
                 .padding(.horizontal)
 
                 // QR Code
-                let qrPayload = "electronote://collab?ip=\(collab.hostIP)&port=\(collab.hostPort)&pin=\(collab.roomCode)&type=\(documentType.rawValue)"
+                let qrPayload = "electronote://collab?ip=\(collab.hostIP)&port=\(String(collab.hostPort))&pin=\(collab.roomCode)&type=\(documentType.rawValue)"
                 if let qrImage = generateQRCode(from: qrPayload) {
                     VStack(spacing: 8) {
                         Image(uiImage: qrImage)

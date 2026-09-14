@@ -21,6 +21,7 @@ final class LiveCollabSessionManager: ObservableObject {
     @Published var roomCode: String = ""
     @Published var discoveredRooms: [DiscoveredRoom] = []
     @Published var activeDocumentType: CollabDocumentType = .note
+    @Published var autoOpenRequestedType: CollabDocumentType? = nil
     @Published var myPeer: CollabPeer
 
     // Document hooks
@@ -75,9 +76,11 @@ final class LiveCollabSessionManager: ObservableObject {
             Task { @MainActor [weak self] in
                 if connected {
                     self?.sessionState = .connected
+                    self?.autoOpenRequestedType = self?.activeDocumentType
                 } else if case .connected = self?.sessionState {
                     self?.sessionState = .idle
                     self?.connectedPeers = []
+                    self?.autoOpenRequestedType = nil
                 }
             }
         }
@@ -144,6 +147,7 @@ final class LiveCollabSessionManager: ObservableObject {
         client.stopBrowsing()
         sessionState = .idle
         connectedPeers = []
+        autoOpenRequestedType = nil
     }
 
     // MARK: - Broadcasting Actions
@@ -271,6 +275,8 @@ final class LiveCollabSessionManager: ObservableObject {
             }
 
         case .snapshotResponse:
+            self.activeDocumentType = message.documentType
+            self.autoOpenRequestedType = message.documentType
             onApplySnapshot?(message.documentSnapshotJson, message.drawingSnapshotJson)
 
         case .strokeAdded:

@@ -27,7 +27,11 @@
     <key>NSMicrophoneUsageDescription</key>
     <string>Zum Aufnehmen von Videos mit Ton in Notizen</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>ElectroNote streamt Ihre Notizen und Whiteboards live im lokalen WLAN an Browser auf PCs, Smart TVs und Tablets.</string>
+    <string>ElectroNote verbindet Geräte im lokalen WLAN für die Live-Zusammenarbeit an Notizen, Whiteboards und Diagrammen.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_electronote-collab._tcp</string>
+    </array>
     <key>UIFileSharingEnabled</key>
     <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>

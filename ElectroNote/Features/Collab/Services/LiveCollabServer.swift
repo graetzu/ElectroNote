@@ -1,11 +1,13 @@
 import Foundation
 import Network
 import Combine
+import CryptoKit
 
 final class LiveCollabServer {
     var port: UInt16 = 8765
     private(set) var isRunning: Bool = false
     private(set) var localIP: String = "127.0.0.1"
+    private(set) var documentType: CollabDocumentType = .note
 
     var onMessageReceived: ((CollabMessage) -> Void)?
     var onPeerListChanged: (([CollabPeer]) -> Void)?
@@ -14,24 +16,26 @@ final class LiveCollabServer {
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
     private var peers: [ObjectIdentifier: CollabPeer] = [:]
+    private var buffers: [ObjectIdentifier: Data] = [:]
+    private var handshakeDone: [ObjectIdentifier: Bool] = [:]
     private let queue = DispatchQueue(label: "de.graetz.electronote.collab.server", qos: .userInitiated)
     private var hostPeer: CollabPeer?
 
     func start(hostPeer: CollabPeer, documentType: CollabDocumentType, roomName: String = "ElectroNote Live") throws {
         stop()
         self.hostPeer = hostPeer
+        self.documentType = documentType
         self.localIP = getLocalIPAddress() ?? "127.0.0.1"
 
         let parameters = NWParameters.tcp
-        let wsOptions = NWProtocolWebSocket.Options()
-        wsOptions.autoReplyPing = true
-        parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
+        parameters.includePeerToPeer = true
+        parameters.allowLocalEndpointReuse = true
 
         // Try preferred port or next available
         var currentPort = port
         var newListener: NWListener? = nil
         for attempt in 0..<10 {
-            let p = NWEndpoint.Port(rawValue: currentPort + UInt16(attempt))!
+            guard let p = NWEndpoint.Port(rawValue: currentPort + UInt16(attempt)) else { continue }
             do {
                 newListener = try NWListener(using: parameters, on: p)
                 self.port = p.rawValue
@@ -52,7 +56,7 @@ final class LiveCollabServer {
                 self?.isRunning = true
             case .failed(let error):
                 self?.isRunning = false
-                print("[CollabServer] Failed with error: \(error)")
+                print("[CollabServer] Listener failed: \(error)")
             case .cancelled:
                 self?.isRunning = false
             default:
@@ -80,18 +84,22 @@ final class LiveCollabServer {
         }
         connections.removeAll()
         peers.removeAll()
+        buffers.removeAll()
+        handshakeDone.removeAll()
         notifyPeersChanged()
     }
 
     private func handleNewConnection(_ connection: NWConnection) {
         let id = ObjectIdentifier(connection)
         connections[id] = connection
+        buffers[id] = Data()
+        handshakeDone[id] = false
 
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard let self = self, let conn = connection else { return }
             switch state {
             case .ready:
-                self.receiveNextMessage(from: conn)
+                self.receiveNextBytes(from: conn)
             case .failed, .cancelled:
                 self.removeConnection(id: id)
             default:
@@ -102,26 +110,199 @@ final class LiveCollabServer {
         connection.start(queue: queue)
     }
 
-    private func receiveNextMessage(from connection: NWConnection) {
-        connection.receiveMessage { [weak self, weak connection] data, context, isComplete, error in
+    private func receiveNextBytes(from connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self, weak connection] data, _, isComplete, error in
             guard let self = self, let conn = connection else { return }
-            if let error = error {
-                print("[CollabServer] Receive error: \(error)")
-                self.removeConnection(id: ObjectIdentifier(conn))
+            let id = ObjectIdentifier(conn)
+
+            if error != nil || isComplete {
+                self.removeConnection(id: id)
                 return
             }
 
-            if let data = data, !data.isEmpty {
-                self.handleIncomingData(data, from: conn)
+            guard let data = data, !data.isEmpty else {
+                if conn.state == .ready {
+                    self.receiveNextBytes(from: conn)
+                }
+                return
             }
 
-            if connection?.state == .ready {
-                self.receiveNextMessage(from: conn)
+            self.handleData(data, from: conn)
+
+            if conn.state == .ready {
+                self.receiveNextBytes(from: conn)
             }
         }
     }
 
-    private func handleIncomingData(_ data: Data, from connection: NWConnection) {
+    private func handleData(_ data: Data, from connection: NWConnection) {
+        let id = ObjectIdentifier(connection)
+        guard var buf = buffers[id] else { return }
+        buf.append(data)
+
+        if handshakeDone[id] != true {
+            // Check if HTTP header is complete
+            if let range = buf.range(of: Data("\r\n\r\n".utf8)) {
+                let headerData = buf.subdata(in: 0..<range.upperBound)
+                buf.removeSubrange(0..<range.upperBound)
+                buffers[id] = buf
+
+                if let headerStr = String(data: headerData, encoding: .utf8) {
+                    processHandshake(headerStr, connection: connection)
+                }
+            } else {
+                buffers[id] = buf
+                return
+            }
+        }
+
+        // Process WebSocket frames if handshake is complete
+        if handshakeDone[id] == true {
+            guard var remainingBuf = buffers[id] else { return }
+            let messages = parseWebSocketFrames(buffer: &remainingBuf, connection: connection)
+            buffers[id] = remainingBuf
+
+            for msgData in messages {
+                handleIncomingMessageData(msgData, from: connection)
+            }
+        }
+    }
+
+    private func processHandshake(_ headers: String, connection: NWConnection) {
+        let id = ObjectIdentifier(connection)
+        guard let key = extractWebSocketKey(from: headers) else {
+            let badResp = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            connection.send(content: badResp.data(using: .utf8), completion: .contentProcessed({ _ in
+                self.removeConnection(id: id)
+            }))
+            return
+        }
+
+        let magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+        let digest = Insecure.SHA1.hash(data: Data((key + magic).utf8))
+        let accept = Data(digest).base64EncodedString()
+
+        let response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(accept)\r\n\r\n"
+        connection.send(content: response.data(using: .utf8), completion: .contentProcessed({ [weak self, weak connection] error in
+            guard let self = self, let conn = connection else { return }
+            if error != nil {
+                self.removeConnection(id: id)
+                return
+            }
+            self.handshakeDone[id] = true
+            print("[CollabServer] WebSocket handshake complete with client")
+
+            // If buffered data remains, process it now
+            if var rem = self.buffers[id], !rem.isEmpty {
+                let messages = self.parseWebSocketFrames(buffer: &rem, connection: conn)
+                self.buffers[id] = rem
+                for msgData in messages {
+                    self.handleIncomingMessageData(msgData, from: conn)
+                }
+            }
+        }))
+    }
+
+    private func extractWebSocketKey(from headers: String) -> String? {
+        for line in headers.components(separatedBy: "\r\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.lowercased().hasPrefix("sec-websocket-key:") {
+                let parts = trimmed.split(separator: ":", maxSplits: 1)
+                if parts.count == 2 {
+                    return parts[1].trimmingCharacters(in: .whitespaces)
+                }
+            }
+        }
+        return nil
+    }
+
+    // MARK: - RFC 6455 Frame Parser & Builder
+
+    private func parseWebSocketFrames(buffer: inout Data, connection: NWConnection) -> [Data] {
+        var payloadList: [Data] = []
+        let id = ObjectIdentifier(connection)
+
+        while buffer.count >= 2 {
+            let b0 = buffer[0]
+            let b1 = buffer[1]
+            let opcode = b0 & 0x0F
+            let isMasked = (b1 & 0x80) != 0
+            var payloadLen = Int(b1 & 0x7F)
+            var offset = 2
+
+            if payloadLen == 126 {
+                guard buffer.count >= 4 else { break }
+                payloadLen = Int(buffer[2]) << 8 | Int(buffer[3])
+                offset = 4
+            } else if payloadLen == 127 {
+                guard buffer.count >= 10 else { break }
+                payloadLen = Int(buffer[2]) << 56 | Int(buffer[3]) << 48 | Int(buffer[4]) << 40 | Int(buffer[5]) << 32 |
+                             Int(buffer[6]) << 24 | Int(buffer[7]) << 16 | Int(buffer[8]) << 8 | Int(buffer[9])
+                offset = 10
+            }
+
+            let maskLen = isMasked ? 4 : 0
+            let totalFrameLen = offset + maskLen + payloadLen
+            guard buffer.count >= totalFrameLen else { break }
+
+            let mask: [UInt8]
+            if isMasked {
+                mask = [buffer[offset], buffer[offset+1], buffer[offset+2], buffer[offset+3]]
+                offset += 4
+            } else {
+                mask = []
+            }
+
+            var payload = Data(buffer[offset..<(offset+payloadLen)])
+            if isMasked && !mask.isEmpty {
+                for i in 0..<payload.count {
+                    payload[i] ^= mask[i % 4]
+                }
+            }
+
+            buffer.removeSubrange(0..<totalFrameLen)
+
+            // Handle Control frames
+            if opcode == 0x08 { // Close frame
+                removeConnection(id: id)
+                return payloadList
+            } else if opcode == 0x09 { // Ping frame -> reply with Pong (0x0A)
+                let pongFrame = makeFrame(payload: payload, opcode: 0x0A)
+                connection.send(content: pongFrame, completion: .contentProcessed({ _ in }))
+            } else if opcode == 0x01 || opcode == 0x02 { // Text or Binary frame
+                payloadList.append(payload)
+            }
+        }
+
+        return payloadList
+    }
+
+    private func makeFrame(payload: Data, opcode: UInt8 = 0x01) -> Data {
+        var frame = Data()
+        frame.reserveCapacity(payload.count + 10)
+        // FIN bit (0x80) | opcode
+        frame.append(0x80 | opcode)
+
+        let len = payload.count
+        if len < 126 {
+            frame.append(UInt8(len))
+        } else if len <= 0xFFFF {
+            frame.append(126)
+            var beLen = UInt16(len).bigEndian
+            withUnsafeBytes(of: &beLen) { frame.append(contentsOf: $0) }
+        } else {
+            frame.append(127)
+            var beLen = UInt64(len).bigEndian
+            withUnsafeBytes(of: &beLen) { frame.append(contentsOf: $0) }
+        }
+
+        frame.append(payload)
+        return frame
+    }
+
+    // MARK: - Collab Message Dispatch
+
+    private func handleIncomingMessageData(_ data: Data, from connection: NWConnection) {
         guard let message = try? JSONDecoder().decode(CollabMessage.self, from: data) else {
             return
         }
@@ -137,13 +318,13 @@ final class LiveCollabServer {
                 // Send current room state to all
                 broadcastRoomState()
 
-                // Send initial snapshot to joining peer
+                // Send initial snapshot with host documentType
                 if let snapshots = onSnapshotNeeded?() {
                     let snapshotMsg = CollabMessage(
                         type: .snapshotResponse,
                         senderId: hostPeer?.id ?? "host",
                         senderName: hostPeer?.name ?? "Host",
-                        documentType: message.documentType,
+                        documentType: self.documentType,
                         documentSnapshotJson: snapshots.docJson,
                         drawingSnapshotJson: snapshots.drawingJson
                     )
@@ -157,7 +338,7 @@ final class LiveCollabServer {
                     type: .snapshotResponse,
                     senderId: hostPeer?.id ?? "host",
                     senderName: hostPeer?.name ?? "Host",
-                    documentType: message.documentType,
+                    documentType: self.documentType,
                     documentSnapshotJson: snapshots.docJson,
                     drawingSnapshotJson: snapshots.drawingJson
                 )
@@ -168,7 +349,7 @@ final class LiveCollabServer {
             removeConnection(id: connId)
 
         default:
-            // Delta event from client: notify local host AND broadcast to other clients
+            // Delta event: notify local host and forward to other clients
             onMessageReceived?(message)
             broadcast(message: message, excluding: connId)
         }
@@ -176,25 +357,17 @@ final class LiveCollabServer {
 
     func broadcast(message: CollabMessage, excluding excludeId: ObjectIdentifier? = nil) {
         guard let data = try? JSONEncoder().encode(message) else { return }
+        let frame = makeFrame(payload: data, opcode: 0x01)
         for (id, conn) in connections {
             if let exclude = excludeId, id == exclude { continue }
-            sendRaw(data: data, to: conn)
+            conn.send(content: frame, completion: .contentProcessed({ _ in }))
         }
     }
 
     private func send(message: CollabMessage, to connection: NWConnection) {
         guard let data = try? JSONEncoder().encode(message) else { return }
-        sendRaw(data: data, to: connection)
-    }
-
-    private func sendRaw(data: Data, to connection: NWConnection) {
-        let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
-        let context = NWConnection.ContentContext(identifier: "ws", metadata: [metadata])
-        connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ error in
-            if let error = error {
-                print("[CollabServer] Send error: \(error)")
-            }
-        }))
+        let frame = makeFrame(payload: data, opcode: 0x01)
+        connection.send(content: frame, completion: .contentProcessed({ _ in }))
     }
 
     private func broadcastRoomState() {
@@ -206,7 +379,7 @@ final class LiveCollabServer {
             type: .roomState,
             senderId: hostPeer?.id ?? "host",
             senderName: hostPeer?.name ?? "Host",
-            documentType: .note,
+            documentType: self.documentType,
             peers: allPeers
         )
         broadcast(message: msg)
@@ -217,6 +390,8 @@ final class LiveCollabServer {
             conn.cancel()
         }
         peers.removeValue(forKey: id)
+        buffers.removeValue(forKey: id)
+        handshakeDone.removeValue(forKey: id)
         notifyPeersChanged()
         broadcastRoomState()
     }

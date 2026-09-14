@@ -7,6 +7,15 @@ enum CollabDocumentType: String, Codable {
     case whiteboard
     case pap
     case mindmap
+
+    var browserDocumentType: DocumentType {
+        switch self {
+        case .note: return .notebook
+        case .whiteboard: return .whiteboard
+        case .pap: return .pap
+        case .mindmap: return .mindmap
+        }
+    }
 }
 
 // MARK: - Action Types

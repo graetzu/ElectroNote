@@ -339,6 +339,7 @@ struct BrowserSidebarView: View {
         }
 
         ToolbarItemGroup(placement: .navigationBarTrailing) {
+            LiveCollabBadgeButton(documentName: "Live-Zusammenarbeit", documentType: .note)
             LiveCastBadgeButton()
 
             Menu {

@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var browserVM = BrowserViewModel()
     @EnvironmentObject private var importManager: ExternalFileImportManager
+    @ObservedObject private var collab = LiveCollabSessionManager.shared
     @State private var selectedItem: DocumentItem?
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .automatic
     @State private var showMath = false
@@ -58,6 +59,24 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .electroNoteDrawingBegan)) { _ in
             #if !targetEnvironment(macCatalyst)
             withAnimation { sidebarVisibility = .detailOnly }
+            #endif
+        }
+        .onReceive(collab.$autoOpenRequestedType) { requestedType in
+            guard let type = requestedType else { return }
+            let targetDocType = type.browserDocumentType
+            if let current = selectedItem, current.type == targetDocType.itemType {
+                return
+            }
+            let liveDocName = "Live-Zusammenarbeit"
+            if let existing = browserVM.items.first(where: { $0.name == liveDocName && $0.type == targetDocType.itemType }) {
+                selectedItem = existing
+            } else if let newDoc = browserVM.createDocument(named: liveDocName, type: targetDocType) {
+                selectedItem = newDoc
+            }
+            #if !targetEnvironment(macCatalyst)
+            withAnimation(.easeInOut(duration: 0.25)) {
+                sidebarVisibility = .detailOnly
+            }
             #endif
         }
         .sheet(isPresented: $showMath) {
