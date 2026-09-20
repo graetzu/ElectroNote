@@ -16,7 +16,7 @@ enum BackgroundStyle: String, Codable, CaseIterable, Identifiable {
         case .blank:   return "rectangle"
         case .lined:   return "line.3.horizontal"
         case .grid:    return "squareshape.split.2x2"
-        case .dotted:  return "ellipsis"
+        case .dotted:  return "circle.grid.2x2"
         case .cornell: return "rectangle.split.3x1"
         }
     }
@@ -176,5 +176,13 @@ struct MediaPlaybackItem: Identifiable {
     let mediaType: String // "video" or "youtube"
     let mediaURLString: String // filename or YouTube ID / URL
     let title: String?
+}
+
+// MARK: - PDF Export Scope
+
+public enum NotebookPDFExportScope: Equatable {
+    case allPages
+    case pageRange(startPage: Int, endPage: Int)
+    case customArea(startY: CGFloat, endY: CGFloat)
 }
 

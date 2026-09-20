@@ -51,7 +51,7 @@ final class BrowserViewModel: ObservableObject {
     }
 
     var isAtRoot: Bool { currentPath == fileService.rootURL }
-    var currentFolderName: String { isAtRoot ? "ElectroNote" : currentPath.lastPathComponent }
+    var currentFolderName: String { isAtRoot ? "InfiniteNote" : currentPath.lastPathComponent }
     var rootURL: URL { fileService.rootURL }
 
     init(fileService: FileServiceProtocol = FileService()) {

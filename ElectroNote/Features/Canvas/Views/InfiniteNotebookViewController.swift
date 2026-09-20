@@ -107,6 +107,10 @@ final class InfiniteNotebookViewController: UIViewController {
     var onPlayMedia: ((MediaPlaybackItem) -> Void)?
     var previousDrawingTool: CanvasToolType = .pen
 
+    // MARK: - PDF Range Export
+    private var rangeExportOverlay: NotebookRangeExportOverlay?
+    var onRangeExportChanged: ((_ startY: CGFloat, _ endY: CGFloat, _ startPage: Int, _ endPage: Int) -> Void)?
+
     // Dedicated pan gesture for smooth, high-precision Apple Pencil canvas scrolling
     private lazy var pencilScrollPanGesture: UIPanGestureRecognizer = {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePencilScrollPan(_:)))
@@ -275,22 +279,40 @@ final class InfiniteNotebookViewController: UIViewController {
         if !didLoad {
             didLoad = true
             loadDocument()
+            let isLocallyEmpty = self.document.insertedImages.isEmpty && self.document.insertedPDFs.isEmpty && self.canvasView.drawing.strokes.isEmpty
             if LiveCollabSessionManager.shared.sessionState == .connected {
                 LiveCollabSessionManager.shared.requestSnapshot()
             } else if LiveCollabSessionManager.shared.sessionState == .hosting && LiveCollabSessionManager.shared.connectedPeers.count > 1 {
-                let docData = try? JSONEncoder().encode(self.document)
-                let docJson = docData.flatMap { String(data: $0, encoding: .utf8) }
-                let strokes = PencilKitBridge.portableStrokes(from: self.canvasView.drawing)
-                let drawingData = try? JSONEncoder().encode(strokes)
-                let drawingJson = drawingData.flatMap { String(data: $0, encoding: .utf8) }
-                let pkDrawingBase64 = self.canvasView.drawing.dataRepresentation().base64EncodedString()
-                let docTitle = self.store?.noteURL.deletingPathExtension().lastPathComponent ?? LiveCollabSessionManager.shared.activeDocumentTitle
-                LiveCollabSessionManager.shared.broadcastHostSnapshot(
-                    docJson: docJson,
-                    drawingJson: drawingJson,
-                    pkDrawingBase64: pkDrawingBase64,
-                    documentTitle: docTitle
-                )
+                if isLocallyEmpty {
+                    // Local host note is empty, request content from peer
+                    LiveCollabSessionManager.shared.requestSnapshot()
+                } else {
+                    let docData = try? JSONEncoder().encode(self.document)
+                    let docJson = docData.flatMap { String(data: $0, encoding: .utf8) }
+                    let strokes = PencilKitBridge.portableStrokes(from: self.canvasView.drawing)
+                    let drawingData = try? JSONEncoder().encode(strokes)
+                    let drawingJson = drawingData.flatMap { String(data: $0, encoding: .utf8) }
+                    let pkDrawingBase64 = self.canvasView.drawing.dataRepresentation().base64EncodedString()
+                    let docTitle = self.store?.noteURL.deletingPathExtension().lastPathComponent ?? LiveCollabSessionManager.shared.activeDocumentTitle
+
+                    var pdfAssets: [String: String] = [:]
+                    if let store = self.store {
+                        for pdfEntry in self.document.insertedPDFs {
+                            let fileURL = store.pdfURL(filename: pdfEntry.filename)
+                            if let data = try? Data(contentsOf: fileURL), !data.isEmpty, data.count <= 25 * 1024 * 1024 {
+                                pdfAssets[pdfEntry.filename] = data.base64EncodedString()
+                            }
+                        }
+                    }
+
+                    LiveCollabSessionManager.shared.broadcastHostSnapshot(
+                        docJson: docJson,
+                        drawingJson: drawingJson,
+                        pkDrawingBase64: pkDrawingBase64,
+                        documentTitle: docTitle,
+                        pdfAssets: pdfAssets.isEmpty ? nil : pdfAssets
+                    )
+                }
             }
             if canvasView.contentSize.width > view.bounds.width && view.bounds.width > 0 {
                 let fitScale = view.bounds.width / canvasView.contentSize.width
@@ -484,13 +506,22 @@ final class InfiniteNotebookViewController: UIViewController {
         if hasAppliedRemoteSnapshot {
             setupBackgroundLayer()
             refreshBackground()
+            lastCollabStrokeCount = canvasView.drawing.strokes.count
             return
         }
         document = store.loadDocument()
         canvasView.drawing = store.loadDrawing()
+        lastCollabStrokeCount = canvasView.drawing.strokes.count
 
         let drawingMaxY = canvasView.drawing.bounds.isNull ? 0 : canvasView.drawing.bounds.maxY
-        let h = max(document.documentHeight, drawingMaxY + Self.initialHeight * 0.5)
+        let imgMaxY = document.insertedImages.map { $0.startY + $0.height }.max() ?? 0
+        let pdfMaxY = document.insertedPDFs.map { $0.endY }.max() ?? 0
+        let contentMaxY = max(drawingMaxY, imgMaxY, pdfMaxY)
+        let h = max(document.documentHeight, contentMaxY + Self.initialHeight * 0.3)
+        if h > document.documentHeight {
+            document.documentHeight = h
+            store?.saveDocument(document)
+        }
         let screenW = view.bounds.width > 0 ? view.bounds.width : 820
         let docPagesMaxW = document.insertedImages.filter { isDocumentPage($0) }.map { $0.startX + $0.width }.max() ?? 0
         let w = max(docPagesMaxW, min(screenW, 834), 820)
@@ -500,10 +531,24 @@ final class InfiniteNotebookViewController: UIViewController {
         setupBackgroundLayer()
         refreshBackground()
 
-        // 1. Only unpack PDF if insertedImages is empty (migration / backwards compatibility)
-        if document.insertedImages.isEmpty {
+        // 1. Recover / unpack PDF pages if images are missing or empty
+        var hasValidImages = false
+        if !document.insertedImages.isEmpty {
+            for img in document.insertedImages {
+                let fileURL = store.imageURL(filename: img.filename)
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    hasValidImages = true
+                    break
+                }
+            }
+        }
+
+        if !hasValidImages && !document.insertedPDFs.isEmpty {
+            print("[InfiniteNotebook] No valid images found on disk, unpacking \(document.insertedPDFs.count) PDF(s)")
+            document.insertedImages.removeAll()
             document.insertedPDFs.forEach { loadPDFEntry($0) }
-        } else {
+            store?.saveDocument(document)
+        } else if !document.insertedImages.isEmpty {
             // De-duplicate any historic duplicate entries at the exact same location (recovers from multi-load bug)
             var seenCoords = Set<String>()
             var deduped: [InsertedImage] = []
@@ -673,6 +718,12 @@ final class InfiniteNotebookViewController: UIViewController {
         lassoOverlay?.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         searchHighlightOverlay.frame = CGRect(origin: .zero, size: canvasView.contentSize)
         canvasView.bringSubviewToFront(searchHighlightOverlay)
+        if let overlay = rangeExportOverlay {
+            overlay.frame = CGRect(origin: .zero, size: canvasView.contentSize)
+            overlay.totalDocumentHeight = canvasView.contentSize.height
+            overlay.singlePageHeight = singlePageCanvasHeight
+            canvasView.bringSubviewToFront(overlay)
+        }
         updatePageBreakDividers()
         centerCanvasContent()
     }
@@ -840,40 +891,11 @@ extension InfiniteNotebookViewController {
             if url.path.contains("InsertLive_") {
                 try? FileManager.default.removeItem(at: url)
             }
-        } else if ext == "docx" {
-            promptDocxImportMode(url: url)
         } else {
             insertPDF(from: url)
         }
     }
 
-    private func promptDocxImportMode(url: URL) {
-        let alert = UIAlertController(
-            title: "Word-Dokument importieren",
-            message: "Wie möchtest du das Dokument in dein Notizbuch einfügen?",
-            preferredStyle: .actionSheet
-        )
-
-        alert.addAction(UIAlertAction(title: "📄 Als A4-Dokumentseiten (zum handschriftlichen Beschriften)", style: .default) { [weak self] _ in
-            self?.insertPDF(from: url)
-        })
-
-        alert.addAction(UIAlertAction(title: "✍️ Als Notiztext (mit Handschrift & Tastatur bearbeitbar)", style: .default) { [weak self] _ in
-            self?.insertDocxAsEditableText(from: url)
-        })
-
-        alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel) { _ in
-            if url.path.contains("InsertLive_") {
-                try? FileManager.default.removeItem(at: url)
-            }
-        })
-
-        if let popover = alert.popoverPresentationController {
-            popover.sourceView = view
-            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
-        }
-        present(alert, animated: true)
-    }
 
     private func insertDocxAsEditableText(from url: URL) {
         Task { @MainActor in
@@ -970,9 +992,8 @@ extension InfiniteNotebookViewController {
                 heights.append(pageH)
 
                 let img = autoreleasepool {
-                    self.renderPDFPage(page, width: pageW, height: pageH)
+                    PDFPageRenderer.render(page: page, width: pageW, height: pageH)
                 }
-                let pageText = await OCRService.shared.extractText(from: page, fallbackImage: img)
                 if let imgFilename = try? self.store.saveImage(img) {
                     let pageId = UUID()
                     let entry = InsertedImage(
@@ -982,7 +1003,7 @@ extension InfiniteNotebookViewController {
                         startY: y,
                         width: pageW,
                         height: pageH,
-                        extractedText: pageText.isEmpty ? nil : pageText,
+                        extractedText: nil,
                         isDocumentPage: true
                     )
                     self.document.insertedImages.append(entry)
@@ -1004,6 +1025,14 @@ extension InfiniteNotebookViewController {
             self.document.insertedPDFs.append(entry)
             self.document.documentHeight = self.canvasView.contentSize.height
             self.store.saveDocument(self.document)
+
+            let finalDoc = self.document
+            let finalDrawing = self.canvasView.drawing
+            if let finalStore = self.store {
+                Task.detached(priority: .utility) {
+                    await NoteIndexingService.shared.indexNotebook(store: finalStore, url: finalStore.noteURL, drawing: finalDrawing, document: finalDoc)
+                }
+            }
 
             self.canvasView.setContentOffset(CGPoint(x: 0, y: max(0, startY - 40)), animated: true)
             self.showToastBanner(text: "PDF eingefügt (\(pdf.pageCount) \(pdf.pageCount == 1 ? "Seite" : "Seiten"))", icon: "doc.text")
@@ -1356,7 +1385,7 @@ extension InfiniteNotebookViewController {
             let pageH = (h > 0) ? h : ((unscaledH / unscaledW) * pageW)
 
             let img = autoreleasepool {
-                renderPDFPage(page, width: pageW, height: pageH)
+                PDFPageRenderer.render(page: page, width: pageW, height: pageH)
             }
             if let imgFilename = try? store.saveImage(img) {
                 let pageId = UUID()
@@ -1379,6 +1408,7 @@ extension InfiniteNotebookViewController {
     }
 
     private func loadImageEntry(_ entry: InsertedImage) {
+        if imageViews[entry.id] != nil { return }
         let isDoc = isDocumentPage(entry)
         let contentFrame = CGRect(x: entry.startX, y: entry.startY,
                                   width: entry.width, height: entry.height)
@@ -1441,6 +1471,18 @@ extension InfiniteNotebookViewController {
                         imgView.image = loadedImg
                         if isDocumentPage(entry), let overlay = documentLiveTextViews[entry.id], overlay.interaction.analysis == nil {
                             analyzeImage(loadedImg, for: overlay, entryId: entry.id)
+                        }
+                    } else if isDocumentPage(entry) {
+                        // Image file missing on disk — self-heal on the fly from insertedPDFs!
+                        if let rendered = renderMissingPageFromPDF(for: entry) {
+                            imgView.image = rendered
+                            let url = URL(fileURLWithPath: path)
+                            if let pngData = rendered.pngData() {
+                                try? pngData.write(to: url, options: .atomic)
+                            }
+                            if let overlay = documentLiveTextViews[entry.id], overlay.interaction.analysis == nil {
+                                analyzeImage(rendered, for: overlay, entryId: entry.id)
+                            }
                         }
                     }
                 }
@@ -1702,40 +1744,48 @@ extension InfiniteNotebookViewController {
     }
 
     private func renderPDFPage(_ page: PDFPage, width: CGFloat, height: CGFloat) -> UIImage {
-        let scale = max(UIScreen.main.scale, 2.0)
-        let pixelSize = CGSize(
-            width: max(round(width * scale), 100),
-            height: max(round(height * scale), 100)
-        )
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1.0 // Render 1:1 at exact pixel dimensions
-        let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
+        PDFPageRenderer.render(page: page, width: width, height: height)
+    }
 
-        return renderer.image { ctx in
-            UIColor.white.setFill()
-            ctx.fill(CGRect(origin: .zero, size: pixelSize))
+    private func renderMissingPageFromPDF(for entry: InsertedImage) -> UIImage? {
+        guard let store = self.store else { return nil }
+        for pdfEntry in document.insertedPDFs {
+            let pdfURL = store.pdfURL(filename: pdfEntry.filename)
+            guard FileManager.default.fileExists(atPath: pdfURL.path),
+                  let doc = PDFDocument(url: pdfURL) else { continue }
 
-            let cg = ctx.cgContext
-            cg.saveGState()
+            var curY = pdfEntry.startY
+            var bestIdx: Int? = nil
+            var minDiff: CGFloat = .greatestFiniteMagnitude
 
-            // Flip UIKit top-left coordinates to CoreGraphics bottom-left coordinates
-            cg.translateBy(x: 0, y: pixelSize.height)
-            cg.scaleBy(x: 1.0, y: -1.0)
+            for (idx, pageH) in pdfEntry.pageHeights.enumerated() {
+                let diff = abs(curY - entry.startY)
+                if diff < minDiff {
+                    minDiff = diff
+                    bestIdx = idx
+                }
+                curY += pageH
+            }
 
-            let box = page.bounds(for: .cropBox).width > 0 ? page.bounds(for: .cropBox) : page.bounds(for: .mediaBox)
-            let rot = (page.rotation % 360 + 360) % 360
-            let isLandscape = (rot == 90 || rot == 270)
-            let unscaledW = max(isLandscape ? box.height : box.width, 1)
-            let unscaledH = max(isLandscape ? box.width : box.height, 1)
+            if let idx = bestIdx, minDiff < 40 {
+                if let page = doc.page(at: idx) {
+                    return autoreleasepool {
+                        PDFPageRenderer.render(page: page, width: entry.width, height: entry.height)
+                    }
+                }
+            }
 
-            let scaleX = pixelSize.width / max(unscaledW, 1)
-            let scaleY = pixelSize.height / max(unscaledH, 1)
-            cg.scaleBy(x: scaleX, y: scaleY)
-
-            cg.translateBy(x: -box.origin.x, y: -box.origin.y)
-            page.draw(with: .cropBox, to: cg)
-            cg.restoreGState()
+            // Fallback: match by relative page index among document pages
+            let docPages = document.insertedImages.filter { isDocumentPage($0) }
+            if let docIdx = docPages.firstIndex(where: { $0.id == entry.id }), docIdx < doc.pageCount {
+                if let page = doc.page(at: docIdx) {
+                    return autoreleasepool {
+                        PDFPageRenderer.render(page: page, width: entry.width, height: entry.height)
+                    }
+                }
+            }
         }
+        return nil
     }
 
     private func makeImageView(image: UIImage?, frame: CGRect) -> UIImageView {
@@ -2059,6 +2109,12 @@ extension InfiniteNotebookViewController {
         box.onCopyText = { [weak self] in
             self?.copyTextFromElement(id: id)
         }
+        if let mType = entry.mediaType, !mType.isEmpty, let mURL = entry.mediaURLString {
+            box.onPlayMedia = { [weak self] in
+                let item = MediaPlaybackItem(mediaType: mType, mediaURLString: mURL, title: entry.textContent)
+                self?.onPlayMedia?(item)
+            }
+        }
 
         imageHandles.values.forEach { $0.setSelected(false) }
         paperOverlayView.addSubview(box)
@@ -2207,6 +2263,14 @@ extension InfiniteNotebookViewController {
 
     @objc private func handleCanvasDoubleTap(_ gr: UITapGestureRecognizer) {
         let loc = gr.location(in: paperBackgroundView)
+        if let elementId = findElement(near: loc),
+           let entry = document.insertedImages.first(where: { $0.id == elementId }),
+           let mType = entry.mediaType, !mType.isEmpty,
+           let mURL = entry.mediaURLString {
+            let item = MediaPlaybackItem(mediaType: mType, mediaURLString: mURL, title: entry.textContent)
+            self.onPlayMedia?(item)
+            return
+        }
         setCanvasToolType(.textSelect)
         onToolChanged?(.textSelect)
         startInlineTextInput(atContentPoint: loc)
@@ -2236,9 +2300,27 @@ extension InfiniteNotebookViewController {
 
             if isTextElement(id: elementId) && isTextOrMac {
                 startInlineTextInput(atContentPoint: loc, existingElementId: elementId)
-            } else {
-                presentTransformBox(forElementId: elementId)
+                return
             }
+
+            // Check if it's a media element (YouTube or Video)
+            if let entry = document.insertedImages.first(where: { $0.id == elementId }),
+               let mType = entry.mediaType, !mType.isEmpty,
+               let mURL = entry.mediaURLString {
+                let elementRect = CGRect(x: entry.startX, y: entry.startY, width: entry.width, height: entry.height)
+                let playCenter = CGPoint(x: elementRect.midX, y: elementRect.midY)
+                let dist = hypot(loc.x - playCenter.x, loc.y - playCenter.y)
+                let playRadius: CGFloat = max(55, min(elementRect.width, elementRect.height) * 0.4)
+
+                // If tapped on/near the play button or if already selected, play immediately!
+                if dist <= playRadius || activeTransformBox?.elementId == elementId {
+                    let item = MediaPlaybackItem(mediaType: mType, mediaURLString: mURL, title: entry.textContent)
+                    self.onPlayMedia?(item)
+                    return
+                }
+            }
+
+            presentTransformBox(forElementId: elementId)
             return
         }
 
@@ -3209,21 +3291,20 @@ extension InfiniteNotebookViewController: PKCanvasViewDelegate {
 
         if !isApplyingRemoteStroke {
             let currentCount = canvasView.drawing.strokes.count
+            let myTitle = self.store?.noteURL.deletingPathExtension().lastPathComponent ?? LiveCollabSessionManager.shared.activeDocumentTitle
             if currentCount > lastCollabStrokeCount {
                 let newStrokes = Array(canvasView.drawing.strokes.suffix(currentCount - lastCollabStrokeCount))
                 for stroke in newStrokes {
-                    let portable = PencilKitBridge.portableStrokes(from: PKDrawing(strokes: [stroke])).first
+                    let portable = PencilKitBridge.portableStrokes(from: PKDrawing(strokes: [stroke])).first ?? PortableStrokeDTO(color: -16777216, width: 2.0, points: [])
                     let pkStrokeBase64 = PKDrawing(strokes: [stroke]).dataRepresentation().base64EncodedString()
-                    if let portable = portable {
-                        LiveCollabSessionManager.shared.sendStroke(portable, pkStrokeBase64: pkStrokeBase64)
-                    }
+                    LiveCollabSessionManager.shared.sendStroke(portable, pkStrokeBase64: pkStrokeBase64, documentTitle: myTitle)
                 }
             } else if currentCount == 0 && lastCollabStrokeCount > 0 {
-                LiveCollabSessionManager.shared.sendStrokesCleared()
+                LiveCollabSessionManager.shared.sendStrokesCleared(documentTitle: myTitle)
             } else if currentCount < lastCollabStrokeCount {
                 let portable = PencilKitBridge.portableStrokes(from: canvasView.drawing)
                 let pkDrawingBase64 = canvasView.drawing.dataRepresentation().base64EncodedString()
-                LiveCollabSessionManager.shared.sendFullDrawingSync(pkDrawingBase64: pkDrawingBase64, portableStrokes: portable)
+                LiveCollabSessionManager.shared.sendFullDrawingSync(pkDrawingBase64: pkDrawingBase64, portableStrokes: portable, documentTitle: myTitle)
             }
             lastCollabStrokeCount = currentCount
         }
@@ -3284,53 +3365,190 @@ extension InfiniteNotebookViewController: PKToolPickerObserver {
     }
 }
 
-// MARK: - PDF Export
+// MARK: - PDF Export & Range Slicing
 
 extension InfiniteNotebookViewController {
 
-    func exportAsPDF(completion: @escaping (URL?) -> Void) {
+    var singlePageCanvasHeight: CGFloat {
+        let canvasWidth = canvasView.contentSize.width
+        guard canvasWidth > 0 else { return 842.0 }
+        let pageW: CGFloat = 595
+        let pageH: CGFloat = 842
+        let scale = pageW / canvasWidth
+        return pageH / scale
+    }
+
+    var totalPageCount: Int {
+        let canvasHeight = canvasView.contentSize.height
+        let pageH = singlePageCanvasHeight
+        guard pageH > 0 else { return 1 }
+        return max(1, Int(ceil(canvasHeight / pageH)))
+    }
+
+    var currentPageNumber: Int {
+        let pageH = singlePageCanvasHeight
+        guard pageH > 0 else { return 1 }
+        let offsetY = canvasView.contentOffset.y
+        let page = Int(floor(offsetY / pageH)) + 1
+        return max(1, min(page, totalPageCount))
+    }
+
+    func enterRangeExportMode(initialStartY: CGFloat? = nil, initialEndY: CGFloat? = nil) {
+        if rangeExportOverlay == nil {
+            let overlay = NotebookRangeExportOverlay(frame: CGRect(origin: .zero, size: canvasView.contentSize))
+            overlay.singlePageHeight = singlePageCanvasHeight
+            overlay.totalDocumentHeight = canvasView.contentSize.height
+
+            let pageH = singlePageCanvasHeight
+            let defaultStartY = initialStartY ?? max(0, canvasView.contentOffset.y + 40)
+            let defaultEndY = initialEndY ?? min(canvasView.contentSize.height, defaultStartY + pageH)
+
+            overlay.setRange(startY: defaultStartY, endY: defaultEndY)
+            overlay.onRangeChanged = { [weak self] startY, endY, startPage, endPage in
+                self?.onRangeExportChanged?(startY, endY, startPage, endPage)
+            }
+
+            canvasView.addSubview(overlay)
+            canvasView.bringSubviewToFront(overlay)
+            rangeExportOverlay = overlay
+
+            let sPage = Int(floor(overlay.startY / pageH)) + 1
+            let ePage = Int(floor(max(0, overlay.endY - 1) / pageH)) + 1
+            onRangeExportChanged?(overlay.startY, overlay.endY, sPage, ePage)
+
+            let feedback = UIImpactFeedbackGenerator(style: .medium)
+            feedback.impactOccurred()
+        }
+    }
+
+    func exitRangeExportMode() {
+        guard let overlay = rangeExportOverlay else { return }
+        UIView.animate(withDuration: 0.2, animations: {
+            overlay.alpha = 0
+        }) { _ in
+            overlay.removeFromSuperview()
+        }
+        rangeExportOverlay = nil
+    }
+
+    func snapRangeExportToPages() {
+        rangeExportOverlay?.snapToPages()
+    }
+
+    func setRangeExportStartAtCurrentScroll() {
+        guard let overlay = rangeExportOverlay else { return }
+        let newY = max(0, canvasView.contentOffset.y + 20)
+        overlay.startY = min(newY, overlay.endY - 30)
+    }
+
+    func setRangeExportEndAtCurrentScroll() {
+        guard let overlay = rangeExportOverlay else { return }
+        let newY = min(canvasView.contentSize.height, canvasView.contentOffset.y + canvasView.bounds.height - 40)
+        overlay.endY = max(overlay.startY + 30, newY)
+    }
+
+    func exportAsPDF(
+        scope: NotebookPDFExportScope = .allPages,
+        cropToExactHeight: Bool = false,
+        completion: @escaping (URL?) -> Void
+    ) {
         let drawing = canvasView.drawing
         let canvasWidth = canvasView.contentSize.width
         let canvasHeight = canvasView.contentSize.height
 
         guard canvasWidth > 0, canvasHeight > 0 else { completion(nil); return }
 
-        // A4 page size in points
+        // Standard ISO A4 in points
         let pageW: CGFloat = 595
         let pageH: CGFloat = 842
         let scale = pageW / canvasWidth
-        let totalPDFHeight = canvasHeight * scale
-        let pageCount = max(1, Int(ceil(totalPDFHeight / pageH)))
+        let singlePageH = pageH / scale
+        let totalDocPages = max(1, Int(ceil(canvasHeight / singlePageH)))
 
         let filename = store.noteURL.deletingPathExtension().lastPathComponent
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(filename)_\(UUID().uuidString).pdf")
 
-        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pageH))
+        struct PageSlice {
+            let canvasY: CGFloat
+            let heightOnCanvas: CGFloat
+        }
+
+        var slices: [PageSlice] = []
+
+        switch scope {
+        case .allPages:
+            for page in 0..<totalDocPages {
+                slices.append(PageSlice(
+                    canvasY: CGFloat(page) * singlePageH,
+                    heightOnCanvas: singlePageH
+                ))
+            }
+
+        case .pageRange(let start, let end):
+            let s = max(1, min(start, totalDocPages))
+            let e = max(s, min(end, totalDocPages))
+            for page in (s - 1)..<e {
+                slices.append(PageSlice(
+                    canvasY: CGFloat(page) * singlePageH,
+                    heightOnCanvas: singlePageH
+                ))
+            }
+
+        case .customArea(let startY, let endY):
+            let topY = max(0, min(startY, endY))
+            let bottomY = min(canvasHeight, max(startY, endY))
+            let areaHeight = max(20, bottomY - topY)
+
+            if cropToExactHeight && areaHeight <= singlePageH {
+                slices.append(PageSlice(canvasY: topY, heightOnCanvas: areaHeight))
+            } else {
+                var curY = topY
+                while curY < bottomY {
+                    let h = min(singlePageH, bottomY - curY)
+                    slices.append(PageSlice(canvasY: curY, heightOnCanvas: h))
+                    curY += singlePageH
+                }
+            }
+        }
+
+        guard !slices.isEmpty else { completion(nil); return }
+
+        let isSingleCustomCrop = (slices.count == 1 && cropToExactHeight)
+        let pdfPageHeight = isSingleCustomCrop ? max(100, slices[0].heightOnCanvas * scale) : pageH
+        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pdfPageHeight))
+
         let data = renderer.pdfData { ctx in
-            for page in 0..<pageCount {
+            for slice in slices {
                 ctx.beginPage()
                 let pdfCtx = ctx.cgContext
+
                 // White background
                 pdfCtx.setFillColor(UIColor.white.cgColor)
-                pdfCtx.fill(CGRect(x: 0, y: 0, width: pageW, height: pageH))
-                // Translate for current page
+                pdfCtx.fill(CGRect(x: 0, y: 0, width: pageW, height: pdfPageHeight))
+
+                // Scale and translate into slice position
                 pdfCtx.saveGState()
                 pdfCtx.scaleBy(x: scale, y: scale)
-                pdfCtx.translateBy(x: 0, y: -CGFloat(page) * pageH / scale)
-                // Render paper background layer
+                pdfCtx.translateBy(x: 0, y: -slice.canvasY)
+
+                // 1. Render paper background layer
                 paperBackgroundView.layer.render(in: pdfCtx)
-                // Render image layers
+
+                // 2. Render image layers
                 imageLayers.values.forEach { $0.render(in: pdfCtx) }
-                // Render PDF layers
+
+                // 3. Render PDF layers
                 pdfLayers.forEach { $0.render(in: pdfCtx) }
-                // Render drawing for this page's slice
+
+                // 4. Render drawing strokes for this slice
                 let pageContentRect = CGRect(
-                    x: 0, y: CGFloat(page) * pageH / scale,
-                    width: canvasWidth, height: pageH / scale
+                    x: 0, y: slice.canvasY,
+                    width: canvasWidth, height: slice.heightOnCanvas
                 )
                 let inkImage = drawing.image(from: pageContentRect, scale: 2)
-                inkImage.draw(in: CGRect(origin: .zero, size: CGSize(width: canvasWidth, height: pageH / scale)))
+                inkImage.draw(in: pageContentRect)
+
                 pdfCtx.restoreGState()
             }
         }
@@ -3343,8 +3561,8 @@ extension InfiniteNotebookViewController {
         }
     }
 
-    func presentExport() {
-        exportAsPDF { [weak self] url in
+    func presentExport(scope: NotebookPDFExportScope = .allPages, cropToExactHeight: Bool = false) {
+        exportAsPDF(scope: scope, cropToExactHeight: cropToExactHeight) { [weak self] url in
             guard let self, let url = url else { return }
             let ac = UIActivityViewController(activityItems: [url], applicationActivities: nil)
             ac.popoverPresentationController?.sourceView = self.view
@@ -4698,7 +4916,7 @@ extension InfiniteNotebookViewController {
         let collab = LiveCollabSessionManager.shared
 
         collab.onProvideSnapshot = { [weak self] in
-            guard let self = self else { return (nil, nil, nil, nil) }
+            guard let self = self else { return (nil, nil, nil, nil, nil) }
             let docData = try? JSONEncoder().encode(self.document)
             let docJson = docData.flatMap { String(data: $0, encoding: .utf8) }
             let strokes = PencilKitBridge.portableStrokes(from: self.canvasView.drawing)
@@ -4706,10 +4924,21 @@ extension InfiniteNotebookViewController {
             let drawingJson = drawingData.flatMap { String(data: $0, encoding: .utf8) }
             let pkDrawingBase64 = self.canvasView.drawing.dataRepresentation().base64EncodedString()
             let docTitle = self.store?.noteURL.deletingPathExtension().lastPathComponent ?? collab.activeDocumentTitle
-            return (docJson, drawingJson, pkDrawingBase64, docTitle)
+
+            var pdfAssets: [String: String] = [:]
+            if let store = self.store {
+                for pdfEntry in self.document.insertedPDFs {
+                    let fileURL = store.pdfURL(filename: pdfEntry.filename)
+                    if let data = try? Data(contentsOf: fileURL), !data.isEmpty, data.count <= 25 * 1024 * 1024 {
+                        pdfAssets[pdfEntry.filename] = data.base64EncodedString()
+                    }
+                }
+            }
+
+            return (docJson, drawingJson, pkDrawingBase64, docTitle, pdfAssets.isEmpty ? nil : pdfAssets)
         }
 
-        collab.onApplySnapshot = { [weak self] docJson, drawingJson, pkDrawingData in
+        collab.onApplySnapshot = { [weak self] docJson, drawingJson, pkDrawingData, pdfAssets in
             guard let self = self else { return }
             self.isApplyingRemoteStroke = true
             self.hasAppliedRemoteSnapshot = true
@@ -4728,7 +4957,7 @@ extension InfiniteNotebookViewController {
             if let docJson = docJson,
                let data = docJson.data(using: .utf8),
                let doc = try? JSONDecoder().decode(NotebookDocument.self, from: data) {
-                self.applyRemoteDocument(doc)
+                self.applyRemoteDocument(doc, pdfAssets: pdfAssets)
             }
             self.isApplyingRemoteStroke = false
         }
@@ -4736,9 +4965,8 @@ extension InfiniteNotebookViewController {
         collab.onRemoteStrokeReceived = { [weak self] strokeDTO, pkStrokeData, docTitle in
             guard let self = self else { return }
             let myTitle = self.store?.noteURL.deletingPathExtension().lastPathComponent ?? ""
-            let cleanRemoteTitle = LiveCollabSessionManager.cleanDocumentTitle(docTitle ?? "")
-            if !cleanRemoteTitle.isEmpty && !myTitle.isEmpty && cleanRemoteTitle != myTitle {
-                print("[NotebookVC] Skipping stroke intended for '\(cleanRemoteTitle)' while current is '\(myTitle)'")
+            if let docTitle = docTitle, !docTitle.isEmpty, !myTitle.isEmpty, !LiveCollabSessionManager.titlesMatch(docTitle, myTitle) {
+                print("[NotebookVC] Skipping stroke intended for '\(docTitle)' while current is '\(myTitle)'")
                 return
             }
             self.isApplyingRemoteStroke = true
@@ -4757,14 +4985,14 @@ extension InfiniteNotebookViewController {
                 self.canvasView.drawing = current
                 self.lastCollabStrokeCount = self.canvasView.drawing.strokes.count
             }
+            self.extendIfNeeded()
             self.isApplyingRemoteStroke = false
         }
 
         collab.onRemoteStrokesCleared = { [weak self] docTitle in
             guard let self = self else { return }
             let myTitle = self.store?.noteURL.deletingPathExtension().lastPathComponent ?? ""
-            let cleanRemote = LiveCollabSessionManager.cleanDocumentTitle(docTitle ?? "")
-            if !cleanRemote.isEmpty && !myTitle.isEmpty && cleanRemote != myTitle { return }
+            if let docTitle = docTitle, !docTitle.isEmpty, !myTitle.isEmpty, !LiveCollabSessionManager.titlesMatch(docTitle, myTitle) { return }
             self.isApplyingRemoteStroke = true
             self.canvasView.drawing = PKDrawing()
             self.lastCollabStrokeCount = 0
@@ -4806,43 +5034,393 @@ extension InfiniteNotebookViewController {
         }
     }
 
-    private func applyRemoteDocument(_ newDoc: NotebookDocument) {
+    private func applyRemoteDocument(_ newDoc: NotebookDocument, pdfAssets: [String: String]? = nil) {
+        // 0. Protect local document from being wiped by an empty remote snapshot
+        let isRemoteEmpty = newDoc.insertedImages.isEmpty && newDoc.insertedPDFs.isEmpty && newDoc.stickyNotes.isEmpty && canvasView.drawing.strokes.isEmpty
+        let hasLocalContent = !self.document.insertedImages.isEmpty || !self.document.insertedPDFs.isEmpty || !self.document.stickyNotes.isEmpty
+        if isRemoteEmpty && hasLocalContent {
+            print("[NotebookVC] Ignoring empty remote snapshot to preserve existing local document content")
+            return
+        }
+
+        // 1. Save received PDF assets into local pdfs folder
+        if let pdfAssets = pdfAssets, let store = self.store {
+            for (filename, b64) in pdfAssets {
+                let dest = store.pdfURL(filename: filename)
+                if !FileManager.default.fileExists(atPath: dest.path),
+                   let data = Data(base64Encoded: b64) {
+                    try? data.write(to: dest, options: .atomic)
+                    print("[NotebookVC] Saved received PDF asset: \(filename) (\(data.count) bytes)")
+                }
+            }
+        }
+
         self.document = newDoc
 
-        // 1. Dark/light appearance
+        // 2. Dark/light appearance
         canvasView.overrideUserInterfaceStyle = newDoc.darkDrawingMode ? .dark : .light
 
-        // 2. Compute proper content size matching host and drawing
+        // 3. Compute proper content size matching host and drawing
         let drawingMaxY = canvasView.drawing.bounds.isNull ? 0 : canvasView.drawing.bounds.maxY
-        let h = max(newDoc.documentHeight, drawingMaxY + Self.initialHeight * 0.5)
+        let imgMaxY = newDoc.insertedImages.map { $0.startY + $0.height }.max() ?? 0
+        let pdfMaxY = newDoc.insertedPDFs.map { $0.endY }.max() ?? 0
+        let contentMaxY = max(drawingMaxY, imgMaxY, pdfMaxY)
+        let h = max(newDoc.documentHeight, contentMaxY + Self.initialHeight * 0.3)
         let screenW = view.bounds.width > 0 ? view.bounds.width : 820
         let docPagesMaxW = newDoc.insertedImages.filter { isDocumentPage($0) }.map { $0.startX + $0.width }.max() ?? 0
         let w = max(docPagesMaxW, min(screenW, 834), 820)
         canvasView.contentSize = CGSize(width: w, height: h)
 
-        // 3. Clear and remount sticky notes
+        // 4. Clear and remount sticky notes
         for (_, view) in stickyNoteViews {
             view.removeFromSuperview()
         }
         stickyNoteViews.removeAll()
         newDoc.stickyNotes.forEach { mountStickyNoteView($0) }
 
-        // 4. Clear and remount inserted images / pages
+        // 5. Clear and remount inserted images / pages
         for (_, view) in imageViews {
             view.removeFromSuperview()
         }
         imageViews.removeAll()
         imageLayers.removeAll()
-        newDoc.insertedImages.forEach { loadImageEntry($0) }
 
-        // 5. Update canvas container bounds and background pattern
+        // If newDoc has insertedPDFs but no images, unpack them
+        if newDoc.insertedImages.isEmpty && !newDoc.insertedPDFs.isEmpty {
+            newDoc.insertedPDFs.forEach { loadPDFEntry($0) }
+        } else {
+            newDoc.insertedImages.forEach { loadImageEntry($0) }
+        }
+
+        // 6. Update canvas container bounds and background pattern
         updateBackgroundFrame()
         refreshBackground()
         updateVisibleImages()
 
-        // 6. Save synced state locally
+        // 7. Save synced state locally
         store?.saveDocument(self.document)
         store?.saveDrawing(self.canvasView.drawing)
+    }
+}
+
+// MARK: - NotebookRangeExportOverlay
+
+/// Interactive canvas overlay that allows the user to visually select and drag
+/// a Startpunkt (top) and Endpunkt (bottom) to export a precise region of the notebook as PDF.
+final class NotebookRangeExportOverlay: UIView {
+
+    // MARK: - Properties
+
+    var startY: CGFloat = 0 {
+        didSet {
+            updateLayout()
+            notifyChange()
+        }
+    }
+
+    var endY: CGFloat = 1000 {
+        didSet {
+            updateLayout()
+            notifyChange()
+        }
+    }
+
+    var singlePageHeight: CGFloat = 1190 {
+        didSet { updateLayout() }
+    }
+
+    var totalDocumentHeight: CGFloat = 3000 {
+        didSet { updateLayout() }
+    }
+
+    var onRangeChanged: ((_ startY: CGFloat, _ endY: CGFloat, _ startPage: Int, _ endPage: Int) -> Void)?
+
+    // MARK: - Subviews
+
+    private let topDimView: UIView = {
+        let v = UIView()
+        v.backgroundColor = UIColor.black.withAlphaComponent(0.28)
+        v.isUserInteractionEnabled = false
+        return v
+    }()
+
+    private let bottomDimView: UIView = {
+        let v = UIView()
+        v.backgroundColor = UIColor.black.withAlphaComponent(0.28)
+        v.isUserInteractionEnabled = false
+        return v
+    }()
+
+    private let leftBorderView: UIView = {
+        let v = UIView()
+        v.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.65)
+        v.isUserInteractionEnabled = false
+        return v
+    }()
+
+    private let rightBorderView: UIView = {
+        let v = UIView()
+        v.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.65)
+        v.isUserInteractionEnabled = false
+        return v
+    }()
+
+    // Startpunkt (Top Marker)
+    private let startLineView: UIView = {
+        let v = UIView()
+        v.backgroundColor = UIColor.systemGreen
+        return v
+    }()
+
+    private let startPillLabel: UILabel = {
+        let l = UILabel()
+        l.font = .systemFont(ofSize: 13, weight: .bold)
+        l.textColor = .white
+        l.textAlignment = .center
+        l.backgroundColor = UIColor.systemGreen
+        l.layer.cornerRadius = 14
+        l.clipsToBounds = true
+        l.layer.shadowColor = UIColor.black.cgColor
+        l.layer.shadowOpacity = 0.25
+        l.layer.shadowRadius = 4
+        l.layer.shadowOffset = CGSize(width: 0, height: 2)
+        return l
+    }()
+
+    // Endpunkt (Bottom Marker)
+    private let endLineView: UIView = {
+        let v = UIView()
+        v.backgroundColor = UIColor.systemRed
+        return v
+    }()
+
+    private let endPillLabel: UILabel = {
+        let l = UILabel()
+        l.font = .systemFont(ofSize: 13, weight: .bold)
+        l.textColor = .white
+        l.textAlignment = .center
+        l.backgroundColor = UIColor.systemRed
+        l.layer.cornerRadius = 14
+        l.clipsToBounds = true
+        l.layer.shadowColor = UIColor.black.cgColor
+        l.layer.shadowOpacity = 0.25
+        l.layer.shadowRadius = 4
+        l.layer.shadowOffset = CGSize(width: 0, height: 2)
+        return l
+    }()
+
+    // Center Range Badge
+    private let rangeInfoBadge: UILabel = {
+        let l = UILabel()
+        l.font = .systemFont(ofSize: 12, weight: .semibold)
+        l.textColor = UIColor.secondaryLabel
+        l.textAlignment = .center
+        l.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.85)
+        l.layer.cornerRadius = 8
+        l.layer.borderWidth = 0.5
+        l.layer.borderColor = UIColor.separator.cgColor
+        l.clipsToBounds = true
+        l.isUserInteractionEnabled = false
+        return l
+    }()
+
+    // Gesture tracking state
+    private var isDraggingStart = false
+    private var isDraggingEnd = false
+    private var initialDragY: CGFloat = 0
+    private var initialHandleY: CGFloat = 0
+
+    // MARK: - Init
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+
+        addSubview(topDimView)
+        addSubview(bottomDimView)
+        addSubview(leftBorderView)
+        addSubview(rightBorderView)
+
+        addSubview(startLineView)
+        addSubview(startPillLabel)
+
+        addSubview(endLineView)
+        addSubview(endPillLabel)
+
+        addSubview(rangeInfoBadge)
+
+        setupGestures()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    // MARK: - Hit Testing
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let topY = min(startY, endY)
+        let botY = max(startY, endY)
+        let hitPadding: CGFloat = 28.0
+
+        if abs(point.y - topY) <= hitPadding {
+            return self
+        }
+        if abs(point.y - botY) <= hitPadding {
+            return self
+        }
+
+        return nil
+    }
+
+    // MARK: - Gestures
+
+    private func setupGestures() {
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.maximumNumberOfTouches = 1
+        addGestureRecognizer(pan)
+    }
+
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let location = gesture.location(in: self)
+        let topY = min(startY, endY)
+        let botY = max(startY, endY)
+
+        switch gesture.state {
+        case .began:
+            let distToStart = abs(location.y - topY)
+            let distToEnd = abs(location.y - botY)
+
+            if distToStart <= distToEnd {
+                isDraggingStart = true
+                isDraggingEnd = false
+                initialHandleY = topY
+            } else {
+                isDraggingStart = false
+                isDraggingEnd = true
+                initialHandleY = botY
+            }
+            initialDragY = location.y
+
+            let feedback = UIImpactFeedbackGenerator(style: .light)
+            feedback.impactOccurred()
+
+        case .changed:
+            let deltaY = location.y - initialDragY
+            let newY = initialHandleY + deltaY
+
+            if isDraggingStart {
+                let clamped = max(0, min(newY, endY - 30))
+                startY = snappedToPageDividerIfNeeded(clamped)
+            } else if isDraggingEnd {
+                let clamped = max(startY + 30, min(newY, totalDocumentHeight))
+                endY = snappedToPageDividerIfNeeded(clamped)
+            }
+
+        case .ended, .cancelled:
+            isDraggingStart = false
+            isDraggingEnd = false
+            let feedback = UIImpactFeedbackGenerator(style: .medium)
+            feedback.impactOccurred()
+
+        default:
+            break
+        }
+    }
+
+    private func snappedToPageDividerIfNeeded(_ y: CGFloat) -> CGFloat {
+        guard singlePageHeight > 0 else { return y }
+        let nearestPage = round(y / singlePageHeight)
+        let pageBreakY = nearestPage * singlePageHeight
+        if abs(y - pageBreakY) < 14 {
+            return pageBreakY
+        }
+        return y
+    }
+
+    // MARK: - Public Actions
+
+    func snapToPages() {
+        guard singlePageHeight > 0 else { return }
+        let topY = min(startY, endY)
+        let botY = max(startY, endY)
+
+        let startPageIdx = floor(topY / singlePageHeight)
+        let endPageIdx = ceil(botY / singlePageHeight)
+
+        startY = startPageIdx * singlePageHeight
+        endY = max((startPageIdx + 1) * singlePageHeight, endPageIdx * singlePageHeight)
+
+        let feedback = UINotificationFeedbackGenerator()
+        feedback.notificationOccurred(.success)
+    }
+
+    func setRange(startY: CGFloat, endY: CGFloat) {
+        self.startY = max(0, startY)
+        self.endY = min(totalDocumentHeight, max(self.startY + 40, endY))
+    }
+
+    // MARK: - Layout
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        updateLayout()
+    }
+
+    private func updateLayout() {
+        let w = bounds.width > 0 ? bounds.width : 820
+        let h = totalDocumentHeight > 0 ? totalDocumentHeight : max(bounds.height, 3000)
+
+        let topY = max(0, min(startY, endY))
+        let botY = min(h, max(startY, endY))
+
+        // Dim layers
+        topDimView.frame = CGRect(x: 0, y: 0, width: w, height: topY)
+        bottomDimView.frame = CGRect(x: 0, y: botY, width: w, height: max(0, h - botY))
+
+        // Side borders
+        leftBorderView.frame = CGRect(x: 0, y: topY, width: 3, height: max(0, botY - topY))
+        rightBorderView.frame = CGRect(x: w - 3, y: topY, width: 3, height: max(0, botY - topY))
+
+        // Start bar & pill
+        startLineView.frame = CGRect(x: 0, y: topY - 1.5, width: w, height: 3)
+        let startPage = Int(floor(topY / singlePageHeight)) + 1
+        let startCm = formatCmOnPage(topY)
+        startPillLabel.text = " 🟢 Startpunkt • S. \(startPage) (\(startCm) cm) ↕ "
+        startPillLabel.sizeToFit()
+        let pillW1 = max(startPillLabel.frame.width + 16, 210)
+        startPillLabel.frame = CGRect(x: (w - pillW1) / 2, y: topY - 14, width: pillW1, height: 28)
+
+        // End bar & pill
+        endLineView.frame = CGRect(x: 0, y: botY - 1.5, width: w, height: 3)
+        let endPage = Int(floor(max(0, botY - 1) / singlePageHeight)) + 1
+        let endCm = formatCmOnPage(botY)
+        endPillLabel.text = " 🔴 Endpunkt • S. \(endPage) (\(endCm) cm) ↕ "
+        endPillLabel.sizeToFit()
+        let pillW2 = max(endPillLabel.frame.width + 16, 210)
+        endPillLabel.frame = CGRect(x: (w - pillW2) / 2, y: botY - 14, width: pillW2, height: 28)
+
+        // Range info badge
+        let heightPt = Int(botY - topY)
+        let pageSpan = max(1, endPage - startPage + 1)
+        rangeInfoBadge.text = " Export-Ausschnitt: \(pageSpan) Seite\(pageSpan > 1 ? "n" : "") • \(heightPt) pt "
+        rangeInfoBadge.sizeToFit()
+        let badgeW = rangeInfoBadge.frame.width + 12
+        rangeInfoBadge.frame = CGRect(x: w - badgeW - 16, y: topY + 12, width: badgeW, height: 22)
+        rangeInfoBadge.isHidden = (botY - topY) < 60
+    }
+
+    private func formatCmOnPage(_ y: CGFloat) -> String {
+        guard singlePageHeight > 0 else { return "0.0" }
+        let relY = y.truncatingRemainder(dividingBy: singlePageHeight)
+        let cm = (relY / singlePageHeight) * 29.7
+        return String(format: "%.1f", cm)
+    }
+
+    private func notifyChange() {
+        let topY = min(startY, endY)
+        let botY = max(startY, endY)
+        let startPage = Int(floor(topY / singlePageHeight)) + 1
+        let endPage = Int(floor(max(0, botY - 1) / singlePageHeight)) + 1
+        onRangeChanged?(topY, botY, startPage, endPage)
     }
 }
 

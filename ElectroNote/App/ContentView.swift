@@ -34,6 +34,11 @@ struct ContentView: View {
                         UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
                     }
                     .id(item.id)
+                case .grafcet:
+                    GrafcetDesignerView(item: item) { image in
+                        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+                    }
+                    .id(item.id)
                 case .pdf:
                     PDFHostView(item: item)
                         .id(item.id)
@@ -58,9 +63,8 @@ struct ContentView: View {
                 // If in an active live session, propagate document switch to other peers
                 if let collabType = item.type.collabDocumentType,
                    (collab.sessionState == .hosting || collab.sessionState == .connected) {
-                    let cleanName = LiveCollabSessionManager.cleanDocumentTitle(item.name)
-                    if collab.activeDocumentTitle != cleanName || collab.activeDocumentType != collabType {
-                        collab.switchDocument(title: cleanName, type: collabType)
+                    if !LiveCollabSessionManager.titlesMatch(collab.activeDocumentTitle, item.name) || collab.activeDocumentType != collabType {
+                        collab.switchDocument(title: item.name, type: collabType)
                     }
                 }
             }
@@ -80,7 +84,7 @@ struct ContentView: View {
             let allDocs = browserVM.listAllDocuments()
             let targetDoc: DocumentItem
             if let existing = allDocs.first(where: {
-                $0.name.localizedCaseInsensitiveCompare(cleanName) == .orderedSame &&
+                LiveCollabSessionManager.titlesMatch($0.name, cleanName) &&
                 $0.type == targetDocType.itemType
             }) {
                 targetDoc = existing

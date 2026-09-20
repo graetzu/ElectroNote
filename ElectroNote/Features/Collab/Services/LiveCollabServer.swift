@@ -11,7 +11,7 @@ final class LiveCollabServer {
 
     var onMessageReceived: ((CollabMessage) -> Void)?
     var onPeerListChanged: (([CollabPeer]) -> Void)?
-    var onSnapshotNeeded: (() -> (docJson: String?, drawingJson: String?, pkDrawingBase64: String?, documentTitle: String?))?
+    var onSnapshotNeeded: (() -> (docJson: String?, drawingJson: String?, pkDrawingBase64: String?, documentTitle: String?, pdfAssets: [String: String]?))?
 
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
@@ -332,7 +332,8 @@ final class LiveCollabServer {
                         documentTitle: snapshots.documentTitle,
                         documentSnapshotJson: snapshots.docJson,
                         drawingSnapshotJson: snapshots.drawingJson,
-                        pkDrawingData: snapshots.pkDrawingBase64
+                        pkDrawingData: snapshots.pkDrawingBase64,
+                        pdfAssets: snapshots.pdfAssets
                     )
                     send(message: snapshotMsg, to: connection)
                 }
@@ -348,7 +349,8 @@ final class LiveCollabServer {
                     documentTitle: snapshots.documentTitle,
                     documentSnapshotJson: snapshots.docJson,
                     drawingSnapshotJson: snapshots.drawingJson,
-                    pkDrawingData: snapshots.pkDrawingBase64
+                    pkDrawingData: snapshots.pkDrawingBase64,
+                    pdfAssets: snapshots.pdfAssets
                 )
                 send(message: snapshotMsg, to: connection)
             }
@@ -368,7 +370,7 @@ final class LiveCollabServer {
         }
     }
 
-    func broadcastSnapshot(docJson: String?, drawingJson: String?, pkDrawingBase64: String?, documentTitle: String?) {
+    func broadcastSnapshot(docJson: String?, drawingJson: String?, pkDrawingBase64: String?, documentTitle: String?, pdfAssets: [String: String]? = nil) {
         let msg = CollabMessage(
             type: .snapshotResponse,
             senderId: hostPeer?.id ?? "host",
@@ -377,7 +379,8 @@ final class LiveCollabServer {
             documentTitle: documentTitle,
             documentSnapshotJson: docJson,
             drawingSnapshotJson: drawingJson,
-            pkDrawingData: pkDrawingBase64
+            pkDrawingData: pkDrawingBase64,
+            pdfAssets: pdfAssets
         )
         broadcast(message: msg)
     }

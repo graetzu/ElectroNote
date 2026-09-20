@@ -379,13 +379,6 @@ struct BrowserSidebarView: View {
                 Image(systemName: "ellipsis.circle")
             }
             .accessibilityLabel("Optionen")
-
-            Button {
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .accessibilityLabel("Einstellungen")
         }
     }
 

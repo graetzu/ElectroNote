@@ -228,7 +228,8 @@ final class ICloudSyncEngine: ObservableObject {
             let isBundle = filename.hasSuffix(".enote") ||
                            filename.hasSuffix(".epap") ||
                            filename.hasSuffix(".ewb") ||
-                           filename.hasSuffix(".emm")
+                           filename.hasSuffix(".emm") ||
+                           filename.hasSuffix(".egrafcet")
 
             if isBundle {
                 enumerator.skipDescendants()

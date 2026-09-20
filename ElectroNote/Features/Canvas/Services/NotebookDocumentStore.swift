@@ -163,21 +163,20 @@ final class NotebookDocumentStore {
 
         for i in 0..<pdf.pageCount {
             guard let page = pdf.page(at: i) else { continue }
-            let b = page.bounds(for: .cropBox)
-            let ratio = (b.width > 0 && b.height > 0) ? (b.height / b.width) : 1.41421356
+            let b = page.bounds(for: .cropBox).width > 0 ? page.bounds(for: .cropBox) : page.bounds(for: .mediaBox)
+            let rot = (page.rotation % 360 + 360) % 360
+            let isLandscape = (rot == 90 || rot == 270)
+            let unscaledW = max(isLandscape ? b.height : b.width, 1)
+            let unscaledH = max(isLandscape ? b.width : b.height, 1)
+            let ratio = unscaledH / unscaledW
             let h = (abs(ratio - 1.41421356) < 0.05) ? a4PageH : (docWidth * ratio)
             heights.append(h)
 
-            let targetSize = CGSize(width: max(docWidth, 100) * 2, height: max(h, 100) * 2)
-            let thumb = page.thumbnail(of: targetSize, for: .cropBox)
-            let renderer = UIGraphicsImageRenderer(size: targetSize)
-            let whiteThumb = renderer.image { ctx in
-                UIColor.white.setFill()
-                ctx.fill(CGRect(origin: .zero, size: targetSize))
-                thumb.draw(in: CGRect(origin: .zero, size: targetSize))
+            let pageImg = autoreleasepool {
+                PDFPageRenderer.render(page: page, width: docWidth, height: h)
             }
-            let pageText = await OCRService.shared.extractText(from: page, fallbackImage: whiteThumb)
-            if let imgFilename = try? saveImage(whiteThumb) {
+
+            if let imgFilename = try? saveImage(pageImg) {
                 let imgEntry = InsertedImage(
                     id: UUID(),
                     filename: imgFilename,
@@ -185,7 +184,7 @@ final class NotebookDocumentStore {
                     startY: y,
                     width: docWidth,
                     height: h,
-                    extractedText: pageText.isEmpty ? nil : pageText,
+                    extractedText: nil,
                     isDocumentPage: true
                 )
                 doc.insertedImages.append(imgEntry)
@@ -201,6 +200,13 @@ final class NotebookDocumentStore {
         let entry = InsertedPDF(id: UUID(), filename: filename, startY: startY, pageHeights: heights)
         doc.insertedPDFs.append(entry)
         saveDocument(doc)
+
+        // Schedule background OCR indexing without blocking UI
+        let finalDoc = doc
+        Task.detached(priority: .utility) {
+            await NoteIndexingService.shared.indexNotebook(store: self, url: self.noteURL, drawing: drawing, document: finalDoc)
+        }
+
         return entry
     }
 
@@ -245,3 +251,59 @@ final class NotebookDocumentStore {
         return entry
     }
 }
+
+// MARK: - Vector PDF Page Renderer
+
+enum PDFPageRenderer {
+    static func render(page: PDFPage, width: CGFloat, height: CGFloat, scale: CGFloat? = nil) -> UIImage {
+        let actualScale = scale ?? max(UIScreen.main.scale, 2.0)
+        let pixelSize = CGSize(
+            width: max(round(width * actualScale), 100),
+            height: max(round(height * actualScale), 100)
+        )
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1.0 // Render 1:1 at exact pixel dimensions
+        let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
+
+        return renderer.image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: pixelSize))
+
+            let cg = ctx.cgContext
+            cg.saveGState()
+
+            // Flip UIKit top-left coordinates to CoreGraphics bottom-left coordinates
+            cg.translateBy(x: 0, y: pixelSize.height)
+            cg.scaleBy(x: 1.0, y: -1.0)
+
+            let box = page.bounds(for: .cropBox).width > 0 ? page.bounds(for: .cropBox) : page.bounds(for: .mediaBox)
+            let rot = (page.rotation % 360 + 360) % 360
+            let isLandscape = (rot == 90 || rot == 270)
+            let unscaledW = max(isLandscape ? box.height : box.width, 1)
+            let unscaledH = max(isLandscape ? box.width : box.height, 1)
+
+            let scaleX = pixelSize.width / max(unscaledW, 1)
+            let scaleY = pixelSize.height / max(unscaledH, 1)
+            cg.scaleBy(x: scaleX, y: scaleY)
+
+            switch rot {
+            case 90:
+                cg.rotate(by: -.pi / 2)
+                cg.translateBy(x: -box.width, y: 0)
+            case 180:
+                cg.rotate(by: -.pi)
+                cg.translateBy(x: -box.width, y: -box.height)
+            case 270:
+                cg.rotate(by: -3 * .pi / 2)
+                cg.translateBy(x: 0, y: -box.height)
+            default:
+                break
+            }
+
+            cg.translateBy(x: -box.origin.x, y: -box.origin.y)
+            page.draw(with: .cropBox, to: cg)
+            cg.restoreGState()
+        }
+    }
+}
+

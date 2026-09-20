@@ -60,6 +60,8 @@
 		EE901805CDD36F5A0C67BD6B /* PlotInserterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C2894B59718F39AE311147C /* PlotInserterView.swift */; };
 		EE11223344556677889900AA /* PAPDesignerView.swift in Sources */   = {isa = PBXBuildFile; fileRef = FF11223344556677889900AA /* PAPDesignerView.swift */; };
 		EE223344556677889900AABB /* MindMapDesignerView.swift in Sources */= {isa = PBXBuildFile; fileRef = FF223344556677889900AABB /* MindMapDesignerView.swift */; };
+		EE3344556677889900AABBCC /* GrafcetModel.swift in Sources */          = {isa = PBXBuildFile; fileRef = FF3344556677889900AABBCC /* GrafcetModel.swift */; };
+		EE44556677889900AABBCCDD /* GrafcetDesignerView.swift in Sources */  = {isa = PBXBuildFile; fileRef = FF44556677889900AABBCCDD /* GrafcetDesignerView.swift */; };
 		EE334455667788990011BBCC /* WhiteboardView.swift in Sources */     = {isa = PBXBuildFile; fileRef = FF334455667788990011BBCC /* WhiteboardView.swift */; };
 		EE445566778899001122CCDD /* InkPreset.swift in Sources */          = {isa = PBXBuildFile; fileRef = FF445566778899001122CCDD /* InkPreset.swift */; };
 		F62671E1B132D4DCA23233C8 /* PDFAnnotationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD50C0F7F3B150972A77A37 /* PDFAnnotationStore.swift */; };
@@ -145,6 +147,8 @@
 		NF07000000000000000011AA /* SyncSettingsView.swift */     = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncSettingsView.swift;     sourceTree = "<group>"; };
 		FF11223344556677889900AA /* PAPDesignerView.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PAPDesignerView.swift;    sourceTree = "<group>"; };
 		FF223344556677889900AABB /* MindMapDesignerView.swift */= {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MindMapDesignerView.swift;sourceTree = "<group>"; };
+		FF3344556677889900AABBCC /* GrafcetModel.swift */       = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrafcetModel.swift;       sourceTree = "<group>"; };
+		FF44556677889900AABBCCDD /* GrafcetDesignerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrafcetDesignerView.swift; sourceTree = "<group>"; };
 		FF334455667788990011BBCC /* WhiteboardView.swift */     = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhiteboardView.swift;     sourceTree = "<group>"; };
 		FF445566778899001122CCDD /* InkPreset.swift */          = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkPreset.swift;          sourceTree = "<group>"; };
 		FF556677889900112233DDEE /* DiagramDocumentStore.swift */= {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagramDocumentStore.swift;sourceTree = "<group>"; };
@@ -432,6 +436,8 @@
 				FF11223344556677889900AA /* PAPDesignerView.swift */,
 				FF223344556677889900AABB /* MindMapDesignerView.swift */,
 				FF556677889900112233DDEE /* DiagramDocumentStore.swift */,
+				FF3344556677889900AABBCC /* GrafcetModel.swift */,
+				FF44556677889900AABBCCDD /* GrafcetDesignerView.swift */,
 			);
 			path = Diagram;
 			sourceTree = "<group>";
@@ -738,6 +744,8 @@
 				B7816E0DA26C5D00B978C436 /* WelcomeView.swift in Sources */,
 				EE11223344556677889900AA /* PAPDesignerView.swift in Sources */,
 				EE223344556677889900AABB /* MindMapDesignerView.swift in Sources */,
+				EE3344556677889900AABBCC /* GrafcetModel.swift in Sources */,
+				EE44556677889900AABBCCDD /* GrafcetDesignerView.swift in Sources */,
 				EE556677889900112233DDEE /* DiagramDocumentStore.swift in Sources */,
 				EE667788990011223344EEFF /* PencilKitBridge.swift in Sources */,
 				EE334455667788990011BBCC /* WhiteboardView.swift in Sources */,

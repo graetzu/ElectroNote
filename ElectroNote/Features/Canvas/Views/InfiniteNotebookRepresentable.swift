@@ -21,6 +21,14 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
         vc.onPlayMedia = { [weak vm] item in
             Task { @MainActor in vm?.activePlaybackMedia = item }
         }
+        vc.onRangeExportChanged = { [weak vm] startY, endY, startPage, endPage in
+            Task { @MainActor in
+                vm?.exportStartY = startY
+                vm?.exportEndY   = endY
+                vm?.exportRangeStartPage = startPage
+                vm?.exportRangeEndPage   = endPage
+            }
+        }
         vm.attach(vc: vc)
         context.coordinator.vc = vc
         return vc
@@ -69,7 +77,18 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
         }
         if let insertion = vm.pendingTextInsertion {
             vm.pendingTextInsertion = nil
-            vc.startTextPlacement(text: insertion.text, fontSize: insertion.fontSize)
+            if insertion.directPlacement {
+                let sc = max(vc.canvasView.zoomScale, 0.01)
+                let off = vc.canvasView.contentOffset
+                let origin = CGPoint(
+                    x: max(30, (off.x + 80) / sc),
+                    y: max(30, (off.y + 140) / sc)
+                )
+                vc.insertTypedText(text: insertion.text, fontSize: insertion.fontSize, contentOrigin: origin, addHandle: true, registerUndoAction: true)
+                vc.showToastBanner(text: "Formel in Notiz eingefügt", icon: "character.textbox")
+            } else {
+                vc.startTextPlacement(text: insertion.text, fontSize: insertion.fontSize)
+            }
         }
 
         // Undo / Redo — routed through VC so unified undoAction/redoAction handles strokes and elements

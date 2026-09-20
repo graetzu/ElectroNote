@@ -574,6 +574,7 @@ struct LiveCollabSheetView: View {
         case .whiteboard: return "Whiteboard (.ewb)"
         case .pap: return "Ablaufplan (.epap)"
         case .mindmap: return "MindMap (.emm)"
+        case .grafcet: return "GRAFCET (.egrafcet)"
         }
     }
 

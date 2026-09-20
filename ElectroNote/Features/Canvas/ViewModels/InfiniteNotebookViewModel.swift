@@ -54,26 +54,103 @@ func makePKTool(tool: CanvasToolType, color: Color, width: CGFloat, eraserType: 
 @MainActor
 final class InfiniteNotebookViewModel: ObservableObject {
 
-    // MARK: - Pen Toolbar State
+    // MARK: - Pen Toolbar State & Per-Tool Memory
+    @Published var penColor: Color = .black
+    @Published var penWidth: CGFloat = 3.0
+
+    @Published var markerColor: Color = .yellow
+    @Published var markerWidth: CGFloat = 9.0
+
+    @Published var pencilColor: Color = .gray
+    @Published var pencilWidth: CGFloat = 1.5
+
     @Published var lastDrawingTool: CanvasToolType = .pen
     @Published var activeTool: CanvasToolType = .pen {
+        willSet {
+            saveCurrentToolState()
+        }
         didSet {
             if activeTool != .pan && activeTool != .lasso && activeTool != .textSelect {
                 lastDrawingTool = activeTool
             }
+            restoreToolState(for: activeTool)
             applyCurrentTool()
         }
     }
     @Published var selectedColor: Color = .black {
-        didSet { applyCurrentTool() }
+        didSet {
+            updateActiveToolColor(selectedColor)
+            applyCurrentTool()
+        }
     }
     @Published var selectedWidth: CGFloat = 3.0 {
-        didSet { applyCurrentTool() }
+        didSet {
+            updateActiveToolWidth(selectedWidth)
+            applyCurrentTool()
+        }
     }
     @Published var eraserType: PKEraserTool.EraserType = .vector {
         didSet { applyCurrentTool() }
     }
     @Published var pendingPKTool: PKTool? = nil
+
+    private func saveCurrentToolState() {
+        switch activeTool {
+        case .pen:
+            penColor = selectedColor
+            penWidth = selectedWidth
+        case .marker:
+            markerColor = selectedColor
+            markerWidth = selectedWidth
+        case .pencil:
+            pencilColor = selectedColor
+            pencilWidth = selectedWidth
+        default:
+            break
+        }
+    }
+
+    private func restoreToolState(for tool: CanvasToolType) {
+        switch tool {
+        case .pen:
+            selectedColor = penColor
+            selectedWidth = penWidth
+        case .marker:
+            selectedColor = markerColor
+            selectedWidth = markerWidth
+        case .pencil:
+            selectedColor = pencilColor
+            selectedWidth = pencilWidth
+        default:
+            break
+        }
+    }
+
+    private func updateActiveToolColor(_ color: Color) {
+        switch activeTool {
+        case .pen:
+            penColor = color
+        case .marker:
+            markerColor = color
+        case .pencil:
+            pencilColor = color
+        default:
+            break
+        }
+    }
+
+    private func updateActiveToolWidth(_ width: CGFloat) {
+        switch activeTool {
+        case .pen:
+            penWidth = width
+        case .marker:
+            markerWidth = width
+        case .pencil:
+            pencilWidth = width
+        default:
+            break
+        }
+    }
 
     // MARK: - Published state (synced to UIKit VC)
     #if targetEnvironment(macCatalyst)
@@ -152,7 +229,61 @@ final class InfiniteNotebookViewModel: ObservableObject {
     @Published var triggerNativeTextInput: Bool = false
 
     // MARK: - Export
-    @Published var triggerExport:  Bool = false
+    @Published var triggerExport:          Bool = false
+    @Published var showPDFExportSheet:     Bool = false
+    @Published var isRangeExportModeActive: Bool = false
+    @Published var exportRangeStartPage:   Int = 1
+    @Published var exportRangeEndPage:     Int = 1
+    @Published var exportTotalPages:       Int = 1
+    @Published var exportCurrentPage:      Int = 1
+    @Published var exportStartY:           CGFloat = 0
+    @Published var exportEndY:             CGFloat = 1000
+
+    func openPDFExportDialog() {
+        if let vc = vcRef {
+            exportTotalPages  = vc.totalPageCount
+            exportCurrentPage = vc.currentPageNumber
+            exportRangeStartPage = 1
+            exportRangeEndPage   = vc.totalPageCount
+        }
+        showPDFExportSheet = true
+    }
+
+    func startRangeExportMode() {
+        showPDFExportSheet = false
+        isRangeExportModeActive = true
+        vcRef?.enterRangeExportMode()
+    }
+
+    func cancelRangeExportMode() {
+        isRangeExportModeActive = false
+        vcRef?.exitRangeExportMode()
+    }
+
+    func snapRangeToPages() {
+        vcRef?.snapRangeExportToPages()
+    }
+
+    func setRangeStartAtCurrentScroll() {
+        vcRef?.setRangeExportStartAtCurrentScroll()
+    }
+
+    func setRangeEndAtCurrentScroll() {
+        vcRef?.setRangeExportEndAtCurrentScroll()
+    }
+
+    func executeRangeExport() {
+        isRangeExportModeActive = false
+        vcRef?.exitRangeExportMode()
+        vcRef?.presentExport(scope: .customArea(startY: exportStartY, endY: exportEndY), cropToExactHeight: true)
+    }
+
+    func executePDFExport(scope: NotebookPDFExportScope, cropToExactHeight: Bool = false) {
+        showPDFExportSheet = false
+        isRangeExportModeActive = false
+        vcRef?.exitRangeExportMode()
+        vcRef?.presentExport(scope: scope, cropToExactHeight: cropToExactHeight)
+    }
 
     // MARK: - In-Canvas Find & Search
     @Published var showSearch:                 Bool = false {
@@ -171,6 +302,16 @@ final class InfiniteNotebookViewModel: ObservableObject {
     @Published var triggerPreviousSearchMatch: Bool = false
     // MARK: - AI Assistant Sidebar
     @Published var showAISidebar: Bool = false
+    // MARK: - Scientific Calculator
+    @Published var showScientificCalculator: Bool = false
+
+    func toggleScientificCalculator() {
+        showScientificCalculator.toggle()
+        if showScientificCalculator {
+            ScientificCalculatorStore.shared.isMinimized = false
+        }
+    }
+
     // MARK: - Web Clipper & Screenshot
     @Published var showWebClipper: Bool = false
     @Published var pendingStickyNoteText: String? = nil
@@ -186,6 +327,7 @@ final class InfiniteNotebookViewModel: ObservableObject {
     struct TypedTextInsertion {
         let text: String
         let fontSize: CGFloat
+        var directPlacement: Bool = false
     }
 
     enum SaveState: Equatable {

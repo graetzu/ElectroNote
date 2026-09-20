@@ -1,7 +1,26 @@
 import UIKit
 import PDFKit
 import UniformTypeIdentifiers
+import WebKit
 import zlib
+
+// MARK: - Subclassed PDFPrintPageRenderer (Overrides read-only paperRect / printableRect)
+
+final class PDFPrintPageRenderer: UIPrintPageRenderer {
+    private let customPaperRect: CGRect
+    private let customPrintableRect: CGRect
+
+    init(paperRect: CGRect, printableRect: CGRect) {
+        self.customPaperRect = paperRect
+        self.customPrintableRect = printableRect
+        super.init()
+    }
+
+    override var paperRect: CGRect { customPaperRect }
+    override var printableRect: CGRect { customPrintableRect }
+}
+
+// MARK: - DocumentConverter
 
 @MainActor
 final class DocumentConverter: NSObject {
@@ -9,31 +28,53 @@ final class DocumentConverter: NSObject {
     static let shared = DocumentConverter()
 
     /// Supported document import UTTypes
-    static let supportedTypes: [UTType] = [
-        .pdf,
-        .plainText,
-        .rtf,
-        .text,
-        .html,
-        UTType("org.openxmlformats.wordprocessingml.document") ?? .data,
-        UTType("com.microsoft.word.doc") ?? .data
-    ]
+    static let supportedTypes: [UTType] = {
+        var types: [UTType] = [.pdf, .plainText, .rtf, .text, .html]
+        if let docx = UTType(filenameExtension: "docx") { types.append(docx) }
+        if let doc = UTType(filenameExtension: "doc") { types.append(doc) }
+        if let docxId = UTType("org.openxmlformats.wordprocessingml.document"), !types.contains(docxId) { types.append(docxId) }
+        if let docId = UTType("com.microsoft.word.doc"), !types.contains(docId) { types.append(docId) }
+        return types
+    }()
 
-    /// Converts any supported document (.docx, .rtf, .txt, .html, .pdf) into a temporary PDF URL.
+    /// Converts any supported document (.docx, .doc, .rtf, .txt, .html, .pdf) into a temporary PDF URL.
     func convertToPDF(sourceURL: URL) async throws -> URL {
         let ext = sourceURL.pathExtension.lowercased()
         if ext == "pdf" {
             return sourceURL
         }
 
-        if ext == "docx" {
-            return try convertDocxToPDF(sourceURL: sourceURL)
+        // Tier 1: Try WebKit native conversion first for .docx, .doc, .rtf, .html, .txt
+        // WKWebView natively renders Microsoft Word (.docx, .doc), RTF, and HTML with full layout fidelity
+        if ["docx", "doc", "html", "htm", "rtf", "txt", "text"].contains(ext) {
+            do {
+                let converter = WebKitDocumentToPDFConverter()
+                return try await converter.convert(fileURL: sourceURL)
+            } catch {
+                #if DEBUG
+                print("[DocumentConverter] WebKit conversion failed or timed out: \(error). Trying native fallback engine...")
+                #endif
+            }
         }
 
+        // Tier 2: OpenXML Parser for .docx
+        if ext == "docx" {
+            do {
+                return try convertDocxToPDFviaXML(sourceURL: sourceURL)
+            } catch {
+                #if DEBUG
+                print("[DocumentConverter] OpenXML conversion failed: \(error). Falling back to text extraction...")
+                #endif
+                return try convertDocxTextFallbackToPDF(sourceURL: sourceURL)
+            }
+        }
+
+        // Tier 3: RTF & TXT native fallback
         if ext == "rtf" || ext == "txt" || ext == "text" {
             return try convertTextOrRTFToPDF(sourceURL: sourceURL)
         }
 
+        // Tier 4: HTML fallback
         if ext == "html" || ext == "htm" {
             return try convertHTMLToPDF(sourceURL: sourceURL)
         }
@@ -42,7 +83,7 @@ final class DocumentConverter: NSObject {
             throw NSError(
                 domain: "DocumentConverter",
                 code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Ältere .doc-Dateien (Word 97-2004) werden nicht unterstützt. Bitte speichere das Dokument im modernen Word-Format (.docx) oder als PDF."]
+                userInfo: [NSLocalizedDescriptionKey: "Das .doc-Dokument konnte nicht geladen werden. Bitte speichere es als .docx oder .pdf."]
             )
         }
 
@@ -81,7 +122,7 @@ final class DocumentConverter: NSObject {
 
     // MARK: - DOCX Conversion (Native ZIP + OpenXML to HTML + PDF)
 
-    private func convertDocxToPDF(sourceURL: URL) throws -> URL {
+    private func convertDocxToPDFviaXML(sourceURL: URL) throws -> URL {
         let fileData = try Data(contentsOf: sourceURL)
         var entries = Self.unzipEntriesCentralDirectory(from: fileData)
         if entries["word/document.xml"] == nil {
@@ -139,6 +180,8 @@ final class DocumentConverter: NSObject {
             font-size: 11pt;
             color: #1a1a1a;
             line-height: 1.45;
+            padding: 0;
+            margin: 0;
         }
         h1 { font-size: 18pt; font-weight: bold; margin-top: 14pt; margin-bottom: 6pt; color: #111; }
         h2 { font-size: 15pt; font-weight: bold; margin-top: 12pt; margin-bottom: 5pt; color: #222; }
@@ -170,6 +213,31 @@ final class DocumentConverter: NSObject {
         return try renderHTMLToPDF(htmlString)
     }
 
+    private func convertDocxTextFallbackToPDF(sourceURL: URL) throws -> URL {
+        let text = (try? extractTextFromDocx(sourceURL: sourceURL)) ?? (try? String(contentsOf: sourceURL, encoding: .utf8)) ?? ""
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw NSError(domain: "DocumentConverter", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein lesbarer Text im Dokument gefunden."])
+        }
+
+        let paragraphs = text.components(separatedBy: "\n\n")
+            .map { "<p>\($0.replacingOccurrences(of: "\n", with: "<br/>"))</p>" }
+            .joined(separator: "\n")
+
+        let html = """
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8">
+        <style>
+        body { font-family: -apple-system, sans-serif; font-size: 11pt; line-height: 1.5; color: #111; }
+        p { margin-bottom: 8pt; }
+        </style>
+        </head>
+        <body>\(paragraphs)</body>
+        </html>
+        """
+        return try renderHTMLToPDF(html)
+    }
+
     // MARK: - HTML Conversion
 
     private func convertHTMLToPDF(sourceURL: URL) throws -> URL {
@@ -178,61 +246,59 @@ final class DocumentConverter: NSObject {
     }
 
     private func renderHTMLToPDF(_ htmlString: String) throws -> URL {
-        guard let htmlData = htmlString.data(using: .utf8) else {
-            throw NSError(
-                domain: "DocumentConverter",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "HTML-Inhalt konnte nicht geladen werden."]
-            )
-        }
-
-        let attrString = try NSAttributedString(
-            data: htmlData,
-            options: [
-                .documentType: NSAttributedString.DocumentType.html,
-                .characterEncoding: String.Encoding.utf8.rawValue
-            ],
-            documentAttributes: nil
-        )
-
-        return try Self.renderAttributedStringToPDF(attrString)
+        let formatter = UIMarkupTextPrintFormatter(markupText: htmlString)
+        return try Self.renderPrintFormatterToPDF(formatter)
     }
 
     // MARK: - Plain Text & RTF Conversion
 
     private func convertTextOrRTFToPDF(sourceURL: URL) throws -> URL {
         let isRTF = sourceURL.pathExtension.lowercased() == "rtf"
-        let docType: NSAttributedString.DocumentType = isRTF ? .rtf : .plain
-        let attrString = try NSAttributedString(
-            url: sourceURL,
-            options: [.documentType: docType],
-            documentAttributes: nil
-        )
-
-        return try Self.renderAttributedStringToPDF(attrString)
+        if isRTF {
+            let attrString = try NSAttributedString(
+                url: sourceURL,
+                options: [.documentType: NSAttributedString.DocumentType.rtf],
+                documentAttributes: nil
+            )
+            let printFormatter = UISimpleTextPrintFormatter(attributedText: attrString)
+            return try Self.renderPrintFormatterToPDF(printFormatter)
+        } else {
+            let text = try String(contentsOf: sourceURL, encoding: .utf8)
+            let printFormatter = UISimpleTextPrintFormatter(text: text)
+            printFormatter.font = UIFont.systemFont(ofSize: 11)
+            return try Self.renderPrintFormatterToPDF(printFormatter)
+        }
     }
 
     // MARK: - Shared PDF Renderer
 
-    private static func renderAttributedStringToPDF(_ attrString: NSAttributedString) throws -> URL {
-        let printFormatter = UISimpleTextPrintFormatter(attributedText: attrString)
-        let renderer = UIPrintPageRenderer()
-        renderer.addPrintFormatter(printFormatter, startingAtPageAt: 0)
+    static func renderPrintFormatterToPDF(
+        _ formatter: UIPrintFormatter,
+        pageSize: CGSize = CGSize(width: 595.2, height: 841.8),
+        margin: CGFloat = 36.0
+    ) throws -> URL {
+        let paper = CGRect(origin: .zero, size: pageSize)
+        let printable = CGRect(x: margin, y: margin, width: pageSize.width - margin * 2, height: pageSize.height - margin * 2)
 
-        let pageWidth: CGFloat = 595.2   // Standard A4
-        let pageHeight: CGFloat = 841.8  // Standard A4
-        let margin: CGFloat = 36.0
-        let printable = CGRect(x: margin, y: margin, width: pageWidth - margin * 2, height: pageHeight - margin * 2)
-        let paper = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
+        let renderer = PDFPrintPageRenderer(paperRect: paper, printableRect: printable)
+        renderer.addPrintFormatter(formatter, startingAtPageAt: 0)
 
-        renderer.setValue(NSValue(cgRect: paper), forKey: "paperRect")
-        renderer.setValue(NSValue(cgRect: printable), forKey: "printableRect")
+        let totalPages = renderer.numberOfPages
+        guard totalPages > 0 else {
+            throw NSError(
+                domain: "DocumentConverter",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "PDF-Generierung ergab 0 Seiten."]
+            )
+        }
 
         let pdfData = NSMutableData()
         UIGraphicsBeginPDFContextToData(pdfData, paper, nil)
-        for i in 0..<renderer.numberOfPages {
+        renderer.prepare(forDrawingPages: NSRange(location: 0, length: totalPages))
+
+        for pageIndex in 0..<totalPages {
             UIGraphicsBeginPDFPage()
-            renderer.drawPage(at: i, in: UIGraphicsGetPDFContextBounds())
+            renderer.drawPage(at: pageIndex, in: printable)
         }
         UIGraphicsEndPDFContext()
 
@@ -249,6 +315,176 @@ final class DocumentConverter: NSObject {
         try pdfData.write(to: tempURL, options: .atomic)
         return tempURL
     }
+
+    // MARK: - WebKit Document Converter
+
+    @MainActor
+    private final class WebKitDocumentToPDFConverter: NSObject, WKNavigationDelegate {
+        private var webView: WKWebView?
+        private var continuation: CheckedContinuation<URL, Error>?
+        private var tempDirectory: URL?
+        private var timeoutTask: Task<Void, Never>?
+
+        func convert(fileURL: URL) async throws -> URL {
+            return try await withCheckedThrowingContinuation { cont in
+                self.continuation = cont
+
+                let tempDir = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("WKDocConvert_\(UUID().uuidString)")
+                do {
+                    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                    let safeURL = tempDir.appendingPathComponent(fileURL.lastPathComponent)
+                    try FileManager.default.copyItem(at: fileURL, to: safeURL)
+                    self.tempDirectory = tempDir
+
+                    let config = WKWebViewConfiguration()
+                    config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
+                    let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 595.2, height: 841.8), configuration: config)
+                    wv.navigationDelegate = self
+                    self.webView = wv
+
+                    self.timeoutTask = Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: 12_000_000_000)
+                        guard let self = self, let c = self.continuation else { return }
+                        self.continuation = nil
+                        self.cleanup()
+                        c.resume(throwing: NSError(
+                            domain: "DocumentConverter",
+                            code: -1,
+                            userInfo: [NSLocalizedDescriptionKey: "WebKit-Konvertierung Zeitüberschreitung."]
+                        ))
+                    }
+
+                    wv.loadFileURL(safeURL, allowingReadAccessTo: tempDir)
+                } catch {
+                    self.cleanup()
+                    cont.resume(throwing: error)
+                }
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            timeoutTask?.cancel()
+            timeoutTask = nil
+
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                self.renderPDF(webView: webView)
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            timeoutTask?.cancel()
+            timeoutTask = nil
+            let c = continuation
+            continuation = nil
+            cleanup()
+            c?.resume(throwing: error)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            timeoutTask?.cancel()
+            timeoutTask = nil
+            let c = continuation
+            continuation = nil
+            cleanup()
+            c?.resume(throwing: error)
+        }
+
+        private func renderPDF(webView: WKWebView) {
+            guard let cont = continuation else { return }
+            self.continuation = nil
+
+            do {
+                let formatter = webView.viewPrintFormatter()
+                let pdfURL = try DocumentConverter.renderPrintFormatterToPDF(formatter)
+                self.cleanup()
+                cont.resume(returning: pdfURL)
+                return
+            } catch {
+                #if DEBUG
+                print("[WebKitDocumentToPDFConverter] viewPrintFormatter failed: \(error). Falling back to webView.createPDF...")
+                #endif
+            }
+
+            webView.createPDF { [weak self] result in
+                guard let self = self else { return }
+                defer { self.cleanup() }
+                switch result {
+                case .success(let pdfData):
+                    do {
+                        let pdfURL = try self.saveOrPaginatePDFData(pdfData)
+                        cont.resume(returning: pdfURL)
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                case .failure(let err):
+                    cont.resume(throwing: err)
+                }
+            }
+        }
+
+        private func saveOrPaginatePDFData(_ pdfData: Data) throws -> URL {
+            guard let doc = PDFDocument(data: pdfData), doc.pageCount > 0 else {
+                throw NSError(domain: "DocumentConverter", code: -1, userInfo: [NSLocalizedDescriptionKey: "Ungültiges PDF von WebKit erzeugt."])
+            }
+
+            let firstPage = doc.page(at: 0)
+            let bounds = firstPage?.bounds(for: .mediaBox) ?? .zero
+            let a4Height: CGFloat = 841.8
+            let a4Width: CGFloat = 595.2
+
+            if doc.pageCount > 1 || bounds.height <= a4Height * 1.4 {
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("\(UUID().uuidString).pdf")
+                try pdfData.write(to: tempURL, options: .atomic)
+                return tempURL
+            }
+
+            let totalHeight = bounds.height
+            let totalWidth = bounds.width > 0 ? bounds.width : a4Width
+            let scale = a4Width / totalWidth
+            let sliceHeightInDoc = a4Height / scale
+
+            let pageSlices = Int(ceil(totalHeight / sliceHeightInDoc))
+            let splitData = NSMutableData()
+            let paper = CGRect(x: 0, y: 0, width: a4Width, height: a4Height)
+            UIGraphicsBeginPDFContextToData(splitData, paper, nil)
+
+            for pageIdx in 0..<pageSlices {
+                UIGraphicsBeginPDFPage()
+                guard let ctx = UIGraphicsGetCurrentContext() else { continue }
+                ctx.saveGState()
+
+                ctx.translateBy(x: 0, y: a4Height)
+                ctx.scaleBy(x: 1.0, y: -1.0)
+
+                let yOffset = CGFloat(pageIdx) * sliceHeightInDoc
+                ctx.scaleBy(x: scale, y: scale)
+                ctx.translateBy(x: 0, y: -(totalHeight - (yOffset + sliceHeightInDoc)))
+
+                firstPage?.draw(with: .mediaBox, to: ctx)
+                ctx.restoreGState()
+            }
+            UIGraphicsEndPDFContext()
+
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("\(UUID().uuidString).pdf")
+            try splitData.write(to: tempURL, options: .atomic)
+            return tempURL
+        }
+
+        private func cleanup() {
+            webView?.navigationDelegate = nil
+            webView?.stopLoading()
+            webView = nil
+            if let dir = tempDirectory {
+                try? FileManager.default.removeItem(at: dir)
+                tempDirectory = nil
+            }
+        }
+    }
+
 
     // MARK: - ZIP Unpacker (zlib Raw Deflate)
 
@@ -463,9 +699,28 @@ private final class DocxXMLHandler: NSObject, XMLParserDelegate {
         case "a:blip", "v:imagedata":
             if let rId = attributeDict["r:embed"] ?? attributeDict["r:id"],
                let imgData = imageMap[rId] {
-                let base64 = imgData.base64EncodedString()
-                let mime = imgData.starts(with: [0xFF, 0xD8]) ? "image/jpeg" : "image/png"
-                paragraphHTML += "<div style=\"text-align:center;margin:6pt 0;\"><img src=\"data:\(mime);base64,\(base64)\" /></div>"
+                let processedData: Data
+                if let uiImage = UIImage(data: imgData) {
+                    let maxDimension: CGFloat = 1000
+                    let w = uiImage.size.width
+                    let h = uiImage.size.height
+                    if max(w, h) > maxDimension {
+                        let factor = maxDimension / max(w, h)
+                        let newSize = CGSize(width: w * factor, height: h * factor)
+                        let format = UIGraphicsImageRendererFormat()
+                        format.scale = 1.0
+                        let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
+                        let resized = renderer.image { _ in uiImage.draw(in: CGRect(origin: .zero, size: newSize)) }
+                        processedData = resized.jpegData(compressionQuality: 0.75) ?? imgData
+                    } else {
+                        processedData = uiImage.jpegData(compressionQuality: 0.8) ?? imgData
+                    }
+                } else {
+                    processedData = imgData
+                }
+                let base64 = processedData.base64EncodedString()
+                let mime = "image/jpeg"
+                paragraphHTML += "<div style=\"text-align:center;margin:6pt 0;\"><img src=\"data:\(mime);base64,\(base64)\" style=\"max-width:100%;height:auto;\" /></div>"
             }
         default:
             break

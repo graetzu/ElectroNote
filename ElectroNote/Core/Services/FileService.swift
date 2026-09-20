@@ -59,6 +59,9 @@ final class FileService: FileServiceProtocol {
             } else if isDir && filename.hasSuffix(".emm") {
                 type = .mindmap
                 displayName = String(filename.dropLast(".emm".count))
+            } else if isDir && filename.hasSuffix(".egrafcet") {
+                type = .grafcet
+                displayName = String(filename.dropLast(".egrafcet".count))
             } else if isDir {
                 type = .folder
                 displayName = filename
@@ -117,6 +120,9 @@ final class FileService: FileServiceProtocol {
                 } else if isDir && filename.hasSuffix(".emm") {
                     let name = String(filename.dropLast(".emm".count))
                     results.append(DocumentItem(id: UUID(), name: name, path: fileURL, type: .mindmap, modifiedAt: modified, syncStatus: .local))
+                } else if isDir && filename.hasSuffix(".egrafcet") {
+                    let name = String(filename.dropLast(".egrafcet".count))
+                    results.append(DocumentItem(id: UUID(), name: name, path: fileURL, type: .grafcet, modifiedAt: modified, syncStatus: .local))
                 } else if !isDir && fileURL.pathExtension.lowercased() == "pdf" {
                     let name = String(filename.dropLast(".pdf".count))
                     results.append(DocumentItem(id: UUID(), name: name, path: fileURL, type: .pdf, modifiedAt: modified, syncStatus: .local))
@@ -149,6 +155,7 @@ final class FileService: FileServiceProtocol {
                       res.isDirectory ?? false else { continue }
                 if filename.hasSuffix(".enote") || filename.hasSuffix(".epap") ||
                    filename.hasSuffix(".ewb") || filename.hasSuffix(".emm") ||
+                   filename.hasSuffix(".egrafcet") ||
                    filename.hasSuffix(".annotations") {
                     continue
                 }
@@ -198,6 +205,10 @@ final class FileService: FileServiceProtocol {
             let initialDoc = DiagramDocumentDTO(name: name, type: "mindmap")
             let store = DiagramDocumentStore(folderURL: dest)
             store.save(initialDoc)
+        } else if type == .grafcet {
+            let initialDoc = GrafcetDocumentDTO.defaultTemplate(name: name)
+            let store = GrafcetDocumentStore(folderURL: dest)
+            store.save(initialDoc)
         }
 
         return makeItem(at: dest, name: name, type: type.itemType)
@@ -210,6 +221,7 @@ final class FileService: FileServiceProtocol {
         case .pap:        suffix = ".epap"
         case .whiteboard: suffix = ".ewb"
         case .mindmap:    suffix = ".emm"
+        case .grafcet:    suffix = ".egrafcet"
         case .pdf:        suffix = ".pdf"
         case .folder:     suffix = ""
         }

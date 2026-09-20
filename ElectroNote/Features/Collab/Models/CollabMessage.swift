@@ -7,6 +7,7 @@ enum CollabDocumentType: String, Codable {
     case whiteboard
     case pap
     case mindmap
+    case grafcet
 
     var browserDocumentType: DocumentType {
         switch self {
@@ -14,6 +15,7 @@ enum CollabDocumentType: String, Codable {
         case .whiteboard: return .whiteboard
         case .pap: return .pap
         case .mindmap: return .mindmap
+        case .grafcet: return .grafcet
         }
     }
 }
@@ -99,4 +101,6 @@ struct CollabMessage: Codable {
     var nodeJson: String?
     var connectionJson: String?
     var cursor: CollabCursor?
+    var pdfAssets: [String: String]? // [filename: base64Data] for inserted vector PDF files
 }
+

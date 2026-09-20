@@ -8,7 +8,9 @@ struct InfiniteNotebookHostView: View {
 
     @StateObject private var vm: InfiniteNotebookViewModel
     @StateObject private var syncVM = SyncViewModel()
+    @ObservedObject private var syncManager = UnifiedSyncManager.shared
     @State private var showNextcloudSheet = false
+    @State private var showGoogleDriveSheet = false
     @State private var showSettingsSheet = false
     @State private var showClipArtPicker  = false
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
@@ -36,7 +38,18 @@ struct InfiniteNotebookHostView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Dedicated Pen, Tool, Shape, OCR & Math Top Bar
-            PenToolbarView(vm: vm, onNextcloud: { showNextcloudSheet = true })
+            PenToolbarView(
+                vm: vm,
+                onNextcloud: { showNextcloudSheet = true },
+                onGoogleDrive: {
+                    if syncManager.googleDriveEngine.isConnected {
+                        showGoogleDriveSheet = true
+                    } else {
+                        showSettingsSheet = true
+                    }
+                },
+                onCloudSettings: { showSettingsSheet = true }
+            )
                 .frame(maxWidth: .infinity)
                 .background(Color(uiColor: .secondarySystemGroupedBackground))
 
@@ -77,6 +90,99 @@ struct InfiniteNotebookHostView: View {
                     .transition(.move(edge: .trailing))
                     .zIndex(30)
                 }
+
+                if vm.isRangeExportModeActive {
+                    VStack {
+                        Spacer()
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("PDF-BEREICH")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                                Text("S. \(vm.exportRangeStartPage) bis \(vm.exportRangeEndPage)")
+                                    .font(.subheadline.weight(.bold))
+                            }
+                            .padding(.trailing, 2)
+
+                            Divider()
+                                .frame(height: 24)
+
+                            Button {
+                                vm.setRangeStartAtCurrentScroll()
+                            } label: {
+                                Label("Start", systemImage: "arrow.down.to.line")
+                                    .font(.caption.weight(.medium))
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button {
+                                vm.setRangeEndAtCurrentScroll()
+                            } label: {
+                                Label("Ende", systemImage: "arrow.up.to.line")
+                                    .font(.caption.weight(.medium))
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button {
+                                vm.snapRangeToPages()
+                            } label: {
+                                Label("Ganze Seite", systemImage: "arrow.up.and.down.and.sparkles")
+                                    .font(.caption.weight(.medium))
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button {
+                                vm.executeRangeExport()
+                            } label: {
+                                Label("Exportieren", systemImage: "square.and.arrow.up.fill")
+                                    .font(.subheadline.weight(.bold))
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Button {
+                                vm.cancelRangeExportMode()
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.caption.weight(.bold))
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+                        .padding(.bottom, 20)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .bottom)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(40)
+                }
+
+                if vm.showScientificCalculator {
+                    ScientificCalculatorFloatingView(
+                        store: .shared,
+                        onClose: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                                vm.showScientificCalculator = false
+                            }
+                        },
+                        onInsertIntoNote: { text in
+                            vm.pendingTextInsertion = InfiniteNotebookViewModel.TypedTextInsertion(text: text, fontSize: 20, directPlacement: true)
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                ScientificCalculatorStore.shared.isMinimized = true
+                            }
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 10)
+                    .padding(.trailing, 10)
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.9).combined(with: .opacity),
+                        removal: .scale(scale: 0.9).combined(with: .opacity)
+                    ))
+                    .zIndex(50)
+                }
             }
         }
         .navigationTitle(item.name)
@@ -103,6 +209,19 @@ struct InfiniteNotebookHostView: View {
             } else {
                 SyncSettingsView { url in
                     showNextcloudSheet = false
+                    vm.pendingPDFURL = url
+                }
+            }
+        }
+        .sheet(isPresented: $showGoogleDriveSheet) {
+            if let creds = syncManager.googleDriveEngine.credentials {
+                GoogleDriveFileBrowserView(credentials: creds) { url in
+                    showGoogleDriveSheet = false
+                    vm.pendingPDFURL = url
+                }
+            } else {
+                AppSettingsView { url in
+                    showGoogleDriveSheet = false
                     vm.pendingPDFURL = url
                 }
             }
@@ -206,6 +325,24 @@ struct InfiniteNotebookHostView: View {
         }
         .sheet(item: $vm.activePlaybackMedia) { mediaItem in
             MediaPlaybackSheetView(item: mediaItem, noteURL: item.path)
+        }
+        .sheet(isPresented: $vm.showPDFExportSheet) {
+            NotebookPDFExportSheet(
+                documentName: item.name,
+                totalPages: vm.exportTotalPages,
+                currentPage: vm.exportCurrentPage,
+                initialStartPage: vm.exportRangeStartPage,
+                initialEndPage: vm.exportRangeEndPage,
+                onExport: { scope, cropExact in
+                    vm.executePDFExport(scope: scope, cropToExactHeight: cropExact)
+                },
+                onSelectRangeInNotebook: {
+                    vm.startRangeExportMode()
+                },
+                onCancel: {
+                    vm.showPDFExportSheet = false
+                }
+            )
         }
         .onChange(of: selectedVideoItem) { _, newItem in
             guard let newItem else { return }
@@ -405,21 +542,22 @@ struct InfiniteNotebookHostView: View {
             // Live Cast Button (WLAN Übertragung)
             LiveCastBadgeButton()
 
-            // Direct Import & Insert Menu (Fotos, Videos & sonstige Inhalte —
-            // Dateien/Nextcloud/Schaltplan/KI sind bereits als Schnellzugriffe
-            // in der Werkzeugleiste unten, hier nicht nochmal duplizieren)
+            // Direct Import & Insert Menu (Fotos, Videos, Notizen & Diagramme)
             Menu {
                 Section("Dateien & Fotos") {
-                    Button {
-                        showSettingsSheet = true
-                    } label: {
-                        Label("Cloud & Synchronisation…", systemImage: "arrow.triangle.2.circlepath.icloud")
-                    }
                     PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                         Label("Foto aus Mediathek…", systemImage: "photo.badge.plus")
                     }
-                }
-                Section("Videos") {
+                    Button {
+                        vm.showCameraPhoto = true
+                    } label: {
+                        Label("Foto mit Kamera aufnehmen…", systemImage: "camera")
+                    }
+                    Button {
+                        vm.showDocumentScanner = true
+                    } label: {
+                        Label("Dokument / Tafel scannen…", systemImage: "doc.viewfinder")
+                    }
                     PhotosPicker(selection: $selectedVideoItem, matching: .videos) {
                         Label("Video aus Mediathek…", systemImage: "video.badge.plus")
                     }
@@ -428,39 +566,40 @@ struct InfiniteNotebookHostView: View {
                     } label: {
                         Label("Video mit Kamera aufnehmen…", systemImage: "video")
                     }
+                    Button {
+                        vm.showPDFPicker = true
+                    } label: {
+                        Label("Datei / PDF importieren…", systemImage: "folder.badge.plus")
+                    }
                 }
-                Section("Inhalte") {
-                    Button { vm.triggerPaste = true } label: {
-                        Label("Aus Zwischenablage einfügen", systemImage: "doc.on.clipboard")
-                    }
-                    Button { vm.triggerHandwritingRecognition = true } label: {
-                        Label("Handschrift erkennen", systemImage: "text.viewfinder")
-                    }
-                    Button { vm.showElektroSim = true } label: {
-                        Label("⚡️ Elektro-Planer (Website)…", systemImage: "bolt.horizontal.circle")
-                    }
-                    Button { showClipArtPicker = true } label: {
-                        Label("Symbol / ClipArt…", systemImage: "star.square")
-                    }
-                    Button { vm.showPlotter = true } label: {
-                        Label("Funktionsplotter…", systemImage: "waveform.path.badge.plus")
-                    }
-                    Button { vm.showTextInsertion = true } label: {
+
+                Section("Notiz-Elemente") {
+                    Button { vm.triggerNativeTextInput = true } label: {
                         Label("Text einfügen", systemImage: "text.cursor")
                     }
                     Button { vm.triggerAddStickyNote = true } label: {
                         Label("Haftzettel", systemImage: "note.text.badge.plus")
                     }
+                    Button { showClipArtPicker = true } label: {
+                        Label("Symbol / ClipArt…", systemImage: "star.square")
+                    }
+                    Button { vm.triggerPaste = true } label: {
+                        Label("Aus Zwischenablage einfügen", systemImage: "doc.on.clipboard")
+                    }
                 }
-                Section("Diagramme") {
-                    Button { vm.showPAP       = true } label: {
-                        Label("Programmablaufplan", systemImage: "arrow.triangle.branch")
+
+                Section("Erkennung & Diagramme") {
+                    Button { vm.triggerHandwritingRecognition = true } label: {
+                        Label("Handschrift erkennen", systemImage: "text.viewfinder")
+                    }
+                    Button { vm.showWhiteboard = true } label: {
+                        Label("Whiteboard", systemImage: "rectangle.and.pencil.and.ellipsis")
                     }
                     Button { vm.showMindMap   = true } label: {
                         Label("MindMap", systemImage: "brain")
                     }
-                    Button { vm.showWhiteboard = true } label: {
-                        Label("Whiteboard", systemImage: "rectangle.and.pencil.and.ellipsis")
+                    Button { vm.showPAP       = true } label: {
+                        Label("Programmablaufplan", systemImage: "arrow.triangle.branch")
                     }
                 }
             } label: {
@@ -476,14 +615,11 @@ struct InfiniteNotebookHostView: View {
                 .foregroundColor(.accentColor)
                 .clipShape(Capsule())
             }
-            .accessibilityLabel("Dateien und Inhalte importieren")
+            .accessibilityLabel("Dateien und Notiz-Inhalte einfügen")
 
-            // "Mehr" menu — consolidates less-used actions to keep toolbar compact in portrait.
-            // Alles, was schon als Schnellzugriff existiert (Lineal, Formen, Dunkelmodus,
-            // Handschrift, Mathe, Dateien, Nextcloud, Schaltplan, KI, Einfügen-Inhalte…),
-            // steht hier bewusst NICHT nochmal — nur echte Einstellungen & Zusatzfunktionen.
+            // "Mehr" menu — Einstellungen, Elektro & Technik, Lesezeichen, Export
             Menu {
-                Section("Ansicht") {
+                Section("Ansicht & Stift") {
                     Toggle(isOn: $vm.pencilOnly) {
                         Label(
                             vm.pencilOnly ? "Nur Pencil schreibt (1 Finger scrollt)" : "Finger & Pencil zeichnen",
@@ -498,6 +634,32 @@ struct InfiniteNotebookHostView: View {
                     .tint(.purple)
                 }
 
+                Section("Elektro & Technik") {
+                    Menu {
+                        Button { vm.showCircuitPicker = true } label: {
+                            Label("Schaltpläne & Schaltsymbole", systemImage: "bolt.badge.clock")
+                        }
+                        Button { vm.showElektroSim = true } label: {
+                            Label("⚡️ Elektro-Planer (Website)…", systemImage: "bolt.horizontal.circle")
+                        }
+                        Button { vm.triggerMathRecognition = true } label: {
+                            Label("Mathe Handschrifterkennung", systemImage: "function")
+                        }
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                                vm.toggleScientificCalculator()
+                            }
+                        } label: {
+                            Label("Wissenschaftlicher Taschenrechner", systemImage: "plus.forwardslash.minus")
+                        }
+                        Button { vm.showPlotter = true } label: {
+                            Label("Funktionsplotter…", systemImage: "waveform.path.badge.plus")
+                        }
+                    } label: {
+                        Label("Elektro & Technik…", systemImage: "bolt.badge.clock")
+                    }
+                }
+
                 Section("Lesezeichen") {
                     Button { vm.triggerAddBookmark   = true } label: {
                         Label("Lesezeichen setzen", systemImage: "bookmark")
@@ -507,17 +669,18 @@ struct InfiniteNotebookHostView: View {
                     }
                 }
 
-                Section("Stift-Presets") {
-                    ForEach(InkPresetStore.shared.presets) { preset in
-                        Button { vm.pendingInkPreset = preset } label: {
-                            Label(preset.name, systemImage: "paintbrush.pointed")
-                        }
+                Section("Export") {
+                    Button { vm.openPDFExportDialog() } label: {
+                        Label("PDF exportieren…", systemImage: "square.and.arrow.up")
+                    }
+                    Button { vm.startRangeExportMode() } label: {
+                        Label("Bereich als PDF exportieren…", systemImage: "crop")
                     }
                 }
 
-                Section {
-                    Button { vm.triggerExport = true } label: {
-                        Label("PDF exportieren", systemImage: "square.and.arrow.up")
+                Section("Cloud") {
+                    Button { showSettingsSheet = true } label: {
+                        Label("Cloud & Synchronisation…", systemImage: "arrow.triangle.2.circlepath.icloud")
                     }
                 }
             } label: {
@@ -597,16 +760,23 @@ struct PenToolbarView: View {
     var onPaste: (() -> Void)? = nil
     var onTextRecognition: (() -> Void)? = nil
     var onMathRecognition: (() -> Void)? = nil
+    var onScientificCalculator: (() -> Void)? = nil
     var onOpenCircuits: (() -> Void)? = nil
     var onImportDocument: (() -> Void)? = nil
     var onImportNextcloud: (() -> Void)? = nil
+    var onImportGoogleDrive: (() -> Void)? = nil
+    var onCloudSettings: (() -> Void)? = nil
     var onToggleAI: (() -> Void)? = nil
     var onCamera: (() -> Void)? = nil
     var onScanDocument: (() -> Void)? = nil
+    var onCameraVideo: (() -> Void)? = nil
     var onYouTube: (() -> Void)? = nil
     var onWebClipper: (() -> Void)? = nil
 
-    init(vm: InfiniteNotebookViewModel, onNextcloud: (() -> Void)? = nil) {
+    init(vm: InfiniteNotebookViewModel,
+         onNextcloud: (() -> Void)? = nil,
+         onGoogleDrive: (() -> Void)? = nil,
+         onCloudSettings: (() -> Void)? = nil) {
         self._activeTool = Binding(get: { vm.activeTool }, set: { vm.activeTool = $0 })
         self._selectedColor = Binding(get: { vm.selectedColor }, set: { vm.selectedColor = $0 })
         self._selectedWidth = Binding(get: { vm.selectedWidth }, set: { vm.selectedWidth = $0 })
@@ -619,9 +789,16 @@ struct PenToolbarView: View {
         self.onPaste = { [weak vm] in vm?.triggerPaste = true }
         self.onTextRecognition = { [weak vm] in vm?.triggerHandwritingRecognition = true }
         self.onMathRecognition = { [weak vm] in vm?.triggerMathRecognition = true }
+        self.onScientificCalculator = { [weak vm] in
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                vm?.toggleScientificCalculator()
+            }
+        }
         self.onOpenCircuits = { [weak vm] in vm?.showCircuitPicker = true }
         self.onImportDocument = { [weak vm] in vm?.showPDFPicker = true }
         self.onImportNextcloud = onNextcloud
+        self.onImportGoogleDrive = onGoogleDrive
+        self.onCloudSettings = onCloudSettings
         self.onToggleAI = { [weak vm] in
             withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
                 vm?.showAISidebar.toggle()
@@ -629,6 +806,7 @@ struct PenToolbarView: View {
         }
         self.onCamera = { [weak vm] in vm?.showCameraPhoto = true }
         self.onScanDocument = { [weak vm] in vm?.showDocumentScanner = true }
+        self.onCameraVideo = { [weak vm] in vm?.showCameraVideo = true }
         self.onYouTube = { [weak vm] in vm?.showYouTubeEmbed = true }
         self.onWebClipper = { [weak vm] in vm?.showWebClipper = true }
     }
@@ -647,11 +825,6 @@ struct PenToolbarView: View {
                                     eraserType = eraserType == .vector ? .bitmap : .vector
                                 } else {
                                     activeTool = tool
-                                    // Schwarz/Weiß ergeben bei einem Textmarker keinen Sinn —
-                                    // beim Umschalten auf eine sinnvolle Leuchtfarbe springen.
-                                    if tool == .marker && (selectedColor == .black || selectedColor == .white) {
-                                        selectedColor = .yellow
-                                    }
                                 }
                                 notifyToolChange()
                             } label: {
@@ -827,119 +1000,34 @@ struct PenToolbarView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Formen-Korrektur")
 
-                    Button {
-                        onMathRecognition?()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "function")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Mathe")
-                                .font(.system(size: 12, weight: .bold))
-                                .lineLimit(1)
+                    // Untermenü: Technik & Mathe (Taschenrechner, Handschrift-Mathe, Schaltungen)
+                    Menu {
+                        Button {
+                            onScientificCalculator?()
+                        } label: {
+                            Label("Wissenschaftlicher Taschenrechner", systemImage: "plus.forwardslash.minus")
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .frame(height: 28)
-                        .background(Color.purple)
-                        .foregroundColor(Color.white)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Mathe berechnen")
 
-                    Divider()
-                        .frame(height: 20)
+                        Button {
+                            onMathRecognition?()
+                        } label: {
+                            Label("Mathe Handschrifterkennung", systemImage: "function")
+                        }
 
-                    // Import: Schaltplan, Dateien, Nextcloud
-                    Button {
-                        onOpenCircuits?()
+                        Button {
+                            onOpenCircuits?()
+                        } label: {
+                            Label("Schaltpläne & Schaltsymbole…", systemImage: "bolt.badge.clock")
+                        }
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: "bolt.badge.clock")
                                 .font(.system(size: 12, weight: .semibold))
-                            Text("Schaltplan")
+                            Text("Technik")
                                 .font(.system(size: 12, weight: .bold))
                                 .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .frame(height: 28)
-                        .background(Color.yellow.opacity(0.95))
-                        .foregroundColor(Color.black)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Schaltsymbole und Stromkreise")
-
-                    Button {
-                        onImportDocument?()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "folder.badge.plus")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Dateien")
-                                .font(.system(size: 12, weight: .bold))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .frame(height: 28)
-                        .background(Color.teal)
-                        .foregroundColor(Color.white)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Datei aus Dateien-App importieren")
-
-                    Button {
-                        onImportNextcloud?()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "icloud.and.arrow.down")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Nextcloud")
-                                .font(.system(size: 12, weight: .bold))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .frame(height: 28)
-                        .background(Color.cyan)
-                        .foregroundColor(Color.white)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Datei aus Nextcloud importieren")
-
-                    Button {
-                        onCamera?()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "camera")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Kamera")
-                                .font(.system(size: 12, weight: .bold))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .frame(height: 28)
-                        .background(Color.pink)
-                        .foregroundColor(Color.white)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Foto mit Kamera aufnehmen")
-
-                    Button {
-                        onScanDocument?()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "doc.viewfinder")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Scannen")
-                                .font(.system(size: 12, weight: .bold))
-                                .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
@@ -948,31 +1036,108 @@ struct PenToolbarView: View {
                         .foregroundColor(Color.white)
                         .clipShape(Capsule())
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Dokument oder Tafel scannen")
+                    .accessibilityLabel("Technik & Mathe")
 
-                    Button {
-                        onYouTube?()
+                    Divider()
+                        .frame(height: 20)
+
+                    // Untermenü: Dateien (iCloud Drive / Lokal, Nextcloud, Google Drive)
+                    Menu {
+                        Button {
+                            onImportDocument?()
+                        } label: {
+                            Label("iCloud Drive / Dateien-App…", systemImage: "folder.badge.plus")
+                        }
+
+                        Button {
+                            onImportNextcloud?()
+                        } label: {
+                            Label("Nextcloud…", systemImage: "icloud.and.arrow.down")
+                        }
+
+                        Button {
+                            onImportGoogleDrive?()
+                        } label: {
+                            Label("Google Drive…", systemImage: "externaldrive.badge.icloud")
+                        }
+
+                        Divider()
+
+                        Button {
+                            onCloudSettings?()
+                        } label: {
+                            Label("Cloud & Synchronisation verwalten…", systemImage: "arrow.triangle.2.circlepath.icloud")
+                        }
                     } label: {
                         HStack(spacing: 3) {
-                            Image(systemName: "play.rectangle")
+                            Image(systemName: "folder.badge.plus")
                                 .font(.system(size: 12, weight: .semibold))
-                            Text("YouTube")
+                            Text("Dateien")
                                 .font(.system(size: 12, weight: .bold))
                                 .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
                         .frame(height: 28)
-                        .background(Color.red)
+                        .background(Color.teal)
                         .foregroundColor(Color.white)
                         .clipShape(Capsule())
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("YouTube-Video einbetten")
+                    .accessibilityLabel("Dateien: iCloud Drive, Nextcloud, Google Drive")
 
-                    Button {
-                        onWebClipper?()
+                    // Untermenü: Kamera (Foto, Dokument scannen, Video)
+                    Menu {
+                        Button {
+                            onCamera?()
+                        } label: {
+                            Label("Foto mit Kamera aufnehmen…", systemImage: "camera")
+                        }
+
+                        Button {
+                            onScanDocument?()
+                        } label: {
+                            Label("Dokument oder Tafel scannen…", systemImage: "doc.viewfinder")
+                        }
+
+                        Button {
+                            onCameraVideo?()
+                        } label: {
+                            Label("Video mit Kamera aufnehmen…", systemImage: "video")
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "camera")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Kamera")
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 28)
+                        .background(Color.pink)
+                        .foregroundColor(Color.white)
+                        .clipShape(Capsule())
+                    }
+                    .accessibilityLabel("Kamera: Foto, Scannen und Video")
+
+                    // Untermenü: WebView (WebClipper & YouTube)
+                    Menu {
+                        Button {
+                            onWebClipper?()
+                        } label: {
+                            Label("Webseite & Screenshot mit OCR…", systemImage: "globe.badge.chevron.backward")
+                        }
+
+                        Button {
+                            onYouTube?()
+                        } label: {
+                            Label("YouTube-Video einbetten…", systemImage: "play.rectangle")
+                        }
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: "globe.badge.chevron.backward")
@@ -980,6 +1145,8 @@ struct PenToolbarView: View {
                             Text("WebView")
                                 .font(.system(size: 12, weight: .bold))
                                 .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
@@ -988,8 +1155,7 @@ struct PenToolbarView: View {
                         .foregroundColor(Color.white)
                         .clipShape(Capsule())
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Webseite & Screenshot mit OCR")
+                    .accessibilityLabel("WebView: Webseite mit OCR und YouTube Video")
                     // KI-Assistent ist bewusst nicht hier — der Toggle lebt oben in der
                     // Navigationsleiste bei den anderen Modus-Schaltern (Suche, Dunkelmodus).
                 }
@@ -1022,3 +1188,214 @@ struct MovieTransferable: Transferable {
         }
     }
 }
+
+// MARK: - NotebookPDFExportSheet
+
+/// Modal sheet for configuring and triggering PDF export (All pages, page range, or visual custom snippet)
+struct NotebookPDFExportSheet: View {
+
+    enum ExportMode: String, CaseIterable, Identifiable {
+        case all    = "Ganzes Blatt"
+        case pages  = "Seitenbereich"
+        case custom = "Ausschnitt"
+
+        var id: String { rawValue }
+    }
+
+    let documentName: String
+    let totalPages: Int
+    let currentPage: Int
+
+    @State private var exportMode: ExportMode = .all
+    @State private var startPage: Int
+    @State private var endPage: Int
+    @State private var cropToExactHeight: Bool = true
+
+    let onExport: (_ scope: NotebookPDFExportScope, _ cropToExactHeight: Bool) -> Void
+    let onSelectRangeInNotebook: () -> Void
+    let onCancel: () -> Void
+
+    init(
+        documentName: String,
+        totalPages: Int,
+        currentPage: Int,
+        initialStartPage: Int? = nil,
+        initialEndPage: Int? = nil,
+        onExport: @escaping (_ scope: NotebookPDFExportScope, _ cropToExactHeight: Bool) -> Void,
+        onSelectRangeInNotebook: @escaping () -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.documentName = documentName
+        self.totalPages = max(1, totalPages)
+        self.currentPage = max(1, min(currentPage, totalPages))
+        _startPage = State(initialValue: max(1, min(initialStartPage ?? 1, totalPages)))
+        _endPage = State(initialValue: max(1, min(initialEndPage ?? totalPages, totalPages)))
+        self.onExport = onExport
+        self.onSelectRangeInNotebook = onSelectRangeInNotebook
+        self.onCancel = onCancel
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                // MARK: - Document Info
+                Section {
+                    HStack(spacing: 14) {
+                        Image(systemName: "doc.text.fill")
+                            .font(.system(size: 32))
+                            .foregroundStyle(.blue)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(documentName)
+                                .font(.headline)
+                                .lineLimit(1)
+
+                            Text("\(totalPages) A4-Seite\(totalPages > 1 ? "n" : "") • DIN A4 (595 × 842 pt)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                // MARK: - Export Mode Picker
+                Section("Export-Bereich") {
+                    Picker("Modus", selection: $exportMode) {
+                        ForEach(ExportMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.vertical, 2)
+                }
+
+                // MARK: - Mode Details
+                switch exportMode {
+                case .all:
+                    Section {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("Alle \(totalPages) Seiten werden vollständig exportiert.")
+                                .font(.subheadline)
+                        }
+                    }
+
+                case .pages:
+                    Section("Seiten auswählen") {
+                        Stepper(value: $startPage, in: 1...endPage) {
+                            HStack {
+                                Text("Startseite:")
+                                Spacer()
+                                Text("Seite \(startPage)")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+
+                        Stepper(value: $endPage, in: startPage...totalPages) {
+                            HStack {
+                                Text("Endseite:")
+                                Spacer()
+                                Text("Seite \(endPage)")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+
+                        // Quick Selectors
+                        HStack(spacing: 8) {
+                            Button("Aktuelle Seite (\(currentPage))") {
+                                startPage = currentPage
+                                endPage = currentPage
+                            }
+                            .buttonStyle(.bordered)
+                            .font(.caption)
+
+                            if totalPages > 1 {
+                                Button("S. 1 bis \(currentPage)") {
+                                    startPage = 1
+                                    endPage = currentPage
+                                }
+                                .buttonStyle(.bordered)
+                                .font(.caption)
+
+                                Button("Alle (1..\(totalPages))") {
+                                    startPage = 1
+                                    endPage = totalPages
+                                }
+                                .buttonStyle(.bordered)
+                                .font(.caption)
+                            }
+                        }
+                        .padding(.vertical, 4)
+
+                        let selectedCount = max(1, endPage - startPage + 1)
+                        Text("Exportiert \(selectedCount) von \(totalPages) Seite\(totalPages > 1 ? "n" : "").")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                case .custom:
+                    Section("Freier Bereich (Start- & Endpunkt)") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Möchtest du nur eine bestimmte Skizze, Aufgabe oder einen Abschnitt exportieren? Markiere Startpunkt und Endpunkt direkt im Notizbuch.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            Button {
+                                onSelectRangeInNotebook()
+                            } label: {
+                                Label("Start- & Endpunkt im Notizbuch wählen…", systemImage: "crop")
+                                    .frame(maxWidth: .infinity)
+                                    .fontWeight(.semibold)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.indigo)
+                            .padding(.top, 4)
+                        }
+                        .padding(.vertical, 4)
+
+                        Toggle("Ausschnitt-Höhe anpassen (keine leeren Ränder)", isOn: $cropToExactHeight)
+                            .font(.subheadline)
+                    }
+                }
+
+                // MARK: - Action Buttons
+                Section {
+                    Button {
+                        switch exportMode {
+                        case .all:
+                            onExport(.allPages, false)
+                        case .pages:
+                            onExport(.pageRange(startPage: startPage, endPage: endPage), false)
+                        case .custom:
+                            onSelectRangeInNotebook()
+                        }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label(exportMode == .custom ? "Bereich im Notizbuch öffnen" : "PDF erstellen & teilen",
+                                  systemImage: exportMode == .custom ? "crop" : "square.and.arrow.up.fill")
+                                .fontWeight(.bold)
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                }
+            }
+            .navigationTitle("PDF Exportieren")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") {
+                        onCancel()
+                    }
+                }
+            }
+        }
+    }
+}
+

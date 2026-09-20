@@ -58,6 +58,7 @@ struct BrowserRowView: View {
         case .pap:        return .orange
         case .whiteboard: return .green
         case .mindmap:    return .purple
+        case .grafcet:    return Color(red: 0.12, green: 0.58, blue: 0.88)
         }
     }
 }

@@ -12,6 +12,9 @@ final class PDFOverlayCanvasView: PKCanvasView {
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard bounds.contains(point) else { return nil }
 
+        #if targetEnvironment(macCatalyst)
+        return super.hitTest(point, with: event)
+        #else
         if let touches = event?.allTouches, !touches.isEmpty {
             let hasPencil = touches.contains { $0.type == .pencil }
             if hasPencil {
@@ -32,6 +35,7 @@ final class PDFOverlayCanvasView: PKCanvasView {
 
         // When event?.allTouches is nil/empty during initial hit testing, return super so PencilKit can receive Apple Pencil touches
         return super.hitTest(point, with: event)
+        #endif
     }
 }
 

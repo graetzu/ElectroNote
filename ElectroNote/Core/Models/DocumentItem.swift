@@ -18,6 +18,7 @@ struct DocumentItem: Identifiable, Hashable {
         case .pap:        return "arrow.triangle.branch"
         case .whiteboard: return "rectangle.and.pencil.and.ellipsis"
         case .mindmap:    return "brain"
+        case .grafcet:    return "point.topleft.down.to.point.bottomright.curvepath"
         }
     }
 
@@ -25,12 +26,12 @@ struct DocumentItem: Identifiable, Hashable {
     var isDocument: Bool {
         switch type {
         case .folder, .pdf: return false
-        case .note, .pap, .whiteboard, .mindmap: return true
+        case .note, .pap, .whiteboard, .mindmap, .grafcet: return true
         }
     }
 
     enum ItemType: String {
-        case folder, pdf, note, pap, whiteboard, mindmap
+        case folder, pdf, note, pap, whiteboard, mindmap, grafcet
 
         var collabDocumentType: CollabDocumentType? {
             switch self {
@@ -38,6 +39,7 @@ struct DocumentItem: Identifiable, Hashable {
             case .whiteboard: return .whiteboard
             case .pap: return .pap
             case .mindmap: return .mindmap
+            case .grafcet: return .grafcet
             case .folder, .pdf: return nil
             }
         }

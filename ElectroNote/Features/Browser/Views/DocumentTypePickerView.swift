@@ -4,9 +4,10 @@ import SwiftUI
 
 enum DocumentType: String, CaseIterable, Identifiable {
     case notebook   = "Notizbuch"
-    case pap        = "Ablaufplan (PAP)"
     case whiteboard = "Whiteboard"
     case mindmap    = "MindMap"
+    case pap        = "Ablaufplan (PAP)"
+    case grafcet    = "GRAFCET (Ablaufsteuerung)"
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum DocumentType: String, CaseIterable, Identifiable {
         case .pap:        return "arrow.triangle.branch"
         case .whiteboard: return "rectangle.and.pencil.and.ellipsis"
         case .mindmap:    return "brain"
+        case .grafcet:    return "point.topleft.down.to.point.bottomright.curvepath"
         }
     }
 
@@ -25,6 +27,7 @@ enum DocumentType: String, CaseIterable, Identifiable {
         case .pap:        return "Programmablaufplan mit Knoten und Verbindungen"
         case .whiteboard: return "Freie Zeichenfläche, beliebig zoombar"
         case .mindmap:    return "Gedankenkarte mit Ästen und Notizen"
+        case .grafcet:    return "Ablaufsteuerung nach DIN EN 60848 mit Schritten, Aktionen & Transitionen"
         }
     }
 
@@ -35,6 +38,7 @@ enum DocumentType: String, CaseIterable, Identifiable {
         case .pap:        return "epap"
         case .whiteboard: return "ewb"
         case .mindmap:    return "emm"
+        case .grafcet:    return "egrafcet"
         }
     }
 
@@ -44,6 +48,7 @@ enum DocumentType: String, CaseIterable, Identifiable {
         case .pap:        return .orange
         case .whiteboard: return .green
         case .mindmap:    return .purple
+        case .grafcet:    return Color(red: 0.12, green: 0.58, blue: 0.88)
         }
     }
 
@@ -54,6 +59,7 @@ enum DocumentType: String, CaseIterable, Identifiable {
         case .pap:        return .pap
         case .whiteboard: return .whiteboard
         case .mindmap:    return .mindmap
+        case .grafcet:    return .grafcet
         }
     }
 }

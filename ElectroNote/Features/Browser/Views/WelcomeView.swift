@@ -7,7 +7,7 @@ struct WelcomeView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Image(systemName: "bolt.fill")
+            Image(systemName: "note.text")
                 .font(.system(size: 56))
                 .foregroundStyle(.blue.gradient)
 
@@ -19,7 +19,7 @@ struct WelcomeView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             } else {
-                Text("ElectroNote")
+                Text("InfiniteNote")
                     .font(.largeTitle.bold())
                 Text("Wähle ein Dokument aus der Seitenleiste oder starte eine Live-Sitzung.")
                     .font(.callout)

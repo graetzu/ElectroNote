@@ -417,6 +417,12 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
     var onChangeColor: ((UIColor) -> Void)?
     var onDelete: (() -> Void)?
     var onDismiss: (() -> Void)?
+    var onPlayMedia: (() -> Void)? {
+        didSet {
+            buildActionToolbar()
+            updateLayout()
+        }
+    }
     var onCopyText: (() -> Void)? {
         didSet {
             buildActionToolbar()
@@ -546,7 +552,15 @@ final class UniversalTransformBox: UIView, UIGestureRecognizerDelegate {
             self?.dismiss()
         }
 
-        var buttons: [UIButton] = [rotBtn, dupBtn]
+        var buttons: [UIButton] = []
+        if let playAction = onPlayMedia {
+            let playBtn = makeToolbarButton(title: "Abspielen", icon: "play.fill", tint: .systemRed) {
+                playAction()
+            }
+            buttons.append(playBtn)
+        }
+        buttons.append(rotBtn)
+        buttons.append(dupBtn)
         if let copyTextAction = onCopyText {
             let textBtn = makeToolbarButton(title: "Text", icon: "doc.text") {
                 copyTextAction()

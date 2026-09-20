@@ -4,7 +4,11 @@ import PDFKit
 final class PDFViewModel: ObservableObject {
     @Published var currentPageIndex: Int = 0
     @Published var hasUnsavedAnnotations: Bool = false
+    #if targetEnvironment(macCatalyst)
+    @Published var pencilOnly: Bool = false
+    #else
     @Published var pencilOnly: Bool = true
+    #endif
 
     let item: DocumentItem
     @Published var document: PDFDocument?
