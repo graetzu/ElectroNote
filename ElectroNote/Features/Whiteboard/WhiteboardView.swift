@@ -13,6 +13,8 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
     var shapeSnapEnabled: Bool = false
     private var shapeSnapTask: Task<Void, Never>?
     private var isSnappingShape: Bool = false
+    private var pendingDrawAndHoldSnap: Bool = false
+    private let drawAndHoldRecognizer = DrawAndHoldGestureRecognizer(target: nil, action: nil)
 
     private var stickyNoteViews: [UUID: StickyNoteView] = [:]
 
@@ -121,9 +123,24 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
         // Default tool: Pen
         let initialColor: UIColor = darkDrawingMode ? .white : .black
         canvasView.tool = PKInkingTool(.pen, color: initialColor, width: 3)
+
+        drawAndHoldRecognizer.attach(to: canvasView) { [weak self] in
+            self?.handleDrawAndHoldTriggered()
+        }
     }
 
     // MARK: - Shape Snapping
+
+    private func handleDrawAndHoldTriggered() {
+        guard canvasView.drawingGestureRecognizer.isEnabled,
+              canvasView.tool is PKInkingTool else { return }
+
+        pendingDrawAndHoldSnap = true
+        canvasView.drawingGestureRecognizer.isEnabled = false
+        canvasView.drawingGestureRecognizer.isEnabled = true
+
+        scheduleShapeSnap(delayMs: 35)
+    }
 
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
         scheduleSave()
@@ -146,14 +163,14 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
             }
             lastCollabStrokeCount = currentCount
         }
-        guard shapeSnapEnabled, !isSnappingShape else { return }
+        guard !isSnappingShape else { return }
         scheduleShapeSnap()
     }
 
-    private func scheduleShapeSnap() {
+    private func scheduleShapeSnap(delayMs: Int = 90) {
         shapeSnapTask?.cancel()
         shapeSnapTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(120))
+            try? await Task.sleep(for: .milliseconds(delayMs))
             guard !Task.isCancelled, let self else { return }
             self.performShapeSnap()
         }
@@ -161,15 +178,35 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
 
     @MainActor
     private func performShapeSnap() {
+        let wasHoldTriggered = pendingDrawAndHoldSnap
+        pendingDrawAndHoldSnap = false
+
         let strokes = canvasView.drawing.strokes
         guard let last = strokes.last else { return }
-        guard let (snapped, _) = ShapeSnapper.snap(last) else { return }
 
+        let heldAtEnd = wasHoldTriggered || ShapeSnapper.didHoldAtEnd(of: last)
+        guard shapeSnapEnabled || heldAtEnd else { return }
+
+        guard let (snapped, _) = ShapeSnapper.snap(last, isHoldTriggered: true) else { return }
+
+        let previousDrawing = canvasView.drawing
         isSnappingShape = true
         var updated = strokes
         updated[updated.count - 1] = snapped
         canvasView.drawing = PKDrawing(strokes: updated)
         isSnappingShape = false
+
+        canvasView.undoManager?.registerUndo(withTarget: self) { target in
+            target.isSnappingShape = true
+            target.canvasView.drawing = previousDrawing
+            target.isSnappingShape = false
+            target.scheduleSave()
+        }
+
+        let feedback = UIImpactFeedbackGenerator(style: .light)
+        feedback.impactOccurred()
+
+        scheduleSave()
     }
 
     // MARK: - Sticky Notes
@@ -233,8 +270,8 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
             canvasView.overrideUserInterfaceStyle = targetStyle
         }
 
-        let bg = dark ? UIColor(white: 0.12, alpha: 1) : UIColor.white
-        let line = dark ? UIColor(white: 0.30, alpha: 1) : UIColor.systemGray4
+        let bg = dark ? UIColor(white: 0.16, alpha: 1) : UIColor.white
+        let line = dark ? UIColor(white: 0.25, alpha: 1) : UIColor(red: 0.87, green: 0.89, blue: 0.92, alpha: 1.0)
         let pattern = UIColor(patternImage: makePattern(style, bg: bg, line: line))
         canvasView.backgroundColor = pattern
         view.backgroundColor = bg
@@ -246,35 +283,42 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
         case .blank:
             return solidColor(bg)
         case .lined:
-            let s = CGSize(width: 1, height: sp)
+            let s = CGSize(width: 20, height: sp)
             return UIGraphicsImageRenderer(size: s).image { ctx in
                 bg.setFill(); ctx.fill(CGRect(origin: .zero, size: s))
-                line.setStroke()
-                let p = UIBezierPath(); p.move(to: CGPoint(x: 0, y: sp - 0.5)); p.addLine(to: CGPoint(x: 1, y: sp - 0.5)); p.stroke()
+                line.withAlphaComponent(0.6).setStroke()
+                ctx.cgContext.setLineWidth(0.5)
+                ctx.cgContext.move(to: CGPoint(x: 0, y: sp - 0.5))
+                ctx.cgContext.addLine(to: CGPoint(x: 20, y: sp - 0.5))
+                ctx.cgContext.strokePath()
             }
         case .grid:
             let s = CGSize(width: sp, height: sp)
             return UIGraphicsImageRenderer(size: s).image { ctx in
                 bg.setFill(); ctx.fill(CGRect(origin: .zero, size: s))
                 line.setStroke()
-                let p = UIBezierPath()
-                p.move(to: CGPoint(x: sp - 0.5, y: 0)); p.addLine(to: CGPoint(x: sp - 0.5, y: sp))
-                p.move(to: CGPoint(x: 0, y: sp - 0.5)); p.addLine(to: CGPoint(x: sp, y: sp - 0.5))
-                p.stroke()
+                ctx.cgContext.setLineWidth(0.5)
+                ctx.cgContext.move(to: CGPoint(x: sp, y: 0)); ctx.cgContext.addLine(to: CGPoint(x: sp, y: sp))
+                ctx.cgContext.move(to: CGPoint(x: 0, y: sp)); ctx.cgContext.addLine(to: CGPoint(x: sp, y: sp))
+                ctx.cgContext.strokePath()
             }
         case .dotted:
             let s = CGSize(width: sp, height: sp)
             return UIGraphicsImageRenderer(size: s).image { ctx in
                 bg.setFill(); ctx.fill(CGRect(origin: .zero, size: s))
                 line.setFill()
-                ctx.fill(CGRect(x: sp/2 - 1, y: sp/2 - 1, width: 2, height: 2))
+                ctx.cgContext.addEllipse(in: CGRect(x: sp - 1.5, y: sp - 1.5, width: 2.5, height: 2.5))
+                ctx.cgContext.fillPath()
             }
         case .cornell:
-            let s = CGSize(width: sp, height: sp)
+            let s = CGSize(width: 20, height: sp)
             return UIGraphicsImageRenderer(size: s).image { ctx in
                 bg.setFill(); ctx.fill(CGRect(origin: .zero, size: s))
-                line.setStroke()
-                let p = UIBezierPath(); p.move(to: CGPoint(x: 0, y: sp - 0.5)); p.addLine(to: CGPoint(x: 1, y: sp - 0.5)); p.stroke()
+                line.withAlphaComponent(0.6).setStroke()
+                ctx.cgContext.setLineWidth(0.5)
+                ctx.cgContext.move(to: CGPoint(x: 0, y: sp - 0.5))
+                ctx.cgContext.addLine(to: CGPoint(x: 20, y: sp - 0.5))
+                ctx.cgContext.strokePath()
             }
         }
     }
@@ -340,8 +384,8 @@ final class WhiteboardViewController: UIViewController, PKCanvasViewDelegate {
         fmt.scale = 2.0
         return UIGraphicsImageRenderer(size: renderSize, format: fmt).image { ctx in
             if withBackground || darkDrawingMode {
-                let bg = darkDrawingMode ? UIColor(white: 0.12, alpha: 1) : UIColor.white
-                let line = darkDrawingMode ? UIColor(white: 0.30, alpha: 1) : UIColor.systemGray4
+                let bg = darkDrawingMode ? UIColor(white: 0.16, alpha: 1) : UIColor.white
+                let line = darkDrawingMode ? UIColor(white: 0.25, alpha: 1) : UIColor(red: 0.87, green: 0.89, blue: 0.92, alpha: 1.0)
                 let pattern = makePattern(backgroundStyle, bg: bg, line: line)
                 pattern.draw(in: CGRect(origin: .zero, size: renderSize))
             } else {
@@ -515,136 +559,20 @@ struct WhiteboardRepresentable: UIViewControllerRepresentable {
 struct WhiteboardView: View {
     var item: DocumentItem? = nil
     var onInsert: ((UIImage) -> Void)? = nil
-    @Environment(\.dismiss) private var dismiss
 
-    @State private var activeTool: CanvasToolType = .pen
-    @State private var selectedColor: Color = .black
-    @State private var selectedWidth: CGFloat = 3.0
-    @State private var eraserType: PKEraserTool.EraserType = .vector
-    @State private var rulerActive: Bool = false
-    @State private var shapeSnapEnabled: Bool = false
-    @State private var background: BackgroundStyle = .blank
-    @State private var darkDrawingMode: Bool = false
-
-    @State private var vc: WhiteboardViewController?
+    @State private var scratchItem: DocumentItem = {
+        let scratchDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmbeddedWhiteboard_\(UUID().uuidString).ewb", isDirectory: true)
+        try? FileManager.default.createDirectory(at: scratchDir, withIntermediateDirectories: true)
+        return DocumentItem(id: UUID(), name: "Whiteboard", path: scratchDir, type: .whiteboard, modifiedAt: Date(), syncStatus: .local)
+    }()
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Dedicated Pen & Tool top bar
-                PenToolbarView(
-                    activeTool: $activeTool,
-                    selectedColor: $selectedColor,
-                    selectedWidth: $selectedWidth,
-                    eraserType: $eraserType,
-                    rulerActive: $rulerActive,
-                    shapeSnapEnabled: $shapeSnapEnabled,
-                    darkDrawingMode: darkDrawingMode,
-                    showRuler: true
-                ) { newTool in
-                    vc?.canvasView.tool = newTool
-                }
-                .frame(maxWidth: .infinity)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
-
-                Divider()
-
-                WhiteboardRepresentable(
-                    vcRef: $vc,
-                    folderURL: item?.path,
-                    background: background,
-                    darkDrawingMode: darkDrawingMode,
-                    rulerActive: rulerActive,
-                    shapeSnapEnabled: shapeSnapEnabled
-                )
-            }
-            .navigationTitle("Whiteboard")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItemGroup(placement: .navigationBarLeading) {
-                    Button("Schließen") { dismiss() }
-
-                    Button { vc?.clearCanvas() } label: {
-                        Image(systemName: "trash")
-                    }
-                    .tint(.red)
-                    .accessibilityLabel("Löschen")
-
-                    Button { vc?.undo() } label: {
-                        Image(systemName: "arrow.uturn.backward")
-                    }
-                    .accessibilityLabel("Rückgängig")
-
-                    Button { vc?.redo() } label: {
-                        Image(systemName: "arrow.uturn.forward")
-                    }
-                    .accessibilityLabel("Wiederholen")
-                }
-
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    // Live Collaboration (Interaktive Zusammenarbeit)
-                    LiveCollabBadgeButton(documentName: item?.name ?? "Whiteboard", documentType: .whiteboard)
-
-                    // Live Cast (WLAN Übertragung)
-                    LiveCastBadgeButton()
-
-                    // Notizzettel hinzufügen
-                    Button {
-                        vc?.addStickyNote()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "note.text.badge.plus")
-                            Text("Notiz")
-                        }
-                        .font(.system(size: 14, weight: .semibold))
-                    }
-                    .tint(.orange)
-                    .accessibilityLabel("Notizzettel hinzufügen")
-
-                    // Background style menu
-                    Menu {
-                        Section("Vorlage") {
-                            ForEach(BackgroundStyle.allCases) { style in
-                                Button {
-                                    background = style
-                                } label: {
-                                    Label(style.rawValue, systemImage: style.symbolName)
-                                }
-                            }
-                        }
-                        Section("Modus") {
-                            Toggle("Dunkles Board", isOn: $darkDrawingMode)
-                        }
-                    } label: {
-                        Image(systemName: background.symbolName)
-                    }
-                    .accessibilityLabel("Hintergrund")
-
-                    Button {
-                        if let img = vc?.exportImage(withBackground: background != .blank || darkDrawingMode) {
-                            onInsert?(img)
-                            dismiss()
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "plus.rectangle.on.rectangle")
-                            Text("Als Bild einfügen")
-                        }
-                        .font(.system(size: 14, weight: .bold))
-                    }
-                }
-            }
-            .onDisappear {
-                vc?.saveDrawing()
-            }
-            .onChange(of: darkDrawingMode) { newDark in
-                if newDark && selectedColor == .black {
-                    selectedColor = .white
-                } else if !newDark && selectedColor == .white {
-                    selectedColor = .black
-                }
-                let tool = makePKTool(tool: activeTool, color: selectedColor, width: selectedWidth, eraserType: eraserType, darkDrawingMode: newDark)
-                vc?.canvasView.tool = tool
+        if let item {
+            InfiniteNotebookHostView(item: item, isWhiteboardMode: true)
+        } else {
+            NavigationStack {
+                InfiniteNotebookHostView(item: scratchItem, isWhiteboardMode: true, onInsert: onInsert)
             }
         }
     }

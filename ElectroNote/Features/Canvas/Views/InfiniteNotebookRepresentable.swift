@@ -6,9 +6,11 @@ struct InfiniteNotebookRepresentable: UIViewControllerRepresentable {
 
     let store: NotebookDocumentStore
     @ObservedObject var vm: InfiniteNotebookViewModel
+    var isWhiteboardMode: Bool = false
 
     func makeUIViewController(context: Context) -> InfiniteNotebookViewController {
         let vc   = InfiniteNotebookViewController()
+        vc.isWhiteboardMode = isWhiteboardMode
         vc.store = store
         let toolColor = vm.darkDrawingMode ? UIColor.white : UIColor(vm.selectedColor)
         vc.canvasView.tool = PKInkingTool(.pen, color: toolColor, width: vm.selectedWidth)

@@ -43,10 +43,14 @@ struct ContentView: View {
                     PDFHostView(item: item)
                         .id(item.id)
                 case .folder:
-                    WelcomeView()
+                    WelcomeView(viewModel: browserVM) { newItem in
+                        selectedItem = newItem
+                    }
                 }
             } else {
-                WelcomeView()
+                WelcomeView(viewModel: browserVM) { newItem in
+                    selectedItem = newItem
+                }
             }
         }
         .navigationSplitViewStyle(.balanced)

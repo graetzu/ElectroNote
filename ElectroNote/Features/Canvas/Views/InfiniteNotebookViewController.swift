@@ -237,7 +237,10 @@ final class InfiniteNotebookViewController: UIViewController {
         set { document.shapeSnapEnabled = newValue; store?.saveDocument(document) }
     }
     private var isSnappingShape = false
+    private var pendingDrawAndHoldSnap = false
     private var shapeSnapTask: Task<Void, Never>?
+    private let drawAndHoldRecognizer = DrawAndHoldGestureRecognizer(target: nil, action: nil)
+    var isWhiteboardMode: Bool = false
 
     var background: BackgroundStyle {
         get { document.background }
@@ -314,7 +317,7 @@ final class InfiniteNotebookViewController: UIViewController {
                     )
                 }
             }
-            if canvasView.contentSize.width > view.bounds.width && view.bounds.width > 0 {
+            if !isWhiteboardMode && canvasView.contentSize.width > view.bounds.width && view.bounds.width > 0 {
                 let fitScale = view.bounds.width / canvasView.contentSize.width
                 canvasView.setZoomScale(fitScale, animated: false)
             }
@@ -473,6 +476,9 @@ final class InfiniteNotebookViewController: UIViewController {
 
         setupCanvasLongPress()
         setupCanvasTapToDeselect()
+        drawAndHoldRecognizer.attach(to: canvasView) { [weak self] in
+            self?.handleDrawAndHoldTriggered()
+        }
         let pointerInteraction = UIPointerInteraction(delegate: self)
         canvasView.addInteraction(pointerInteraction)
         self.canvasPointerInteraction = pointerInteraction
@@ -524,8 +530,16 @@ final class InfiniteNotebookViewController: UIViewController {
         }
         let screenW = view.bounds.width > 0 ? view.bounds.width : 820
         let docPagesMaxW = document.insertedImages.filter { isDocumentPage($0) }.map { $0.startX + $0.width }.max() ?? 0
-        let w = max(docPagesMaxW, min(screenW, 834), 820)
-        canvasView.contentSize = CGSize(width: w, height: h)
+        if isWhiteboardMode {
+            let drawingMaxX = canvasView.drawing.bounds.isNull ? 0 : canvasView.drawing.bounds.maxX
+            let imgMaxX = document.insertedImages.map { $0.startX + $0.width }.max() ?? 0
+            let w = max(docPagesMaxW, drawingMaxX + 400, imgMaxX + 400, screenW * 2.2, 2400)
+            let hVal = max(h, 2400)
+            canvasView.contentSize = CGSize(width: w, height: hVal)
+        } else {
+            let w = max(docPagesMaxW, min(screenW, 834), 820)
+            canvasView.contentSize = CGSize(width: w, height: h)
+        }
 
         canvasView.overrideUserInterfaceStyle = document.darkDrawingMode ? .dark : .light
         setupBackgroundLayer()
@@ -626,6 +640,7 @@ final class InfiniteNotebookViewController: UIViewController {
 
         pageBreakContainer.frame = CGRect(origin: .zero, size: CGSize(width: width, height: totalH))
         pageBreakContainer.subviews.forEach { $0.removeFromSuperview() }
+        guard !isWhiteboardMode else { return }
 
         let pageH = width * 1.41421356 // Proportional ISO A4 ratio (1 : √2)
         let dark = document.darkDrawingMode
@@ -683,7 +698,7 @@ final class InfiniteNotebookViewController: UIViewController {
         view.backgroundColor = deskColor
 
         let paperBg = dark ? UIColor(white: 0.16, alpha: 1) : UIColor.white
-        let line    = dark ? UIColor(white: 0.32, alpha: 1) : UIColor.systemGray4
+        let line    = dark ? UIColor(white: 0.25, alpha: 1) : UIColor(red: 0.87, green: 0.89, blue: 0.92, alpha: 1.0)
         let pattern = UIColor(patternImage: makePattern(document.background, bg: paperBg, line: line))
 
         paperBackgroundView.backgroundColor = pattern
@@ -839,14 +854,26 @@ final class InfiniteNotebookViewController: UIViewController {
     // MARK: - Auto-extend
 
     private func extendIfNeeded() {
+        var didChange = false
         let rawMaxY = canvasView.drawing.bounds.isNull ? 0 : canvasView.drawing.bounds.maxY
-        let needed = rawMaxY + Self.initialHeight * 0.3
-        guard needed > canvasView.contentSize.height else { return }
-        let newH = needed + Self.initialHeight * 0.5
-        canvasView.contentSize.height = newH
-        updateBackgroundFrame()
-        document.documentHeight = newH
-        // Document height persisted by the ViewModel autosave timer — no immediate write needed here
+        let neededY = rawMaxY + Self.initialHeight * 0.3
+        if neededY > canvasView.contentSize.height {
+            let newH = neededY + Self.initialHeight * 0.5
+            canvasView.contentSize.height = newH
+            document.documentHeight = newH
+            didChange = true
+        }
+        if isWhiteboardMode {
+            let rawMaxX = canvasView.drawing.bounds.isNull ? 0 : canvasView.drawing.bounds.maxX
+            let neededX = rawMaxX + 400
+            if neededX > canvasView.contentSize.width {
+                canvasView.contentSize.width = neededX + 600
+                didChange = true
+            }
+        }
+        if didChange {
+            updateBackgroundFrame()
+        }
     }
 
     // MARK: - Save
@@ -3331,13 +3358,26 @@ extension InfiniteNotebookViewController: PKCanvasViewDelegate {
 
 extension InfiniteNotebookViewController {
 
-    private func scheduleShapeSnap() {
-        guard shapeSnapEnabled else { return }
+    private func handleDrawAndHoldTriggered() {
+        guard canvasView.drawingGestureRecognizer.isEnabled,
+              canvasView.tool is PKInkingTool else { return }
+
+        pendingDrawAndHoldSnap = true
+
+        // Briefly toggle drawingGestureRecognizer so PencilKit immediately commits
+        // the in-progress stroke while the pen is still held on the screen.
+        canvasView.drawingGestureRecognizer.isEnabled = false
+        canvasView.drawingGestureRecognizer.isEnabled = true
+
+        scheduleShapeSnap(delayMs: 35)
+    }
+
+    private func scheduleShapeSnap(delayMs: Int = 90) {
         shapeSnapTask?.cancel()
         shapeSnapTask = Task { [weak self] in
             // Wait for the drawing event to settle (PKCanvasView may fire
             // canvasViewDrawingDidChange multiple times for one gesture).
-            try? await Task.sleep(for: .milliseconds(120))
+            try? await Task.sleep(for: .milliseconds(delayMs))
             guard !Task.isCancelled, let self else { return }
             self.performShapeSnap()
         }
@@ -3345,15 +3385,37 @@ extension InfiniteNotebookViewController {
 
     @MainActor
     private func performShapeSnap() {
+        let wasHoldTriggered = pendingDrawAndHoldSnap
+        pendingDrawAndHoldSnap = false
+
         let strokes = canvasView.drawing.strokes
         guard let last = strokes.last else { return }
-        guard let (snapped, _) = ShapeSnapper.snap(last) else { return }
 
+        let heldAtEnd = wasHoldTriggered || ShapeSnapper.didHoldAtEnd(of: last)
+        guard shapeSnapEnabled || heldAtEnd else { return }
+
+        guard let (snapped, _) = ShapeSnapper.snap(last, isHoldTriggered: true) else { return }
+
+        let previousDrawing = canvasView.drawing
         isSnappingShape = true
         var updated = strokes
         updated[updated.count - 1] = snapped
-        canvasView.drawing = PKDrawing(strokes: updated)
+        let newDrawing = PKDrawing(strokes: updated)
+        canvasView.drawing = newDrawing
         isSnappingShape = false
+
+        // Register undo so the user can revert to the original hand-drawn stroke with 1 tap
+        canvasView.undoManager?.registerUndo(withTarget: self) { target in
+            target.isSnappingShape = true
+            target.canvasView.drawing = previousDrawing
+            target.isSnappingShape = false
+            target.onDrawingChanged?()
+        }
+
+        let feedback = UIImpactFeedbackGenerator(style: .light)
+        feedback.impactOccurred()
+
+        onDrawingChanged?()
     }
 }
 
@@ -4404,6 +4466,59 @@ extension InfiniteNotebookViewController {
         }
     }
 
+    func renderCanvasSnapshotImage() -> UIImage? {
+        var contentRect = canvasView.drawing.bounds
+        for entry in document.insertedImages {
+            let r = CGRect(x: entry.startX, y: entry.startY, width: entry.width, height: entry.height)
+            contentRect = contentRect.isNull ? r : contentRect.union(r)
+        }
+        for (_, v) in stickyNoteViews {
+            contentRect = contentRect.isNull ? v.frame : contentRect.union(v.frame)
+        }
+
+        let targetRect: CGRect
+        if !contentRect.isNull && contentRect.width > 5 && contentRect.height > 5 {
+            let padding: CGFloat = 24
+            targetRect = CGRect(
+                x: max(0, contentRect.minX - padding),
+                y: max(0, contentRect.minY - padding),
+                width: min(contentRect.width + padding * 2, 2400),
+                height: min(contentRect.height + padding * 2, 2400)
+            )
+        } else {
+            return captureVisiblePageImage()
+        }
+
+        let renderSize = CGSize(width: max(targetRect.width, 100), height: max(targetRect.height, 100))
+        let inkImage = canvasView.drawing.image(from: targetRect, scale: 2.0)
+
+        let fmt = UIGraphicsImageRendererFormat()
+        fmt.scale = 2.0
+        return UIGraphicsImageRenderer(size: renderSize, format: fmt).image { ctx in
+            let dark = document.darkDrawingMode
+            let paperBg = dark ? UIColor(white: 0.16, alpha: 1) : UIColor.white
+            let line = dark ? UIColor(white: 0.25, alpha: 1) : UIColor(red: 0.87, green: 0.89, blue: 0.92, alpha: 1.0)
+            let pattern = UIColor(patternImage: makePattern(document.background, bg: paperBg, line: line))
+            pattern.setFill()
+            ctx.fill(CGRect(origin: .zero, size: renderSize))
+
+            ctx.cgContext.saveGState()
+            ctx.cgContext.translateBy(x: -targetRect.minX, y: -targetRect.minY)
+            paperBackgroundView.layer.render(in: ctx.cgContext)
+            for (_, v) in stickyNoteViews {
+                ctx.cgContext.saveGState()
+                ctx.cgContext.translateBy(x: v.frame.minX, y: v.frame.minY)
+                v.layer.render(in: ctx.cgContext)
+                ctx.cgContext.restoreGState()
+            }
+            ctx.cgContext.restoreGState()
+
+            if inkImage.size.width > 0 && inkImage.size.height > 0 {
+                inkImage.draw(in: CGRect(origin: .zero, size: renderSize))
+            }
+        }
+    }
+
     func collectContextText() async -> String {
         let zoom = max(canvasView.zoomScale, 0.01)
         let scrollY = canvasView.contentOffset.y / zoom
@@ -4466,6 +4581,11 @@ extension InfiniteNotebookViewController: UIGestureRecognizerDelegate {
         guard let gView = gestureRecognizer.view, let oView = otherGestureRecognizer.view,
               gView.window != nil, gView.window === oView.window else {
             return false
+        }
+
+        // Draw-and-hold passive recognizer always runs alongside PencilKit drawing
+        if gestureRecognizer is DrawAndHoldGestureRecognizer || otherGestureRecognizer is DrawAndHoldGestureRecognizer {
+            return true
         }
 
         // Tap-to-deselect can run alongside canvas pan so touching outside doesn't cancel scroll
@@ -5068,8 +5188,15 @@ extension InfiniteNotebookViewController {
         let h = max(newDoc.documentHeight, contentMaxY + Self.initialHeight * 0.3)
         let screenW = view.bounds.width > 0 ? view.bounds.width : 820
         let docPagesMaxW = newDoc.insertedImages.filter { isDocumentPage($0) }.map { $0.startX + $0.width }.max() ?? 0
-        let w = max(docPagesMaxW, min(screenW, 834), 820)
-        canvasView.contentSize = CGSize(width: w, height: h)
+        if isWhiteboardMode {
+            let drawingMaxX = canvasView.drawing.bounds.isNull ? 0 : canvasView.drawing.bounds.maxX
+            let imgMaxX = newDoc.insertedImages.map { $0.startX + $0.width }.max() ?? 0
+            let w = max(docPagesMaxW, drawingMaxX + 400, imgMaxX + 400, screenW * 2.2, 2400)
+            canvasView.contentSize = CGSize(width: w, height: max(h, 2400))
+        } else {
+            let w = max(docPagesMaxW, min(screenW, 834), 820)
+            canvasView.contentSize = CGSize(width: w, height: h)
+        }
 
         // 4. Clear and remount sticky notes
         for (_, view) in stickyNoteViews {

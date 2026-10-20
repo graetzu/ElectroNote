@@ -17,9 +17,14 @@ struct BrowserSidebarView: View {
     @State private var showTrash = false
     @State private var showTagBrowser = false
     @State private var itemForTagEditor: DocumentItem?
+    @State private var showCollabSheet = false
+    @State private var collabInitialTab = 1
+    @State private var showLiveCastSheet = false
 
     // Observe metaStore changes so favorites/tags update live
     @ObservedObject private var metaStore = ItemMetadataStore.shared
+    @ObservedObject private var collab = LiveCollabSessionManager.shared
+    @ObservedObject private var liveCast = LiveCastServer.shared
 
     var body: some View {
         Group {
@@ -111,6 +116,16 @@ struct BrowserSidebarView: View {
         .sheet(item: $itemForTagEditor) { item in
             TagEditorView(item: item, relPath: viewModel.relPath(for: item))
         }
+        .sheet(isPresented: $showCollabSheet) {
+            LiveCollabSheetView(
+                documentName: selectedItem?.name ?? "Live-Zusammenarbeit",
+                documentType: selectedItem?.type.collabDocumentType ?? .note,
+                initialTab: collabInitialTab
+            )
+        }
+        .sheet(isPresented: $showLiveCastSheet) {
+            LiveCastSheetView()
+        }
         .alert("Umbenennen", isPresented: Binding(
             get: { itemToRename != nil },
             set: { if !$0 { itemToRename = nil } }
@@ -162,6 +177,25 @@ struct BrowserSidebarView: View {
                     }
                 }
             } else {
+                // First option in sidebar: Create New Document
+                Section {
+                    Button {
+                        showDocTypePicker = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.blue)
+                            Text("Neues Dokument erstellen…")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.primary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 // Favorites section – only at root
                 if viewModel.isAtRoot {
                     let favorites = viewModel.items.filter { viewModel.isFavorite($0) }
@@ -305,13 +339,30 @@ struct BrowserSidebarView: View {
 
     private var emptyState: some View {
         VStack(spacing: 16) {
+            Button {
+                showDocTypePicker = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                    Text("Neues Dokument erstellen…")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(Color.blue.gradient)
+                .clipShape(Capsule())
+            }
+            .padding(.bottom, 8)
+
             Image(systemName: "folder")
-                .font(.system(size: 52))
+                .font(.system(size: 48))
                 .foregroundStyle(.tertiary)
             Text("Noch leer")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            Text("Tippe auf **+** um einen Ordner oder eine Notiz anzulegen.")
+            Text("Tippe oben auf **Neues Dokument erstellen** oder **+**.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -339,12 +390,7 @@ struct BrowserSidebarView: View {
         }
 
         ToolbarItemGroup(placement: .navigationBarTrailing) {
-            LiveCollabBadgeButton(
-                documentName: selectedItem?.name ?? "Live-Zusammenarbeit",
-                documentType: selectedItem?.type.collabDocumentType ?? .note
-            )
-            LiveCastBadgeButton()
-
+            // 1. First toolbar option: Create New Document / Folder / Import
             Menu {
                 Button { showDocTypePicker = true } label: {
                     Label("Neues Dokument…", systemImage: "note.text.badge.plus")
@@ -360,6 +406,49 @@ struct BrowserSidebarView: View {
                 Image(systemName: "plus")
             }
             .accessibilityLabel("Neu")
+
+            // 2. Live Collaboration & Cast grouped in a submenu
+            Menu {
+                Section("Live-Zusammenarbeit") {
+                    Button {
+                        collabInitialTab = 0
+                        showCollabSheet = true
+                    } label: {
+                        Label("Sitzung hosten…", systemImage: "person.2.wave.2.fill")
+                    }
+                    Button {
+                        collabInitialTab = 1
+                        showCollabSheet = true
+                    } label: {
+                        Label("Sitzung beitreten…", systemImage: "arrow.right.circle.fill")
+                    }
+                }
+                Section("Bildschirmübertragung") {
+                    Button {
+                        showLiveCastSheet = true
+                    } label: {
+                        Label(
+                            liveCast.isStreaming ? "WLAN Live-Cast aktiv (\(liveCast.viewerCount))" : "WLAN Live-Übertragung (Cast)…",
+                            systemImage: "antenna.radiowaves.left.and.right"
+                        )
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    if collab.sessionState == .hosting || collab.sessionState == .connected {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 7, height: 7)
+                    } else if liveCast.isStreaming {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 7, height: 7)
+                    }
+                    Image(systemName: "person.2.wave.2")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+            }
+            .accessibilityLabel("Live-Menü")
 
             Menu {
                 Button { showSettings = true } label: {

@@ -5,6 +5,9 @@ import AVFoundation
 
 struct InfiniteNotebookHostView: View {
     let item: DocumentItem
+    var isWhiteboardMode: Bool = false
+    var onInsert: ((UIImage) -> Void)? = nil
+    @Environment(\.dismiss) private var dismiss
 
     @StateObject private var vm: InfiniteNotebookViewModel
     @StateObject private var syncVM = SyncViewModel()
@@ -17,8 +20,10 @@ struct InfiniteNotebookHostView: View {
     @State private var selectedVideoItem: PhotosPickerItem? = nil
     private let store: NotebookDocumentStore
 
-    init(item: DocumentItem) {
+    init(item: DocumentItem, isWhiteboardMode: Bool = false, onInsert: ((UIImage) -> Void)? = nil) {
         self.item  = item
+        self.isWhiteboardMode = isWhiteboardMode
+        self.onInsert = onInsert
         let st = NotebookDocumentStore(noteURL: item.path)
         self.store = st
         let doc = st.loadDocument()
@@ -56,7 +61,7 @@ struct InfiniteNotebookHostView: View {
             Divider()
 
             ZStack(alignment: .topTrailing) {
-                InfiniteNotebookRepresentable(store: store, vm: vm)
+                InfiniteNotebookRepresentable(store: store, vm: vm, isWhiteboardMode: isWhiteboardMode)
                     .ignoresSafeArea(edges: .bottom)
 
                 if vm.showSearch {
@@ -423,6 +428,10 @@ struct InfiniteNotebookHostView: View {
         // Left: undo / redo — routed via ViewModel → Representable → VC so the
         // PKCanvasView's undoManager is always the target regardless of first-responder state
         ToolbarItemGroup(placement: .navigationBarLeading) {
+            if onInsert != nil {
+                Button("Schließen") { dismiss() }
+            }
+
             Button { vm.triggerUndo = true } label: { Image(systemName: "arrow.uturn.backward") }
                 .accessibilityLabel("Rückgängig")
 
@@ -432,6 +441,19 @@ struct InfiniteNotebookHostView: View {
 
         // Right: always-visible core controls
         ToolbarItemGroup(placement: .navigationBarTrailing) {
+
+            if let onInsert {
+                Button {
+                    if let img = vm.renderCanvasSnapshotImage() {
+                        onInsert(img)
+                        dismiss()
+                    }
+                } label: {
+                    Label("Einfügen", systemImage: "plus.rectangle.on.rectangle")
+                        .font(.system(size: 13, weight: .bold))
+                }
+                .buttonStyle(.borderedProminent)
+            }
 
             // Save status indicator with clear description
             Label(vm.saveState.label, systemImage: vm.saveState.symbol)
@@ -537,7 +559,7 @@ struct InfiniteNotebookHostView: View {
             .accessibilityLabel("Text per Tastatur eingeben")
 
             // Live Collaboration (Interaktive Zusammenarbeit)
-            LiveCollabBadgeButton(documentName: item.name, documentType: .note)
+            LiveCollabBadgeButton(documentName: item.name, documentType: isWhiteboardMode ? .whiteboard : .note)
 
             // Live Cast Button (WLAN Übertragung)
             LiveCastBadgeButton()
@@ -698,11 +720,15 @@ struct PenToolbarView: View {
     @Binding var selectedColor: Color
     @Binding var selectedWidth: CGFloat
     @Binding var eraserType: PKEraserTool.EraserType
+    @Binding var eraserWidth: CGFloat
     @Binding var rulerActive: Bool
     @Binding var shapeSnapEnabled: Bool
     var darkDrawingMode: Bool = false
     var showRuler: Bool = true
     var onToolChanged: ((PKTool) -> Void)? = nil
+
+    @State private var localEraserWidth: CGFloat = 16.0
+    private var usesLocalEraserWidth: Bool = false
 
     private let quickColors: [Color] = [
         .black,
@@ -741,6 +767,7 @@ struct PenToolbarView: View {
          selectedColor: Binding<Color>,
          selectedWidth: Binding<CGFloat>,
          eraserType: Binding<PKEraserTool.EraserType>,
+         eraserWidth: Binding<CGFloat>? = nil,
          rulerActive: Binding<Bool> = .constant(false),
          shapeSnapEnabled: Binding<Bool> = .constant(false),
          darkDrawingMode: Bool = false,
@@ -750,6 +777,13 @@ struct PenToolbarView: View {
         self._selectedColor = selectedColor
         self._selectedWidth = selectedWidth
         self._eraserType = eraserType
+        if let ew = eraserWidth {
+            self._eraserWidth = ew
+            self.usesLocalEraserWidth = false
+        } else {
+            self._eraserWidth = .constant(16.0)
+            self.usesLocalEraserWidth = true
+        }
         self._rulerActive = rulerActive
         self._shapeSnapEnabled = shapeSnapEnabled
         self.darkDrawingMode = darkDrawingMode
@@ -781,6 +815,8 @@ struct PenToolbarView: View {
         self._selectedColor = Binding(get: { vm.selectedColor }, set: { vm.selectedColor = $0 })
         self._selectedWidth = Binding(get: { vm.selectedWidth }, set: { vm.selectedWidth = $0 })
         self._eraserType = Binding(get: { vm.eraserType }, set: { vm.eraserType = $0 })
+        self._eraserWidth = Binding(get: { vm.eraserWidth }, set: { vm.eraserWidth = $0 })
+        self.usesLocalEraserWidth = false
         self._rulerActive = Binding(get: { vm.rulerActive }, set: { vm.rulerActive = $0 })
         self._shapeSnapEnabled = Binding(get: { vm.shapeSnapEnabled }, set: { vm.shapeSnapEnabled = $0 })
         self.darkDrawingMode = vm.darkDrawingMode
@@ -919,6 +955,80 @@ struct PenToolbarView: View {
                                 .buttonStyle(.plain)
                                 .accessibilityLabel(item.label)
                             }
+                        }
+                        .fixedSize()
+                    } else if activeTool == .eraser {
+                        Divider()
+                            .frame(height: 22)
+
+                        // Eraser mode switcher (Pixel vs Strich)
+                        HStack(spacing: 4) {
+                            Button {
+                                eraserType = .bitmap
+                                notifyToolChange()
+                            } label: {
+                                Text("Pixel")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(eraserType == .bitmap ? Color.accentColor : Color(uiColor: .tertiarySystemFill))
+                                    .foregroundColor(eraserType == .bitmap ? .white : .primary)
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                eraserType = .vector
+                                notifyToolChange()
+                            } label: {
+                                Text("Strich")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(eraserType == .vector ? Color.accentColor : Color(uiColor: .tertiarySystemFill))
+                                    .foregroundColor(eraserType == .vector ? .white : .primary)
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .fixedSize()
+
+                        Divider()
+                            .frame(height: 22)
+
+                        // Continuous Eraser Size Slider
+                        HStack(spacing: 8) {
+                            let currentW = usesLocalEraserWidth ? localEraserWidth : eraserWidth
+                            let previewDiameter = max(4, min(22, currentW * 0.42))
+
+                            ZStack {
+                                Circle()
+                                    .stroke(Color.primary.opacity(0.55), lineWidth: 1.5)
+                                    .background(Circle().fill(Color.accentColor.opacity(0.22)))
+                                    .frame(width: previewDiameter, height: previewDiameter)
+                            }
+                            .frame(width: 24, height: 24)
+
+                            Slider(
+                                value: Binding(
+                                    get: { usesLocalEraserWidth ? localEraserWidth : eraserWidth },
+                                    set: { newVal in
+                                        if usesLocalEraserWidth {
+                                            localEraserWidth = newVal
+                                        } else {
+                                            eraserWidth = newVal
+                                        }
+                                        notifyToolChange()
+                                    }
+                                ),
+                                in: 4...64
+                            )
+                            .frame(width: 135)
+
+                            Text("\(Int(currentW.rounded())) pt")
+                                .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(minWidth: 34, alignment: .leading)
                         }
                         .fixedSize()
                     }
@@ -1167,7 +1277,15 @@ struct PenToolbarView: View {
     }
 
     private func notifyToolChange() {
-        let tool = makePKTool(tool: activeTool, color: selectedColor, width: selectedWidth, eraserType: eraserType, darkDrawingMode: darkDrawingMode)
+        let ew = usesLocalEraserWidth ? localEraserWidth : eraserWidth
+        let tool = makePKTool(
+            tool: activeTool,
+            color: selectedColor,
+            width: selectedWidth,
+            eraserType: eraserType,
+            eraserWidth: ew,
+            darkDrawingMode: darkDrawingMode
+        )
         onToolChanged?(tool)
     }
 }

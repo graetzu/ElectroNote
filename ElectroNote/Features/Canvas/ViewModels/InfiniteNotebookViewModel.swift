@@ -25,7 +25,14 @@ enum CanvasToolType: String, CaseIterable, Identifiable {
     }
 }
 
-func makePKTool(tool: CanvasToolType, color: Color, width: CGFloat, eraserType: PKEraserTool.EraserType, darkDrawingMode: Bool = false) -> PKTool {
+func makePKTool(
+    tool: CanvasToolType,
+    color: Color,
+    width: CGFloat,
+    eraserType: PKEraserTool.EraserType,
+    eraserWidth: CGFloat = 16.0,
+    darkDrawingMode: Bool = false
+) -> PKTool {
     let uiColor: UIColor
     if color == .black {
         uiColor = .black
@@ -45,7 +52,7 @@ func makePKTool(tool: CanvasToolType, color: Color, width: CGFloat, eraserType: 
     case .pencil:
         return PKInkingTool(.pencil, color: uiColor, width: max(width * 1.5, 2))
     case .eraser:
-        return PKEraserTool(eraserType)
+        return PKEraserTool(eraserType, width: eraserWidth)
     case .lasso:
         return PKLassoTool()
     }
@@ -89,7 +96,10 @@ final class InfiniteNotebookViewModel: ObservableObject {
             applyCurrentTool()
         }
     }
-    @Published var eraserType: PKEraserTool.EraserType = .vector {
+    @Published var eraserType: PKEraserTool.EraserType = .bitmap {
+        didSet { applyCurrentTool() }
+    }
+    @Published var eraserWidth: CGFloat = 16.0 {
         didSet { applyCurrentTool() }
     }
     @Published var pendingPKTool: PKTool? = nil
@@ -183,7 +193,14 @@ final class InfiniteNotebookViewModel: ObservableObject {
             pendingPKTool = nil
             return
         }
-        pendingPKTool = makePKTool(tool: activeTool, color: selectedColor, width: selectedWidth, eraserType: eraserType, darkDrawingMode: darkDrawingMode)
+        pendingPKTool = makePKTool(
+            tool: activeTool,
+            color: selectedColor,
+            width: selectedWidth,
+            eraserType: eraserType,
+            eraserWidth: eraserWidth,
+            darkDrawingMode: darkDrawingMode
+        )
     }
 
     init() {
@@ -323,6 +340,10 @@ final class InfiniteNotebookViewModel: ObservableObject {
 
     func captureCurrentPageImageForAI() -> UIImage? {
         vcRef?.captureVisiblePageImage()
+    }
+
+    func renderCanvasSnapshotImage() -> UIImage? {
+        vcRef?.renderCanvasSnapshotImage()
     }
     struct TypedTextInsertion {
         let text: String
